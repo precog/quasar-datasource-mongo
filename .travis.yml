@@ -1,60 +1,50 @@
 language: scala
 scala: 2.12.6
 jdk: oraclejdk8
-
 stages:
-  - name: test
-  - name: publish
-    if: NOT type = pull_request
-
+- name: test
+- name: publish
+  if: NOT type = pull_request
 cache:
   directories:
-    - $HOME/.ivy2/cache
-    - $HOME/.sbt
-    - $HOME/.coursier/cache
-    - '.hoarder-cache'
-
+  - "$HOME/.ivy2/cache"
+  - "$HOME/.sbt"
+  - "$HOME/.coursier/cache"
+  - ".hoarder-cache"
 env:
   global:
-    - COURSIER_PROGRESS=0
-    - SBT=./sbt
-    # ENCRYPTION_PASSWORD
-    - secure: ...
-    # GITHUB_TOKEN
-    - secure: ...
-    # GITHUB_ACCESS_TOKEN
-    - secure: ...
-    # DISCORD_WEBHOOK_TOKENS
-    - secure: ...
-
+  - COURSIER_PROGRESS=0
+  - SBT=./sbt
+  # ENCRYPTION_PASSWORD
+  - secure: "VC3y06duW58hS+LHqo3sGlzK965kzyn5UatTgMnjdFn9ucUAbVbutmZJb0LYOqcs6IlqTBC3g+npe6pWsgqNvPktwuicDvC0STfqMTy+Dm5HUhs7f03geDQU5IXYZzSWeaInjYP6an/yWu42fcdL4+DeizYF3qYKSGD53pYYDWWlu/KKX4rW4DGqH51N3a6Kq/UNNWOzlr0KMJRrSI7Exg8ik3ddQYRXWroZcmvZPDQhUccYKa0Dd/nXK3jo86kVVjsydPnLssilqVDHtM/zMQgdk2U+URDk5OZCKLvaw6Ew76UJrEPseQF7Sl97bN4C6NYzoSYAtd5oWWInBjWIDZVuUf2lbXdCKDPVKIPm3x2R+qZDres8i81M2xUNX3PP0f7KYUQYlX31xmtrKvWP53/eliQlTYRQwWrpxtLRoWGIJNrnGJfxkQssyZuNLfLUm+sCDophi3vuVYMhde7lzCiUjfyQacYomwPHtu9IEm9qCCiJJ3pIL75fkVdz0LPChc5pYcJyuTGq8fDuBA9l0+ZXRu47bGEAC65frshGgmOAhM0X4pDrp2t+XjQdakSsDw6CWjVPQ/lXzpa7WEkarKTqALzJ6J6kGA/eQMJvPHBc63KfvZeXtXtKPifcYQNUVgyoRXUWwqlkMMDMZ47Ad/IV4ZvXDyug5hFq+VQa8k8="
+  # GITHUB_TOKEN
+  - secure: "LnNugmjwXQ3QerZ7iQ9d7gYeLIQ7T4PGkZZinMwiaXSzwwyIJOr0OEc+b1LVVUsdxV2kuy3xdMZGQalcbJXji9x4H0QE+PtnQhrgP0Qbfik4HhTc7TIf1blEPBAAVkXrQY66MZpjWSrsNquySRYYFjyYDK3/8sgx+WMFKI4WC2CM4haLWeJy5BhKJ2z/bIsHWCAZfFSo0YeTPO0sVs03zSa31NFtjki8qiYbPyjwR91lxK+lXM84AuxbSMAIE6exPSW+yz4Y88Xf6ezyX6PH6PwDeXowK/j3nuxo1/TWx1EK464NvWNPhMidiu6cf8ByhTZD96RGVpeUqFSXq6Kx/miX2TA1MPpVU8GRGtg8z2fi4uMS7APaG/fczc6cS8hQCcyRKpVmqPBuTLQCAXIdxNRcARWLhtpQeSe8SVvyL/r2kQSaaChgnCdIiAgFoBbhOleLq9FjU+6cBqhVcAV3iXgX/L/WiGDkrpPSOd9dItkqfmzMyYBlEcxH9lv5iG9wLfwCEl7+WX99yzrahw4zVT5Ki3Efr6eTTSAbRS6ucbAHgfcOYqU35OHUdQsM+DO14QzWkgrK+p9LaVfrM8VkeoWBtuwVq9BfsohLfVRC+QGINcUlPlJ8pGWeHFPSc/SkO4G7eI+VYP9sEKY8hTqpfoFjbz+FEvfhHVFrE3V48Gc="
+  # GITHUB_ACCESS_TOKEN
+  - secure: "K6USf/xBgqSTWWhBZbY5xksoL16mDDpZ9zyAeYEhZ4SLSWrM3y4k8SiybhQOMJjCjJTkvbnnIivVH919Wl5oykEhCn8+mqDGTNJE5okIT1/CVnMa4slnp9df0kOYR5T4qSlwK/u6ujuUybsunFgTHO6NwsjU7QkQqGJgsRshDotCLr1IfZm5ONSKPhLKKupl25+rZM1MzEveuZBHudXmK3yLi16zp7/yTo/ghUVkP4UFqh0zYZz0u/lsK2ak2RWPD/Av2Ma4XCGarpwI8Rk0sQIwEYIQmHW0rRWjCUn1ioM5rLg4UW7JW9F9FSI0k0X5SDCljUmbyd2NqqcIjOATDWhy1LmzN9cHU+B7qhBl8a25y90DG7G4Ixplq/sVVCxkFi7gbxid/qUoUFKRrE38JLacs4hF40Y7dmCVf6sDqKP2Rz4k2Z0XGVnHE4JobenoFOuPW4pWJnws2CaCwuV+A7DwHjFrVSMzUqEQiu9wMr0vcWGKMMMAPrl7yQaUrEw8LuAaYPSDjTzIdhOBAxKUPYbA1CM1uFlZENZOAaKn0OkqzaKua0L7C7V67bBJiMwQ9GAI35oN5yWuQYGOjmYRXoThbiNyP0EeDvVR64r7CCXmiIQu5nRwLj6NGXLr+50Sd4gHZsb8q1j5ZRpXV03Y/5naLGshloVHqjJLMjPHuHw="
+  # DISCORD_WEB_HOOKS
+  - secure: "E0lqht8izRNm1cOSSfcYHn+jixVLXByi7XYWbsg2hYkTKxL/ZeCPcx5Xieu6mFGy2VZm0Qw/tKF8KZzdkN8W/TGg0cAJrKhB7LBq9s5zMERZsUb+DItrzXGrKIZ4icyJN3DHd5oKaw787sdOeJHLBrxGKCNITqfUhLE2XAyyO/AhwPV1fbrHriYkTR8i7b3bzMyJDGVD7hBQQ/lGoh5pN7uquXEdfemr6OIO0gXo5V4zQ2OUunwYiy9VOyiaiLFjDHaQgk4/HILdsxW2hAJvQe8+0+1M28Xgzqkm2sMK0Yww7fTEN8BFRPrZruU2WCS+jWi7Ws2u+X0Ch7QqQxsg3sGCGVTgRshW2LNLigwpcKWLsCIYkwEyB+l1VYRkdjnvRIup9TNQDKBo0zNh58fdOAAqweXF6uzRMzcumAvM/+jqW1N3T8eZT0mBrJBrqlLmxLKUGsKyOA8apPoA7PRFLbYYuH3BysP6kQUhg2xN6ujVnAQf2urTHUoCNBff9TqdbYnL56oPubJXDviLLrZbBRTiHXkmVVJOATF+/5WN3H29PrJNCE0XRcYR7cq3U45+mAiYm4Eg37NodlnV+iPBmBvk0zqF73/nu/I5y7yd79+tWY6ODnvwNgWavvdQOKkQGZr2G/JLFAvSBTBTt75JZPMJvYZ3mG1MsjpqtCN8kLA="
 jobs:
   include:
-    - stage: test
-      script:
-        - set -e
-        - $SBT ++$TRAVIS_SCALA_VERSION test
-
-    - stage: publish
-      env:
-      script:
-        - set -e
-        - $SBT transferPublishAndTagResources
-        - TRAVIS_JOB_NUMBER=1 scripts/publishAndTag 'slamdata/quasar-mongo'
-
-      git:
-        depth: false
-
+  - stage: test
+    script:
+    - set -e
+    - "$SBT ++$TRAVIS_SCALA_VERSION test"
+  - stage: publish
+    env:
+    script:
+    - set -e
+    - "$SBT transferPublishAndTagResources"
+    - TRAVIS_JOB_NUMBER=1 scripts/publishAndTag 'slamdata/quasar-mongo'
+    git:
+      depth: false
 after_success:
-  - scripts/discordTravisPost success https://discordapp.com/api/webhooks/$DISCORD_WEBHOOK_TOKENS
-
+- scripts/discordTravisPost success https://discordapp.com/api/webhooks/$DISCORD_WEBHOOK_TOKENS
 after_failure:
-  - scripts/discordTravisPost failure https://discordapp.com/api/webhooks/$DISCORD_WEBHOOK_TOKENS
-
+- scripts/discordTravisPost failure https://discordapp.com/api/webhooks/$DISCORD_WEBHOOK_TOKENS
 branches:
   only:
-    - master
-    - /^backport.*$/
-
+  - master
+  - "/^backport.*$/"
 before_cache:
-  - find "$HOME/.sbt/" -name '*.lock' -print0 | xargs -0 rm
-  - find "$HOME/.ivy2/" -name 'ivydata-*.properties' -print0 | xargs -0 rm
+- find "$HOME/.sbt/" -name '*.lock' -print0 | xargs -0 rm
+- find "$HOME/.ivy2/" -name 'ivydata-*.properties' -print0 | xargs -0 rm
