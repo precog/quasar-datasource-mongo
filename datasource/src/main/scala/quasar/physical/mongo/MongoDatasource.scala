@@ -22,6 +22,8 @@ import quasar.api.datasource.DatasourceType
 import quasar.api.resource._
 import quasar.connector.{MonadResourceErr, QueryResult}
 import quasar.connector.datasource._
+import qdata._
+import qdata.QType._
 
 import cats.effect._
 import cats.kernel.Eq
@@ -34,8 +36,10 @@ import fs2.concurrent._
 import org.mongodb.scala._
 import eu.timepit.refined.auto._
 import org.mongodb.scala._
+import org.bson._
 import quasar.contrib.pathy.AFile
 import pathy.Path
+import spire.math.Real
 import shims._
 
 class MongoDatasource[F[_]: ConcurrentEffect: ContextShift: MonadResourceErr: Timer](
@@ -44,9 +48,95 @@ class MongoDatasource[F[_]: ConcurrentEffect: ContextShift: MonadResourceErr: Ti
   extends LightweightDatasource[F, Stream[F, ?], QueryResult[F]] {
   val kind: DatasourceType = DatasourceType("mongo", 1L)
 
-  override def evaluate(path: ResourcePath): F[QueryResult[F]] = {
-    ???
+  override def evaluate(path: ResourcePath): F[QueryResult[F]] = path match {
+    case ResourcePath.Root => QueryResult.parsed(qdataDecoder, Stream.empty.covary[F]).pure[F]
+    case ResourcePath.Leaf(file) => fileAsMongoResource(file) match {
+      case None => QueryResult.parsed(qdataDecoder, Stream.empty.covary[F]).pure[F]
+      case Some(Db(_)) => QueryResult.parsed(qdataDecoder, Stream.empty.covary[F]).pure[F]
+      case Some(coll@Coll(_, _)) => QueryResult.parsed(qdataDecoder, everythingInCollection(coll)).pure[F]
+    }
   }
+
+  private def everythingInCollection(coll: Coll): Stream[F, BsonValue] = {
+    for {
+      colExists <- collectionExistsSignal(coll)
+      res <- if (!colExists) { Stream.empty } else { coll match {
+        case Coll(dbName, collName) => {
+          val collection = mongoClient.getDatabase(dbName).getCollection(collName)
+          MongoDatasource.observableAsStream(collection.find[BsonValue]())
+        }
+      }}
+    } yield res
+  }
+
+  private val qdataDecoder: QDataDecode[BsonValue] = new QDataDecode[BsonValue] {
+    type ObjectCursor = String
+    type ArrayCursor = Int
+    override def tpe(bson: BsonValue): QType = bson.getBsonType() match {
+      case BsonType.DOCUMENT => QObject
+      case BsonType.ARRAY => QArray
+      case BsonType.STRING => QString
+      case BsonType.INT32 => QLong
+      case BsonType.INT64 => QLong
+      case BsonType.DOUBLE => QDouble
+      case BsonType.DECIMAL128 => QReal
+      case BsonType.BOOLEAN => QBoolean
+      case BsonType.OBJECT_ID => QString
+      case BsonType.DB_POINTER => QString
+      case BsonType.BINARY => QString
+      case BsonType.DATE_TIME => QOffsetDateTime
+      case BsonType.SYMBOL => QString
+      case BsonType.REGULAR_EXPRESSION => QString
+      case BsonType.JAVASCRIPT => QString
+      case BsonType.NULL => QNull
+      case BsonType.TIMESTAMP => QOffsetDateTime
+      case BsonType.UNDEFINED => QNull
+      case BsonType.JAVASCRIPT_WITH_SCOPE => QString
+      case BsonType.MAX_KEY => QString
+      case BsonType.MIN_KEY => QString
+    }
+
+    override def getArrayAt(a: ArrayCursor) = ???
+    override def getArrayCursor(a: BsonValue) = ???
+    override def hasNextArray(a: ArrayCursor) = ???
+    override def stepArray(a: ArrayCursor) = ???
+
+    override def getObjectCursor(a: BsonValue) = ???
+    override def getObjectKeyAt(a: ObjectCursor) = ???
+    override def getObjectValueAt(a: ObjectCursor) = ???
+    override def hasNextObject(a: ObjectCursor) = ???
+    override def stepObject(a: ObjectCursor) = ???
+
+    override def getBoolean(bson: BsonValue): Boolean = bson match {
+      case bool: BsonBoolean => bool.getValue()
+    }
+    override def getDouble(bson: BsonValue): Double = bson match {
+      case num: BsonNumber => num.doubleValue()
+    }
+    override def getLong(bson: BsonValue): Long = bson match {
+      case num: BsonNumber => num.longValue()
+    }
+    override def getReal(bson: BsonValue): Real = bson match {
+      case num: BsonNumber => Real(num.decimal128Value().bigDecimalValue())
+    }
+    override def getString(bson: BsonValue): String = bson match {
+      // TODO: all QStrings
+      case str: BsonString => str.getValue()
+    }
+
+    override def getInterval(a: BsonValue) = ???
+    override def getLocalDate(a: BsonValue) = ???
+    override def getLocalDateTime(a: BsonValue) = ???
+    override def getLocalTime(a: BsonValue) = ???
+
+    override def getMetaMeta(a: BsonValue) = ???
+    override def getMetaValue(a: BsonValue) = ???
+    override def getOffsetDate(a: BsonValue) = ???
+    override def getOffsetDateTime(a: BsonValue) = ???
+    override def getOffsetTime(a: BsonValue) = ???
+
+  }
+
 
   override def pathIsResource(path: ResourcePath): F[Boolean] = path match {
     case ResourcePath.Root => false.pure[F]
@@ -100,6 +190,7 @@ class MongoDatasource[F[_]: ConcurrentEffect: ContextShift: MonadResourceErr: Ti
           case None => Coll(printName(eitherDB.asCats), printName(eitherName.asCats)).some
         }
       }
+      case None => none
     }
   }
 
@@ -110,29 +201,26 @@ class MongoDatasource[F[_]: ConcurrentEffect: ContextShift: MonadResourceErr: Ti
         .exists(_ == name)
   }
   private def collections(db: Db): Stream[F, Coll] = db match {
-    case Db(name) => {
+    case Db(dbName) => {
       for {
         dbExists <- databaseExistenceSignal(db)
-        res <- if (dbExists) {collectionNames(db)} else {Stream.empty}
+        res <- if (!dbExists) {Stream.empty} else {
+          val mDb: MongoDatabase = mongoClient.getDatabase(dbName)
+          MongoDatasource
+            .observableAsStream(mDb.listCollectionNames())
+            .map(colName => Coll(dbName, colName))
+        }
       } yield res
     }
   }
-  private def collectionNames(db: Db): Stream[F, Coll] = db match {
-    case Db(dbName) => {
-      val db: MongoDatabase = mongoClient.getDatabase(dbName)
-      MongoDatasource
-        .observableAsStream(db.listCollectionNames())
-        .map(colName => Coll(dbName, colName))
-      }
-  }
-  private def collectionExists(coll: Coll): F[Boolean] = coll match {
-    case Coll(dbName, _) => {
+  private def collectionExistsSignal(coll: Coll): Stream[F, Boolean] = coll match {
+    case Coll(dbName, _) =>
       collections(Db(dbName))
         .exists(MongoResource(_) === MongoResource(coll))
-        .compile
-        .lastOrError
-    }
   }
+  private def collectionExists(coll: Coll): F[Boolean] =
+    collectionExistsSignal(coll).compile.lastOrError
+
   private def printName(p: Either[Path.DirName, Path.FileName]): String = p match {
     case Right(Path.FileName(n)) => n
     case Left(Path.DirName(n)) => n

@@ -19,6 +19,7 @@ package quasar.physical.mongo
 import slamdata.Predef._
 import org.specs2.mutable.Specification
 import org.mongodb.scala._
+import org.bson._
 
 import cats.effect._
 import scala.concurrent.ExecutionContext
@@ -74,7 +75,7 @@ class Test extends Specification {
 
     scala.Predef.println(db)
 
-    val wrongClient = MongoClient("mongodb://wrong")
+    val wrongClient = MongoClient() //("mongodb://wrong")
 /*    wrongClient.listDatabaseNames().subscribe(new Observer[String] {
       override def onNext(res: String): Unit = {
         scala.Predef.println("next")
@@ -100,6 +101,10 @@ class Test extends Specification {
 //    scala.Predef.println(observableAsStream[IO, String](wrongClient.listDatabases()).attempt.take(1).compile.toList.unsafeRunSync())
 //    scala.Predef.println(wrongDb.listCollectionNames().attempt.compile.toList.unsafeRunSync().length)
     scala.Predef.println(db)
+
+    scala.Predef.println(wrongClient.getDatabase("data").getCollection("orders").find[BsonValue]().take(10).compile.toList.unsafeRunSync())
+
+
     true
   }
 }
