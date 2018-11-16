@@ -26,6 +26,7 @@ import scala.concurrent.ExecutionContext
 import fs2.Stream
 import fs2.concurrent._
 import quasar.connector.ResourceError
+import java.util.regex._
 
 class Test extends Specification {
   def observableAsStream[F[_], A]
@@ -103,8 +104,10 @@ class Test extends Specification {
     scala.Predef.println(db)
 
     scala.Predef.println(wrongClient.getDatabase("data").getCollection("orders").find[BsonValue]().take(10).compile.toList.unsafeRunSync())
-
-
+    val br = new BsonRegularExpression("[0-9]", "gi")
+    val rg = Pattern.compile("[0-9]", Pattern.CASE_INSENSITIVE|Pattern.CANON_EQ)
+    scala.Predef.println(br.toString())
+    scala.Predef.println(rg.toString())
     true
   }
 }

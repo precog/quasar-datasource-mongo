@@ -25,6 +25,7 @@ import quasar.connector.datasource._
 import qdata._
 import qdata.QType._
 
+import java.time._
 import cats.effect._
 import cats.kernel.Eq
 import cats.syntax.applicative._
@@ -40,6 +41,8 @@ import org.bson._
 import quasar.contrib.pathy.AFile
 import pathy.Path
 import spire.math.Real
+import scala.collection.JavaConverters._
+import scala.collection.JavaConversions._
 import shims._
 
 class MongoDatasource[F[_]: ConcurrentEffect: ContextShift: MonadResourceErr: Timer](
@@ -70,8 +73,6 @@ class MongoDatasource[F[_]: ConcurrentEffect: ContextShift: MonadResourceErr: Ti
   }
 
   private val qdataDecoder: QDataDecode[BsonValue] = new QDataDecode[BsonValue] {
-    type ObjectCursor = String
-    type ArrayCursor = Int
     override def tpe(bson: BsonValue): QType = bson.getBsonType() match {
       case BsonType.DOCUMENT => QObject
       case BsonType.ARRAY => QArray
@@ -94,19 +95,53 @@ class MongoDatasource[F[_]: ConcurrentEffect: ContextShift: MonadResourceErr: Ti
       case BsonType.JAVASCRIPT_WITH_SCOPE => QString
       case BsonType.MAX_KEY => QString
       case BsonType.MIN_KEY => QString
+      case BsonType.END_OF_DOCUMENT => QNull
     }
 
-    override def getArrayAt(a: ArrayCursor) = ???
-    override def getArrayCursor(a: BsonValue) = ???
-    override def hasNextArray(a: ArrayCursor) = ???
-    override def stepArray(a: ArrayCursor) = ???
+    type ArrayCursor = List[BsonValue]
 
-    override def getObjectCursor(a: BsonValue) = ???
-    override def getObjectKeyAt(a: ObjectCursor) = ???
-    override def getObjectValueAt(a: ObjectCursor) = ???
-    override def hasNextObject(a: ObjectCursor) = ???
-    override def stepObject(a: ObjectCursor) = ???
+    override def getArrayCursor(bson: BsonValue): ArrayCursor = bson match {
+      case arr: BsonArray => {
+        arr.getValues().asScala.toList
+      }
+    }
+    override def getArrayAt(cursor: ArrayCursor): BsonValue = cursor match {
+      case (hd :: _) => hd
+      case _ => ???
+    }
+    override def hasNextArray(cursor: ArrayCursor): Boolean = cursor match {
+      case (hd :: _) => false
+      case _ => true
+    }
+    override def stepArray(cursor: ArrayCursor): ArrayCursor = cursor match {
+      case (_ :: tl) => tl
+      case _ => ???
+    }
 
+    type ObjectCursor = (List[String], BsonDocument)
+
+    override def getObjectCursor(bson: BsonValue): ObjectCursor = bson match {
+      case obj: BsonDocument => {
+        val lst: List[String] = obj.keySet().toList
+        (lst, obj)
+      }
+    }
+    override def getObjectKeyAt(cursor: ObjectCursor): String = cursor match {
+      case ((k :: _), obj) => k
+      case _ => ???
+    }
+    override def getObjectValueAt(cursor: ObjectCursor): BsonValue = cursor match {
+      case ((k :: _), obj) => obj.get(k)
+      case _ => ???
+    }
+    override def hasNextObject(cursor: ObjectCursor): Boolean = cursor match {
+      case (List(), _) => false
+      case _ => true
+    }
+    override def stepObject(cursor: ObjectCursor): ObjectCursor = cursor match {
+      case ((_ :: tail), obj) => (tail, obj)
+      case _ => ???
+    }
     override def getBoolean(bson: BsonValue): Boolean = bson match {
       case bool: BsonBoolean => bool.getValue()
     }
@@ -120,23 +155,39 @@ class MongoDatasource[F[_]: ConcurrentEffect: ContextShift: MonadResourceErr: Ti
       case num: BsonNumber => Real(num.decimal128Value().bigDecimalValue())
     }
     override def getString(bson: BsonValue): String = bson match {
-      // TODO: all QStrings
       case str: BsonString => str.getValue()
+      case objId: BsonObjectId => objId.getValue().toHexString()
+      case pointer: BsonDbPointer => {
+        pointer.getNamespace() ++ ":" ++ pointer.getId().toHexString()
+      }
+      case binary: BsonBinary => binary.getData().toString()
+      case symbol: BsonSymbol => symbol.getSymbol()
+      case regexp: BsonRegularExpression => regexp.getPattern()
+      case js: BsonJavaScript => js.getCode()
+      case maxKey: BsonMaxKey => maxKey.toString()
+      case minKey: BsonMinKey => minKey.toString()
+      case jsWithScope: BsonJavaScriptWithScope => jsWithScope.getCode()
+    }
+
+    override def getOffsetDateTime(bson: BsonValue): OffsetDateTime = bson match {
+      case ts: BsonTimestamp => {
+        Instant.ofEpochSecond(ts.getTime().longValue).atOffset(ZoneOffset.UTC)
+      }
+      case date: BsonDateTime => {
+        Instant.ofEpochMilli(date.getValue()).atOffset(ZoneOffset.UTC)
+      }
     }
 
     override def getInterval(a: BsonValue) = ???
     override def getLocalDate(a: BsonValue) = ???
     override def getLocalDateTime(a: BsonValue) = ???
     override def getLocalTime(a: BsonValue) = ???
-
     override def getMetaMeta(a: BsonValue) = ???
     override def getMetaValue(a: BsonValue) = ???
     override def getOffsetDate(a: BsonValue) = ???
-    override def getOffsetDateTime(a: BsonValue) = ???
     override def getOffsetTime(a: BsonValue) = ???
 
   }
-
 
   override def pathIsResource(path: ResourcePath): F[Boolean] = path match {
     case ResourcePath.Root => false.pure[F]
@@ -177,9 +228,11 @@ class MongoDatasource[F[_]: ConcurrentEffect: ContextShift: MonadResourceErr: Ti
     def apply(a: MongoResource): MongoResource = a
 
     implicit val equal: Eq[MongoResource] = Eq.fromUniversalEquals
+
   }
-  case class Db(name: String) extends MongoResource
-  case class Coll(db: String, coll: String) extends MongoResource
+  final case class Db(name: String) extends MongoResource
+  final case class Coll(db: String, coll: String) extends MongoResource
+
 
   private def fileAsMongoResource(file: AFile): Option[MongoResource] = {
     Path.peel(file) match {
