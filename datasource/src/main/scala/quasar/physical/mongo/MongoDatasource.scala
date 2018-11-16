@@ -42,14 +42,14 @@ import quasar.contrib.pathy.AFile
 import pathy.Path
 import spire.math.Real
 import scala.collection.JavaConverters._
-import scala.collection.JavaConversions._
 import shims._
 
-class MongoDatasource[F[_]: ConcurrentEffect: ContextShift: MonadResourceErr: Timer](
+class MongoDataSource[F[_]: ConcurrentEffect: ContextShift: MonadResourceErr: Timer](
   mongoClient: MongoClient
   )
   extends LightweightDatasource[F, Stream[F, ?], QueryResult[F]] {
-  val kind: DatasourceType = DatasourceType("mongo", 1L)
+
+  val kind = MongoDataSource.kind
 
   override def evaluate(path: ResourcePath): F[QueryResult[F]] = path match {
     case ResourcePath.Root => QueryResult.parsed(qdataDecoder, Stream.empty.covary[F]).pure[F]
@@ -66,7 +66,7 @@ class MongoDatasource[F[_]: ConcurrentEffect: ContextShift: MonadResourceErr: Ti
       res <- if (!colExists) { Stream.empty } else { coll match {
         case Coll(dbName, collName) => {
           val collection = mongoClient.getDatabase(dbName).getCollection(collName)
-          MongoDatasource.observableAsStream(collection.find[BsonValue]())
+          MongoDataSource.observableAsStream(collection.find[BsonValue]())
         }
       }}
     } yield res
@@ -115,16 +115,13 @@ class MongoDatasource[F[_]: ConcurrentEffect: ContextShift: MonadResourceErr: Ti
     }
     override def stepArray(cursor: ArrayCursor): ArrayCursor = cursor match {
       case (_ :: tl) => tl
-      case _ => ???
+      case c => c
     }
 
     type ObjectCursor = (List[String], BsonDocument)
 
     override def getObjectCursor(bson: BsonValue): ObjectCursor = bson match {
-      case obj: BsonDocument => {
-        val lst: List[String] = obj.keySet().toList
-        (lst, obj)
-      }
+      case obj: BsonDocument => (obj.keySet().asScala.toList, obj)
     }
     override def getObjectKeyAt(cursor: ObjectCursor): String = cursor match {
       case ((k :: _), obj) => k
@@ -140,7 +137,7 @@ class MongoDatasource[F[_]: ConcurrentEffect: ContextShift: MonadResourceErr: Ti
     }
     override def stepObject(cursor: ObjectCursor): ObjectCursor = cursor match {
       case ((_ :: tail), obj) => (tail, obj)
-      case _ => ???
+      case a => a
     }
     override def getBoolean(bson: BsonValue): Boolean = bson match {
       case bool: BsonBoolean => bool.getValue()
@@ -160,7 +157,7 @@ class MongoDatasource[F[_]: ConcurrentEffect: ContextShift: MonadResourceErr: Ti
       case pointer: BsonDbPointer => {
         pointer.getNamespace() ++ ":" ++ pointer.getId().toHexString()
       }
-      case binary: BsonBinary => binary.getData().toString()
+      case binary: BsonBinary => new String(binary.getData())
       case symbol: BsonSymbol => symbol.getSymbol()
       case regexp: BsonRegularExpression => regexp.getPattern()
       case js: BsonJavaScript => js.getCode()
@@ -201,7 +198,7 @@ class MongoDatasource[F[_]: ConcurrentEffect: ContextShift: MonadResourceErr: Ti
   override def prefixedChildPaths(prefixPath: ResourcePath)
     : F[Option[Stream[F, (ResourceName, ResourcePathType)]]] = prefixPath match {
     case ResourcePath.Root => {
-      val names = MongoDatasource.observableAsStream(mongoClient.listDatabaseNames())
+      val names = MongoDataSource.observableAsStream(mongoClient.listDatabaseNames())
       val res: Stream[F, (ResourceName, ResourcePathType)] = names.map( name => {
         (ResourceName(name), ResourcePathType.prefix)
       })
@@ -249,7 +246,7 @@ class MongoDatasource[F[_]: ConcurrentEffect: ContextShift: MonadResourceErr: Ti
 
   private def databaseExistenceSignal(db: Db): Stream[F, Boolean] = db match {
     case Db(name) =>
-      MongoDatasource
+      MongoDataSource
         .observableAsStream(mongoClient.listDatabaseNames())
         .exists(_ == name)
   }
@@ -259,7 +256,7 @@ class MongoDatasource[F[_]: ConcurrentEffect: ContextShift: MonadResourceErr: Ti
         dbExists <- databaseExistenceSignal(db)
         res <- if (!dbExists) {Stream.empty} else {
           val mDb: MongoDatabase = mongoClient.getDatabase(dbName)
-          MongoDatasource
+          MongoDataSource
             .observableAsStream(mDb.listCollectionNames())
             .map(colName => Coll(dbName, colName))
         }
@@ -280,10 +277,10 @@ class MongoDatasource[F[_]: ConcurrentEffect: ContextShift: MonadResourceErr: Ti
   }
 }
 
-object MongoDatasource {
+object MongoDataSource {
   def observableAsStream[F[_], A]
     (obs: Observable[A])
-    (implicit F: ConcurrentEffect[F]/*, cs: ContextShift[F]*/): Stream[F, A]  = {
+    (implicit F: ConcurrentEffect[F]): Stream[F, A]  = {
     def handler(cb: Either[Throwable, Option[A]] => Unit): Unit = {
       obs.subscribe(new Observer[A] {
         override def onNext(result: A): Unit = {
@@ -303,5 +300,5 @@ object MongoDatasource {
       res <- q.dequeue.rethrow.unNoneTerminate
      } yield res
   }
-
+  val kind: DatasourceType = DatasourceType("mongo", 1L)
 }

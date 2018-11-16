@@ -26,6 +26,8 @@ import scala.concurrent.ExecutionContext
 import fs2.Stream
 import fs2.concurrent._
 import quasar.connector.ResourceError
+import quasar.physical.mongo.json._
+import argonaut._, Argonaut._
 import java.util.regex._
 
 class Test extends Specification {
@@ -108,6 +110,23 @@ class Test extends Specification {
     val rg = Pattern.compile("[0-9]", Pattern.CASE_INSENSITIVE|Pattern.CANON_EQ)
     scala.Predef.println(br.toString())
     scala.Predef.println(rg.toString())
+//    scala.Predef.println((UserName("user")).asJson)
+//    scala.Predef.println(
+//      Json.obj( "connectionString" -> ConnectionString("foo").asJson).asJson.as[MongoConfig]
+//    )
+//    def mkMongo: Stream[IO, MongoClient] = Stream.eval(IO.delay(MongoClient("foo")))
+//    scala.Predef.println(mkMongo.compile.lastOrError.unsafeRunSync())
+
+    val conn = new com.mongodb.ConnectionString("mongodb://foo:bar@localhost/foo@")
+    val conn2 = new com.mongodb.ConnectionString("mongodb://localhost")
+    scala.Predef.println(Option(conn.getUsername()))
+    scala.Predef.println(Option(conn.getPassword()))
+    val r = "://([^@]+)@".r
+    scala.Predef.println(r.replaceFirstIn(conn.getConnectionString(), "://<hidden>:<hidden>@"))
+    scala.Predef.println(r.replaceFirstIn(conn2.getConnectionString(), "://<hidden>:<hidden>@"))
+
+    scala.Predef.println(conn.getConnectionString())
+
     true
   }
 }

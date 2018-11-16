@@ -162,6 +162,11 @@ lazy val datasourceCoreDeps = Seq(
 )
 
 
+// Quasar needs to know where the DataSourceModule for the connector is
+lazy val manifestSettings =
+  packageOptions in (Compile, packageBin) +=
+    Package.ManifestAttributes("DataSource-Module" -> "quasar.physical.mongo.MongoDataSourceModule$")
+
 lazy val datasource = project
   .settings(name := "quasar-mongo")
   .settings(commonSettings)
@@ -187,5 +192,5 @@ lazy val datasource = project
   .settings(githubReleaseSettings)
   .settings(excludeTypelevelScalaLibrary)
   .settings(AssembleDatasource.setAssemblyKey(datasourceCoreDeps))
-//  .settings(manifestSettings)
+  .settings(manifestSettings)
   .enablePlugins(AutomateHeaderPlugin)
