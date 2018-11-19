@@ -22,7 +22,16 @@ import argonaut._, Argonaut._
 
 final case class MongoConfig(connectionString: String)
 
-object json {
+object MongoConfig {
   implicit val configCodec: CodecJson[MongoConfig] =
     casecodec1(MongoConfig.apply, MongoConfig.unapply)("connectionString")
+
+  private val credentialsRegex = "://[^@+]+@".r
+
+  def sanitize(config: Json): Json = config.as[MongoConfig].result match {
+    case Left(_) => config
+    case Right(MongoConfig(value)) => {
+      MongoConfig(credentialsRegex.replaceFirstIn(value, "://<hidden>:<hidden>@")).asJson
+    }
+  }
 }

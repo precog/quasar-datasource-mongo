@@ -22,6 +22,7 @@ import org.mongodb.scala._
 import org.bson._
 
 import cats.effect._
+import cats.syntax.applicative._
 import scala.concurrent.ExecutionContext
 import fs2.Stream
 import fs2.concurrent._
@@ -127,6 +128,24 @@ class Test extends Specification {
 
     scala.Predef.println(conn.getConnectionString())
 
+    true
+  }
+  "???" >> {
+    implicit val ec: ExecutionContext = ExecutionContext.global
+    implicit val cs: ContextShift[IO] = IO.contextShift(ec)
+    implicit val timer: Timer[IO] = IO.timer(ec)
+
+    class Foo[F[_]: ConcurrentEffect] {
+    }
+    object Foo {
+      def apply[F[_]: ConcurrentEffect] = new Foo[F]()
+    }
+    val o = Foo[IO]
+//    object Foo {
+//      def apply(F[Int]): Foo[F] = new Foo
+//    }
+
+//    val o = Foo[F](1.pure[IO])
     true
   }
 }
