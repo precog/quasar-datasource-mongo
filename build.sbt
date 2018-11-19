@@ -155,6 +155,8 @@ lazy val datasourceCoreDeps = Seq(
   "com.codecommit"         %% "shims"               % shimsVersion,
   "com.slamdata"           %% "qdata-json"          % qdataVersion,
   "org.typelevel"          %% "cats-effect"         % catsEffectVersion,
+  "org.mongodb.scala"      %% "mongo-scala-driver"  % mongoVersion,
+  "org.mongodb.scala"      %% "mongo-scala-driver"  % mongoVersion % Test classifier "tests",
   "org.slf4j"              %  "slf4j-log4j12"       % slf4jVersion % Test,
   "org.specs2"             %% "specs2-core"         % specsVersion % Test,
   "org.specs2"             %% "specs2-scalaz"       % specsVersion % Test,
@@ -177,9 +179,9 @@ lazy val datasource = project
     // to keep from packaging it and its dependencies.
     libraryDependencies ++= datasourceCoreDeps ++ Seq(
       "com.slamdata"      %% "quasar-api-internal"        % quasarVersion,
-      "org.mongodb.scala" %% "mongo-scala-driver"         % mongoVersion,
+
       "com.slamdata"      %% "quasar-api-internal"        % quasarVersion % Test classifier "tests",
-      "org.mongodb.scala" %% "mongo-scala-driver"         % mongoVersion % Test classifier "tests",
+
       "com.slamdata"      %% "quasar-foundation-internal" % quasarVersion,
       "com.slamdata"      %% "quasar-foundation-internal" % quasarVersion % Test classifier "tests",
       "com.slamdata"      %% "quasar-connector-internal"  % quasarVersion,

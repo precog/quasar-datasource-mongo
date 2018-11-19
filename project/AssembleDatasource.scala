@@ -62,7 +62,7 @@ object AssembleDatasource {
         datasourcePluginsFolder.toPath.relativize(datasourceJarFile.toPath).toString
 
       // the path to the generated .plugin file.
-      val pluginFilePath = new File(datasourcePluginsFolder, "blobstore.plugin").toPath
+      val pluginFilePath = new File(datasourcePluginsFolder, "mongo.plugin").toPath
 
       // start coursier on resolving all of the datasource's
       // dependencies, *except* for quasar. quasar and its
@@ -161,7 +161,7 @@ object AssembleDatasource {
         files = datasourcePluginsFolder.listFiles.map(p => datasourcePluginsFolder.toPath.relativize(p.toPath)).mkString(" ")
 
         // the `plugins` tarball's location
-        tarPath = new File(buildOutputFolder, s"quasar-blobstore-$thisVersion-q$quasarVersion-explode.tar.gz")
+        tarPath = new File(buildOutputFolder, s"quasar-mongo-$thisVersion-q$quasarVersion-explode.tar.gz")
 
         // the command we run to finish up: zip up (-c) all of
         // the files in our plugins folder ($files), with the
