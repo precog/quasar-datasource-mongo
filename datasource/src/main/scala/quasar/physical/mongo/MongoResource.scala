@@ -28,7 +28,7 @@ sealed trait MongoResource
 
 object MongoResource {
   def database(name: String): MongoResource = Database(name)
-  def collection(database: Database, name: String) = Collection(database, name)
+  def collection(database: Database, name: String): MongoResource = Collection(database, name)
   def apply(a: MongoResource): MongoResource = a
 
   implicit val equal: Eq[MongoResource] = Eq.fromUniversalEquals

@@ -34,31 +34,34 @@ import cats.syntax.applicative._
 import scala.concurrent.ExecutionContext
 
 object MongoDataSourceModule extends LightweightDatasourceModule {
-  def lightweightDatasource[F[_]: ConcurrentEffect: ContextShift: MonadResourceErr : Timer]
+  type DS[F[_]] = Datasource[F, Stream[F, ?], ResourcePath, QueryResult[F]]
+  type Result[F[_]] = Disposable[F, DS[F]]
+  type Error = InitializationError[Json]
+  type ResultOrError[F[_]] = InitializationError[Json] \/ Result[F]
+
+  private def mkError[F[_]](config: Json, msg: String): ResultOrError[F] =
+    DatasourceError
+      .invalidConfiguration[Json, Error](kind, config, NonEmptyList(msg))
+      .left[Result[F]]
+
+  @SuppressWarnings(Array("org.wartremover.warts.ImplicitParameter"))
+  def lightweightDatasource[F[_]: ConcurrentEffect: ContextShift: MonadResourceErr: Timer]
     (config: Json)
     (implicit ec: ExecutionContext)
-    : F[InitializationError[Json] \/ Disposable[F, Datasource[F, Stream[F, ?], ResourcePath, QueryResult[F]]]] =
+    : F[ResultOrError[F]] =
 
     config.as[MongoConfig].result match {
       case Left((msg, _)) =>
-        DatasourceError.invalidConfiguration[Json, InitializationError[Json]](kind, config, NonEmptyList(msg))
-          .left[Disposable[F, Datasource[F, Stream[F, ?], ResourcePath, QueryResult[F]]]]
-          .pure[F]
-
+        mkError(config, msg).pure[F]
       case Right(mongoConfig) => {
         Mongo(mongoConfig).attempt.compile.last.map (_ match {
           case None =>
-            DatasourceError
-              .invalidConfiguration[Json, InitializationError[Json]](kind, config, NonEmptyList("Incorrect connection string"))
-              .left[Disposable[F, Datasource[F, Stream[F, ?], ResourcePath, QueryResult[F]]]]
+            mkError(config, "Incorrect connection string")
           case Some(Left(e)) =>
-            DatasourceError
-              .invalidConfiguration[Json, InitializationError[Json]](kind, config, NonEmptyList(e.getMessage()))
-              .left[Disposable[F, Datasource[F, Stream[F, ?], ResourcePath, QueryResult[F]]]]
+            mkError(config, e.getMessage())
           case Some(Right(client)) => {
-            val ds: Datasource[F, Stream[F, ?], ResourcePath, QueryResult[F]] = new MongoDataSource(client)
-            val disposable = Disposable(ds, client.close)
-            disposable.right[InitializationError[Json]]
+            val ds: DS[F] = new MongoDataSource(client)
+            Disposable(ds, client.close).right
           }
         })
       }
