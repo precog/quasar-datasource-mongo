@@ -19,12 +19,32 @@ package quasar.physical.mongo
 import slamdata.Predef._
 
 import argonaut._, Argonaut._
+import com.mongodb.ConnectionString
 
 final case class MongoConfig(connectionString: String)
 
 object MongoConfig {
-  implicit val configCodec: CodecJson[MongoConfig] =
-    casecodec1(MongoConfig.apply, MongoConfig.unapply)("connectionString")
+  implicit val encodeJson: EncodeJson[MongoConfig] =
+    EncodeJson(conn => Json.obj("connectionString" -> jString(conn.connectionString)))
+  implicit val decodeJson: DecodeJson[MongoConfig] = DecodeJson(config => {
+    config.get[String]("connectionString").toOption match {
+      case None => DecodeResult.fail("Incorrect mongodb configuration", config.history)
+      case Some(unchecked) => isConnectionString(unchecked) match {
+        case Right(str) => DecodeResult.ok(MongoConfig(str))
+        case Left(msg) => DecodeResult.fail(msg, config.history)
+      }
+    }
+  })
+
+  private def isConnectionString(inp: String): Either[String, String] = {
+    try {
+      val _ = new ConnectionString(inp)
+      Right(inp)
+    }
+    catch {
+      case e: Throwable => Left(e.getMessage())
+    }
+  }
 
   private val credentialsRegex = "://[^@+]+@".r
 
