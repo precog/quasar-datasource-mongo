@@ -29,8 +29,8 @@ import scala.concurrent.ExecutionContext
 import fs2.Stream
 
 class MongoSpec extends Specification {
-  implicit val ec: ExecutionContext = ExecutionContext.global
-  implicit val cs: ContextShift[IO] = IO.contextShift(ec)
+  import MongoSpec._
+
 
   step(MongoSpec.setupDB)
 
@@ -55,8 +55,8 @@ class MongoSpec extends Specification {
   "databaseExists returns true for existing dbs" >>  {
     val stream = for {
       mongo <- mkMongo
-      dbName <- Stream.emits(MongoSpec.dbs)
-      exists <- mongo.databaseExists(Database(dbName))
+      db <- MongoSpec.correctDbs
+      exists <- mongo.databaseExists(db)
     } yield exists
     stream.fold(true)(_ && _).compile.last.unsafeRunSync().getOrElse(false)
   }
@@ -64,8 +64,8 @@ class MongoSpec extends Specification {
   "databaseExists returns false for non-existing dbs" >> {
     val stream = for {
       mongo <- mkMongo
-      dbName <- Stream.emits(MongoSpec.nonexistentDbs)
-      exists <- mongo.databaseExists(Database(dbName))
+      db <- MongoSpec.incorrectDbs
+      exists <- mongo.databaseExists(db)
     } yield exists
     !stream.fold(false)(_ || _).compile.last.unsafeRunSync().getOrElse(true)
   }
@@ -90,8 +90,8 @@ class MongoSpec extends Specification {
   "collections return empty list for non-existing databases" >> {
     val stream = for {
       mongo <- mkMongo
-      dbName <- Stream.emits(MongoSpec.nonexistentDbs)
-      col <- mongo.collections(Database(dbName))
+      db <- MongoSpec.incorrectDbs
+      col <- mongo.collections(db)
     } yield col
     stream.compile.toList.unsafeRunSync() === List[Collection]()
   }
@@ -159,39 +159,51 @@ class MongoSpec extends Specification {
     }
   }
  */
-  private def mkMongo: Stream[IO, Mongo[IO]] =
-    Mongo[IO](MongoConfig(MongoSpec.connectionString))
-
-  private def incorrectCollections: Stream[IO, Collection] = {
-    val incorrectDbStream =
-      Stream.emits(MongoSpec.nonexistentDbs)
-        .map((dbName: String) => (colName: String) => Collection(Database(dbName), colName))
-        .ap(Stream.emits(MongoSpec.cols ++ MongoSpec.nonexistentCols))
-        .covary[IO]
-    val incorrectColStream =
-      Stream.emits(MongoSpec.nonexistentCols)
-        .map((colName: String) => (dbName: String) => Collection(Database(dbName), colName))
-        .ap(Stream.emits(MongoSpec.dbs))
-        .covary[IO]
-    incorrectDbStream ++ incorrectColStream
-  }
-
-  private def correctCollections: Stream[IO, Collection] = {
-    Stream.emits(MongoSpec.dbs)
-      .map((dbName: String) => (colName: String) => Collection(Database(dbName), colName))
-      .ap(Stream.emits(MongoSpec.cols))
-  }
 
 }
 
 object MongoSpec {
   import Mongo._
+
+  implicit val ec: ExecutionContext = ExecutionContext.global
+  implicit val cs: ContextShift[IO] = IO.contextShift(ec)
+
   val dbs = List("A", "B", "C", "D")
   val cols = List("a", "b", "c", "d")
   val nonexistentDbs = List("Z", "Y")
   val nonexistentCols = List("z", "y")
 
   lazy val connectionString = Source.fromFile("./datasource/src/test/resource/mongo-connection").mkString.trim
+
+  def mkMongo: Stream[IO, Mongo[IO]] =
+    Mongo[IO](MongoConfig(connectionString))
+
+  def incorrectCollections: Stream[IO, Collection] = {
+    val incorrectDbStream =
+      Stream.emits(nonexistentDbs)
+        .map((dbName: String) => (colName: String) => Collection(Database(dbName), colName))
+        .ap(Stream.emits(cols ++ nonexistentCols))
+        .covary[IO]
+    val incorrectColStream =
+      Stream.emits(nonexistentCols)
+        .map((colName: String) => (dbName: String) => Collection(Database(dbName), colName))
+        .ap(Stream.emits(dbs))
+        .covary[IO]
+    incorrectDbStream ++ incorrectColStream
+  }
+
+  def correctCollections: Stream[IO, Collection] = {
+    Stream.emits(dbs)
+      .map((dbName: String) => (colName: String) => Collection(Database(dbName), colName))
+      .ap(Stream.emits(cols))
+  }
+
+  def correctDbs: Stream[IO, Database] = {
+    Stream.emits(dbs).map(Database(_))
+  }
+  def incorrectDbs: Stream[IO, Database] = {
+    Stream.emits(nonexistentDbs).map(Database(_))
+  }
 
   def setupDB(): Unit = {
     implicit val ec: ExecutionContext = ExecutionContext.global

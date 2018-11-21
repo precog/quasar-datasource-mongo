@@ -28,6 +28,7 @@ val refinedVersion = "0.8.5"
 lazy val core = project
   .in(file("datasource"))
   .settings(addCompilerPlugin("com.olegpy" %% "better-monadic-for" % "0.2.4"))
+  .settings(parallelExecution in Test := false)
   .settings(
     name := "quasar-datasource-mongo",
     datasourceName := "mongo",

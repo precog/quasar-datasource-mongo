@@ -32,9 +32,7 @@ import eu.timepit.refined.auto._
 import quasar.physical.mongo.decoder._
 import shims._
 
-class MongoDataSource[F[_]: ConcurrentEffect: ContextShift: MonadResourceErr: Timer](
-  mongo: Mongo[F]
-  )
+class MongoDataSource[F[_]: ConcurrentEffect: ContextShift: MonadResourceErr: Timer](mongo: Mongo[F])
   extends LightweightDatasource[F, Stream[F, ?], QueryResult[F]] {
 
   val kind = MongoDataSource.kind
@@ -78,4 +76,7 @@ class MongoDataSource[F[_]: ConcurrentEffect: ContextShift: MonadResourceErr: Ti
 
 object MongoDataSource {
   val kind: DatasourceType = DatasourceType("mongo", 1L)
+
+  def apply[F[_]: ConcurrentEffect: ContextShift: MonadResourceErr: Timer](mongo: Mongo[F])
+    : F[MongoDataSource[F]] = ConcurrentEffect[F].delay(new MongoDataSource[F](mongo))
 }
