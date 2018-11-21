@@ -23,6 +23,8 @@ import quasar.api.resource._
 import quasar.connector.{MonadResourceErr, QueryResult}
 import quasar.connector.datasource._
 
+import cats.syntax.eq._
+import cats.syntax.functor._
 import cats.effect._
 import cats.syntax.applicative._
 import cats.syntax.option._
@@ -38,7 +40,8 @@ class MongoDataSource[F[_]: ConcurrentEffect: ContextShift: MonadResourceErr: Ti
   val kind = MongoDataSource.kind
 
   override def evaluate(path: ResourcePath): F[QueryResult[F]] = path match {
-    case ResourcePath.Root => QueryResult.parsed(qdataDecoder, Stream.empty.covary[F]).pure[F]
+    case _ if isRoot(path) =>
+      QueryResult.parsed(qdataDecoder, Stream.empty.covary[F]).pure[F]
     case ResourcePath.Leaf(file) => MongoResource.ofFile(file) match {
       case None => QueryResult.parsed(qdataDecoder, Stream.empty.covary[F]).pure[F]
       case Some(Database(_)) => QueryResult.parsed(qdataDecoder, Stream.empty.covary[F]).pure[F]
@@ -47,7 +50,7 @@ class MongoDataSource[F[_]: ConcurrentEffect: ContextShift: MonadResourceErr: Ti
   }
 
   override def pathIsResource(path: ResourcePath): F[Boolean] = path match {
-    case ResourcePath.Root => false.pure[F]
+    case _ if isRoot(path) => false.pure[F]
     case ResourcePath.Leaf(file) => MongoResource.ofFile(file) match {
       case Some(Database(_)) => false.pure[F]
       case Some(coll@Collection(_, _)) => mongo.collectionExists(coll).compile.lastOrError
@@ -57,7 +60,7 @@ class MongoDataSource[F[_]: ConcurrentEffect: ContextShift: MonadResourceErr: Ti
 
   override def prefixedChildPaths(prefixPath: ResourcePath)
     : F[Option[Stream[F, (ResourceName, ResourcePathType)]]] = prefixPath match {
-    case ResourcePath.Root => {
+    case _ if isRoot(prefixPath) => {
       mongo.databases.map(_ match {
         case Database(name) => (ResourceName(name), ResourcePathType.prefix)
       }).some.pure[F]
@@ -66,12 +69,23 @@ class MongoDataSource[F[_]: ConcurrentEffect: ContextShift: MonadResourceErr: Ti
       case None => none.pure[F]
       case Some(Collection(_, _)) => none.pure[F]
       case Some(db@Database(_)) => {
-        mongo.collections(db).map(_ match {
-          case Collection(_, colName) => (ResourceName(colName), ResourcePathType.leafResource)
-        }).some.pure[F]
+        val dbExists: F[Boolean] = mongo.databaseExists(db).compile.last.map(_.getOrElse(false))
+
+        dbExists.map(exists => {
+          if (exists) {
+            mongo.collections(db).map(_ match {
+              case Collection(_, colName) => (ResourceName(colName), ResourcePathType.leafResource)
+            }).some
+          } else {
+            none
+          }
+        })
       }
     }
   }
+  private def isRoot(inp: ResourcePath): Boolean =
+    inp === (ResourcePath.root() / ResourceName("")) || inp === ResourcePath.root()
+
 }
 
 object MongoDataSource {

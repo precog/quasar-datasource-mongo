@@ -22,10 +22,14 @@ import fs2.Stream
 import fs2.concurrent._
 import org.bson.{Document => _, _}
 import org.mongodb.scala._
+import quasar.connector.{MonadResourceErr, ResourceError}
+import quasar.api.resource.{ResourceName, ResourcePath}
 import slamdata.Predef._
 
-class Mongo[F[_]] private[Mongo](client: MongoClient)(implicit F: ConcurrentEffect[F]) {
+class Mongo[F[_]: MonadResourceErr : ConcurrentEffect] private[Mongo](client: MongoClient) {
   import Mongo._
+
+  val F: ConcurrentEffect[F] = ConcurrentEffect[F]
 
   def databases: Stream[F, Database] =
     observableAsStream(client.listDatabaseNames).map(Database(_))
@@ -48,9 +52,18 @@ class Mongo[F[_]] private[Mongo](client: MongoClient)(implicit F: ConcurrentEffe
 
   def findAll(collection: Collection): Stream[F, BsonValue] = for {
     colExists <- collectionExists(collection)
-    res <- if (!colExists) { Stream.empty } else collection match {
-      case Collection(Database(db), coll) =>
+    res <- collection match {
+      case Collection(Database(db), coll) => if (colExists) {
         observableAsStream(client.getDatabase(db).getCollection(coll).find[BsonValue]())
+      } else {
+        Stream.raiseError(
+          ResourceError.throwableP(
+            ResourceError.pathNotFound(
+              ResourcePath.root() / ResourceName(collection.database.name) / ResourceName(collection.name)
+            )
+          )
+        )
+      }
     }
   } yield res
 
@@ -73,9 +86,9 @@ object Mongo {
     } yield res
   }
 
-  def apply[F[_]](config: MongoConfig)(implicit F: ConcurrentEffect[F]): Stream[F, Mongo[F]] = config match {
+  def apply[F[_]: ConcurrentEffect: MonadResourceErr](config: MongoConfig): Stream[F, Mongo[F]] = config match {
     case MongoConfig(conn) => {
-      Stream.eval(F.delay(MongoClient(conn))).flatMap(client => {
+      Stream.eval(ConcurrentEffect[F].delay(MongoClient(conn))).flatMap(client => {
         observableAsStream(
           client
             .getDatabase("admin")

@@ -20,8 +20,9 @@ import slamdata.Predef._
 
 import cats.effect.{IO, ConcurrentEffect, ContextShift, Timer}
 import quasar.EffectfulQSpec
+import org.specs2.matcher.MatchResult
 import quasar.api.resource.{ResourceName, ResourcePath, ResourcePathType}
-import quasar.connector.{Datasource, QueryResult, ResourceError, MonadResourceErr}
+import quasar.connector.ResourceError
 import fs2.Stream
 import scala.concurrent.ExecutionContext
 import quasar.contrib.scalaz.MonadError_
@@ -31,6 +32,65 @@ class MongoDataSourceSpec extends EffectfulQSpec[IO]() (MongoDataSourceSpec.F, M
   import MongoDataSourceSpec._
 
   step(MongoSpec.setupDB)
+
+  "prefixedChildPaths" >> {
+    def assertPrefixed(path: ResourcePath, expected: List[(ResourceName, ResourcePathType)])
+        : IO[MatchResult[Set[(ResourceName, ResourcePathType)]]] = {
+      val fStream = for {
+        ds <- mkDataSource
+        res <- ds.prefixedChildPaths(path)
+      } yield res.getOrElse(Stream.empty)
+
+      Stream.force(fStream)
+        .compile
+        .toList
+        .map(x => x.toSet === expected.toSet)
+    }
+
+    "root prefixed children are databases" >>* {
+      val expected =
+        (MongoSpec.dbs ++ List("local", "admin"))
+          .map(x => (ResourceName(x), ResourcePathType.prefix))
+      assertPrefixed(ResourcePath.root(), expected)
+    }
+    "weird root prefixed children are databases" >>* {
+      val expected =
+        (MongoSpec.dbs ++ List("local", "admin"))
+          .map(x => (ResourceName(x), ResourcePathType.prefix))
+
+      assertPrefixed(ResourcePath.root() / ResourceName(""), expected)
+    }
+    "existent database children are collections" >>* {
+      val expected =
+        MongoSpec.cols.map(colName => (ResourceName(colName), ResourcePathType.leafResource))
+      val stream = for {
+        db <- Stream.emits(MongoSpec.dbs)
+        match_ <- Stream.eval(assertPrefixed(ResourcePath.root() / ResourceName(db), expected))
+      } yield match_.isSuccess
+      stream.fold(true)(_ && _).compile.last.map(_.getOrElse(false))
+    }
+    "nonexistent database children are empty" >>* {
+      val stream: Stream[IO, Boolean] = for {
+        ds <- dsSignal
+        db <- Stream.emits(MongoSpec.nonexistentDbs)
+        prefixed <- Stream.eval(ds.prefixedChildPaths(ResourcePath.root() / ResourceName(db)))
+      } yield prefixed.isEmpty
+      stream.map(x => scala.Predef.println(x)).drain
+      stream.fold(true)(_ && _).compile.last.map(_.getOrElse(false))
+    }
+    "there is no children of collections" >>* {
+      val stream: Stream[IO, Boolean] = for {
+        ds <- dsSignal
+        col <- MongoSpec.correctCollections ++ MongoSpec.incorrectCollections
+        prefixed <- col match {
+          case Collection(Database(dbName), colName) =>
+            Stream.eval(ds.prefixedChildPaths(ResourcePath.root() / ResourceName(dbName) / ResourceName(colName)))
+        }
+      } yield prefixed.isEmpty
+      stream.fold(true)(_ && _).compile.last.map(_.getOrElse(false))
+    }
+
+  }
 
   "pathIsResource" >> {
     "root is not a resource" >>* {

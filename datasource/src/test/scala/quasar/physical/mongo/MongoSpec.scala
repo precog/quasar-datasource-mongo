@@ -19,14 +19,17 @@ package quasar.physical.mongo
 import slamdata.Predef._
 
 import cats.syntax.apply._
-import cats.effect.{IO, ContextShift}
+import cats.effect.{IO, ContextShift, Timer}
 import org.specs2.mutable.Specification
 import org.specs2.execute.AsResult
 import org.mongodb.scala._
 import org.bson.{Document => _, _}
 import scala.io.Source
 import scala.concurrent.ExecutionContext
+import quasar.contrib.scalaz.MonadError_
+import quasar.connector.ResourceError
 import fs2.Stream
+import shims._
 
 class MongoSpec extends Specification {
   import MongoSpec._
@@ -87,7 +90,7 @@ class MongoSpec extends Specification {
     stream.fold(true)(_ && _).compile.last.unsafeRunSync().getOrElse(false)
   }
 
-  "collections return empty list for non-existing databases" >> {
+  "collections return error stream for non-existing databases" >> {
     val stream = for {
       mongo <- mkMongo
       db <- MongoSpec.incorrectDbs
@@ -138,10 +141,14 @@ class MongoSpec extends Specification {
 
   "findAll returns correct result for nonexisting collections" >> {
     def checkFindAll(client: Mongo[IO], col: Collection): Stream[IO, Boolean] =
-      client.findAll(col).fold(List[BsonValue]())((lst, col) => col :: lst).map(_ match {
-        case List() => true
-        case _ => false
-      })
+      client
+        .findAll(col)
+        .attempt
+        .fold(List[Either[Throwable, BsonValue]]())((lst, col) => col :: lst)
+        .map(_ match {
+          case Left(_) :: List() => true
+          case _ => false
+        })
     val stream = for {
       mongo <- mkMongo
       col <- incorrectCollections
@@ -167,6 +174,9 @@ object MongoSpec {
 
   implicit val ec: ExecutionContext = ExecutionContext.global
   implicit val cs: ContextShift[IO] = IO.contextShift(ec)
+  implicit val timer: Timer[IO] = IO.timer(ec)
+  implicit val ioMonadResourceErr: MonadError_[IO, ResourceError] =
+    MonadError_.facet[IO](ResourceError.throwableP)
 
   val dbs = List("A", "B", "C", "D")
   val cols = List("a", "b", "c", "d")
