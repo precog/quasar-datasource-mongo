@@ -3,5 +3,5 @@
 ## Usage
 
 ```sbt
-libraryDependencies += "com.slamdata" %% "quasar-mongo" % <version>
+libraryDependencies += "com.slamdata" %% "quasar-datasource-mongo" % <version>
 ```

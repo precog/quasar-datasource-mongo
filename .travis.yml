@@ -34,7 +34,7 @@ jobs:
     script:
     - set -e
     - "$SBT transferPublishAndTagResources"
-    - TRAVIS_JOB_NUMBER=1 scripts/publishAndTag 'slamdata/quasar-mongo'
+    - TRAVIS_JOB_NUMBER=1 scripts/publishAndTag 'slamdata/quasar-datasource-mongo'
     git:
       depth: false
 after_success:

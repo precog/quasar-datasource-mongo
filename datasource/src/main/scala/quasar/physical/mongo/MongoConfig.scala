@@ -26,16 +26,18 @@ final case class MongoConfig(connectionString: String)
 object MongoConfig {
   implicit val encodeJson: EncodeJson[MongoConfig] =
     EncodeJson(conn => Json.obj("connectionString" -> jString(conn.connectionString)))
-  implicit val decodeJson: DecodeJson[MongoConfig] = DecodeJson(config => {
+
+  implicit val decodeJson: DecodeJson[MongoConfig] = DecodeJson(config =>
     config.get[String]("connectionString").toOption match {
       case None => DecodeResult.fail("Incorrect mongodb configuration", config.history)
       case Some(unchecked) => isConnectionString(unchecked) match {
         case Right(str) => DecodeResult.ok(MongoConfig(str))
         case Left(msg) => DecodeResult.fail(msg, config.history)
       }
-    }
-  })
+    })
 
+  // I don't think that this is _really_ necessary check, because `Mongo.apply(config)`
+  // calls `new MongoClient` that calls `new ConnectionString` in its internals
   private def isConnectionString(inp: String): Either[String, String] = {
     try {
       val _ = new ConnectionString(inp)
