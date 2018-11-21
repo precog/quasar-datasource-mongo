@@ -65,8 +65,8 @@ object decoder {
       case _ => ???
     }
     override def hasNextArray(cursor: ArrayCursor): Boolean = cursor match {
-      case (hd :: _) => false
-      case _ => true
+      case (hd :: _) => true
+      case _ => false
     }
     override def stepArray(cursor: ArrayCursor): ArrayCursor = cursor match {
       case (_ :: tl) => tl
