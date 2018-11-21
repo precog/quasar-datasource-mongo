@@ -20,7 +20,7 @@ import slamdata.Predef._
 
 import quasar.api.datasource.DatasourceType
 import quasar.api.resource._
-import quasar.connector.{MonadResourceErr, QueryResult}
+import quasar.connector.{MonadResourceErr, QueryResult, ResourceError}
 import quasar.connector.datasource._
 
 import cats.syntax.eq._
@@ -39,14 +39,19 @@ class MongoDataSource[F[_]: ConcurrentEffect: ContextShift: MonadResourceErr: Ti
 
   val kind = MongoDataSource.kind
 
-  override def evaluate(path: ResourcePath): F[QueryResult[F]] = path match {
-    case _ if isRoot(path) =>
-      QueryResult.parsed(qdataDecoder, Stream.empty.covary[F]).pure[F]
-    case ResourcePath.Leaf(file) => MongoResource.ofFile(file) match {
-      case None => QueryResult.parsed(qdataDecoder, Stream.empty.covary[F]).pure[F]
-      case Some(Database(_)) => QueryResult.parsed(qdataDecoder, Stream.empty.covary[F]).pure[F]
-      case Some(collection@Collection(_, _)) => QueryResult.parsed(qdataDecoder, mongo.findAll(collection)).pure[F]
+  override def evaluate(path: ResourcePath): F[QueryResult[F]] = {
+    val errorSignal =
+      Stream.raiseError(ResourceError.throwableP(ResourceError.pathNotFound(path)))
+
+    val stream = path match {
+      case _ if isRoot(path) => errorSignal
+      case ResourcePath.Leaf(file) => MongoResource.ofFile(file) match {
+        case None => errorSignal
+        case Some(Database(_)) => errorSignal
+        case Some(collection@Collection(_, _)) => mongo.findAll(collection)
+      }
     }
+    QueryResult.parsed(qdataDecoder, stream).pure[F]
   }
 
   override def pathIsResource(path: ResourcePath): F[Boolean] = path match {

@@ -23,6 +23,7 @@ import quasar.EffectfulQSpec
 import org.specs2.matcher.MatchResult
 import quasar.api.resource.{ResourceName, ResourcePath, ResourcePathType}
 import quasar.connector.ResourceError
+import org.bson._
 import fs2.Stream
 import scala.concurrent.ExecutionContext
 import quasar.contrib.scalaz.MonadError_
@@ -32,6 +33,61 @@ class MongoDataSourceSpec extends EffectfulQSpec[IO]() (MongoDataSourceSpec.F, M
   import MongoDataSourceSpec._
 
   step(MongoSpec.setupDB)
+
+  "evaluate" >> {
+    def assertOnlyErrors(paths: List[ResourcePath]) = {
+      val stream = for {
+        ds <- dsSignal
+        path <- Stream.emits(paths)
+        queryRes <- Stream.eval(ds.evaluate(path))
+        bson <- queryRes.data
+      } yield bson
+
+      stream.attempt.compile.toList.map(_.length === paths.length)
+
+      stream
+        .attempt
+        .fold(true)((acc: Boolean, errOrRes: Either[Throwable, Any]) => acc && errOrRes.isLeft)
+        .compile
+        .last
+        .map(_.getOrElse(false))
+    }
+    def pathOfCollection(col: Collection) =
+      ResourcePath.root() / ResourceName(col.database.name) / ResourceName(col.name)
+
+    "evaluation root and weirdRoot is error stream" >>* {
+      val roots = List(ResourcePath.root(), ResourcePath.root() / ResourceName(""))
+      val paths = MongoSpec.dbs.map(db => ResourcePath.root() / ResourceName(db)) ++ roots
+      assertOnlyErrors(paths)
+    }
+    "evaluation of existing collections is collection content" >>* {
+      def checkBson(col: Collection, any: Any): Boolean = any match {
+        case bson: BsonValue =>
+          (bson.asDocument().get(col.name).asString().getValue() === col.database.name).isSuccess
+        case _ => false
+      }
+
+      val stream: Stream[IO, Boolean] = for {
+        ds <- dsSignal
+        col <- MongoSpec.correctCollections
+        queryRes <- Stream.eval(ds.evaluate(pathOfCollection(col)))
+        any <- queryRes.data
+        checked <- Stream.emit(checkBson(col, any))
+      } yield checked
+
+      stream.fold(true)(_ && _).compile.last.map(_.getOrElse(false))
+    }
+
+    "evaluation of non-existent collections is error stream" >>* {
+      MongoSpec
+        .incorrectCollections
+        .compile
+        .toList
+        .map(_.map(pathOfCollection(_)))
+        .flatMap(ps => assertOnlyErrors(ps))
+    }
+  }
+
 
   "prefixedChildPaths" >> {
     def assertPrefixed(path: ResourcePath, expected: List[(ResourceName, ResourcePathType)])
