@@ -18,18 +18,15 @@ package quasar.physical.mongo
 
 import slamdata.Predef._
 
-import cats.effect.{IO, ConcurrentEffect, ContextShift, Timer}
-import quasar.EffectfulQSpec
-import org.specs2.matcher.MatchResult
-import quasar.api.resource.{ResourceName, ResourcePath, ResourcePathType}
-import quasar.connector.ResourceError
-import org.bson._
+import cats.effect.IO
 import fs2.Stream
-import scala.concurrent.ExecutionContext
-import quasar.contrib.scalaz.MonadError_
-import shims._
+import org.bson._
+import org.specs2.matcher.MatchResult
+import quasar.EffectfulQSpec
+import quasar.api.resource.{ResourceName, ResourcePath, ResourcePathType}
+import testImplicits._
 
-class MongoDataSourceSpec extends EffectfulQSpec[IO]() (MongoDataSourceSpec.F, MongoDataSourceSpec.ec) {
+class MongoDataSourceSpec extends EffectfulQSpec[IO] {
   import MongoDataSourceSpec._
 
   step(MongoSpec.setupDB)
@@ -195,14 +192,6 @@ class MongoDataSourceSpec extends EffectfulQSpec[IO]() (MongoDataSourceSpec.F, M
 }
 
 object MongoDataSourceSpec {
-  val ec: ExecutionContext = ExecutionContext.global
-  implicit val cs: ContextShift[IO] = IO.contextShift(ec)
-  implicit val timer: Timer[IO] = IO.timer(ec)
-  implicit val ioMonadResourceErr: MonadError_[IO, ResourceError] =
-    MonadError_.facet[IO](ResourceError.throwableP)
-
-  val F = ConcurrentEffect[IO]
-
   def mkDataSource: IO[MongoDataSource[IO]] =
     MongoSpec.mkMongo.compile.lastOrError.flatMap(MongoDataSource[IO](_))
   def dsSignal: Stream[IO, MongoDataSource[IO]] =
