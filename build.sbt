@@ -8,7 +8,7 @@ homepage in ThisBuild := Some(url("https://github.com/slamdata/quasar-datasource
 
 scmInfo in ThisBuild := Some(ScmInfo(
   url("https://github.com/slamdata/quasar-datasource-mongo"),
-  "scm:git@github.com:slamdata/quasar-datasource-mongo.gitt"))
+  "scm:git@github.com:slamdata/quasar-datasource-mongo.git"))
 
 lazy val root = project
   .in(file("."))

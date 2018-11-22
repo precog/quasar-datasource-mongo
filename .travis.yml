@@ -29,7 +29,7 @@ jobs:
   include:
   - stage: test
     script:
-    - docker run --name mongodb bitnami/mongodb:latest
+    - docker run -d -p 127.0.0.1:27018:27017 --name mongodb bitnami/mongodb:latest
     - set -e
     - sudo chmod +x $SBT
     - "$SBT ++$TRAVIS_SCALA_VERSION test"

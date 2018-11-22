@@ -18,17 +18,23 @@ package quasar.physical.mongo
 
 import slamdata.Predef._
 
-import cats.effect.{ConcurrentEffect, ContextShift, IO, Timer}
-import fs2.Stream
+import cats.effect.IO
 import quasar.EffectfulQSpec
-import quasar.connector.ResourceError
-import quasar.contrib.scalaz.MonadError_
-import scala.concurrent.ExecutionContext
 import quasar.physical.mongo.testImplicits._
+import argonaut._, Argonaut._
 import shims._
 
 class MongoDataSourceModuleSpec extends EffectfulQSpec[IO] {
-}
-
-object MongoDataSourceModuleSpec {
+  "Using incorrect config leads to Left error" >>* {
+    val config = Json.obj("foo" -> Json.jString("bar"))
+    MongoDataSourceModule.lightweightDatasource[IO](config).map (_.asCats must beLeft)
+  }
+  "Using correct config produces Right Disposable" >>* {
+    val config = MongoConfig(MongoSpec.connectionString).asJson
+    MongoDataSourceModule.lightweightDatasource[IO](config).map (_.asCats must beRight)
+  }
+  "Using unreachable config produces Left error" >>* {
+    val config = MongoConfig("mongodb://unreachable").asJson
+    MongoDataSourceModule.lightweightDatasource[IO](config).map (_.asCats must beLeft)
+  }
 }

@@ -21,7 +21,6 @@ import slamdata.Predef._
 import cats.effect.IO
 import fs2.Stream
 import org.bson._
-import org.specs2.matcher.MatchResult
 import quasar.EffectfulQSpec
 import quasar.api.resource.{ResourceName, ResourcePath, ResourcePathType}
 import testImplicits._
@@ -88,7 +87,7 @@ class MongoDataSourceSpec extends EffectfulQSpec[IO] {
 
   "prefixedChildPaths" >> {
     def assertPrefixed(path: ResourcePath, expected: List[(ResourceName, ResourcePathType)])
-        : IO[MatchResult[Set[(ResourceName, ResourcePathType)]]] = {
+        : IO[Boolean] = {
       val fStream = for {
         ds <- mkDataSource
         res <- ds.prefixedChildPaths(path)
@@ -97,7 +96,7 @@ class MongoDataSourceSpec extends EffectfulQSpec[IO] {
       Stream.force(fStream)
         .compile
         .toList
-        .map(x => x.toSet === expected.toSet)
+        .map(x => expected.toSet.subsetOf(x.toSet))
     }
 
     "root prefixed children are databases" >>* {
@@ -118,8 +117,8 @@ class MongoDataSourceSpec extends EffectfulQSpec[IO] {
         MongoSpec.cols.map(colName => (ResourceName(colName), ResourcePathType.leafResource))
       val stream = for {
         db <- Stream.emits(MongoSpec.dbs)
-        match_ <- Stream.eval(assertPrefixed(ResourcePath.root() / ResourceName(db), expected))
-      } yield match_.isSuccess
+        asserted <- Stream.eval(assertPrefixed(ResourcePath.root() / ResourceName(db), expected))
+      } yield asserted
       stream.fold(true)(_ && _).compile.last.map(_.getOrElse(false))
     }
     "nonexistent database children are empty" >>* {

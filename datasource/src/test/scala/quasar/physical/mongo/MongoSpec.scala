@@ -19,17 +19,15 @@ package quasar.physical.mongo
 import slamdata.Predef._
 
 import cats.syntax.apply._
-import cats.effect.{IO, ContextShift, Timer}
+import cats.effect.IO
 import org.specs2.mutable.Specification
 import org.specs2.execute.AsResult
 import org.mongodb.scala._
 import org.bson.{Document => _, _}
 import scala.io.Source
-import scala.concurrent.ExecutionContext
-import quasar.contrib.scalaz.MonadError_
-import quasar.connector.ResourceError
 import fs2.Stream
 import shims._
+import testImplicits._
 
 class MongoSpec extends Specification {
   import MongoSpec._
@@ -51,8 +49,8 @@ class MongoSpec extends Specification {
       databases <- mongo.databases
     } yield databases
     val evaluatedDbs = stream.compile.toList.unsafeRunSync()
-    val expectedDbs = (MongoSpec.dbs ++ List("admin", "local")).map(Database(_))
-    evaluatedDbs === expectedDbs
+    val expectedDbs = MongoSpec.dbs.map(Database(_))
+    expectedDbs.toSet.subsetOf(evaluatedDbs.toSet)
   }
 
   "databaseExists returns true for existing dbs" >>  {
@@ -105,7 +103,6 @@ class MongoSpec extends Specification {
       col <- correctCollections
       exists <- mongo.collectionExists(col)
     } yield exists
-
     stream.fold(true)(_ && _).compile.last.unsafeRunSync().getOrElse(false)
   }
 
@@ -156,7 +153,7 @@ class MongoSpec extends Specification {
     } yield correct
     stream.fold(true)(_ && _).compile.last.unsafeRunSync().getOrElse(false)
   }
-/*
+
   "raise errors when mongodb is unreachable" >>  {
     val unreachableURI = "mongodb://unreachable"
     Mongo[IO](MongoConfig(unreachableURI)).attempt.compile.last.unsafeRunSync() match {
@@ -165,25 +162,17 @@ class MongoSpec extends Specification {
       case Some(Right(_)) => AsResult(false).updateMessage("Mongo.apply.attempt worked for incorrect connection string")
     }
   }
- */
-
 }
 
 object MongoSpec {
   import Mongo._
-
-  implicit val ec: ExecutionContext = ExecutionContext.global
-  implicit val cs: ContextShift[IO] = IO.contextShift(ec)
-  implicit val timer: Timer[IO] = IO.timer(ec)
-  implicit val ioMonadResourceErr: MonadError_[IO, ResourceError] =
-    MonadError_.facet[IO](ResourceError.throwableP)
 
   val dbs = List("A", "B", "C", "D")
   val cols = List("a", "b", "c", "d")
   val nonexistentDbs = List("Z", "Y")
   val nonexistentCols = List("z", "y")
 
-  lazy val connectionString = Source.fromFile("./datasource/src/test/resource/mongo-connection").mkString.trim
+  lazy val connectionString = Source.fromFile("./datasource/src/test/resources/mongo-connection").mkString.trim
 
   def mkMongo: Stream[IO, Mongo[IO]] =
     Mongo[IO](MongoConfig(connectionString))
@@ -216,9 +205,6 @@ object MongoSpec {
   }
 
   def setupDB(): Unit = {
-    implicit val ec: ExecutionContext = ExecutionContext.global
-    implicit val cs: ContextShift[IO] = IO.contextShift(ec)
-
     val stream = for {
       client <- Stream.eval(IO.delay(MongoClient(connectionString)))
       dbName <- Stream.emits(dbs)
