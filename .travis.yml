@@ -25,16 +25,12 @@ jobs:
   include:
   - stage: test
     script:
-    - docker run -d -p 127.0.0.1:27018:27017 --name mongodb bitnami/mongodb:latest
+    - docker run -d -p 127.0.0.1:27018:27017 --name mongodb bitnami/mongodb:4.1.4
     - set -e
-    - sudo chmod +x $SBT
-    - sudo chmod +x scripts/discordTravisPost
     - "$SBT ++$TRAVIS_SCALA_VERSION test"
   - stage: publish
-    env: 
     script:
     - set -e
-    - sudo chmod +x scripts/publishAndTag
     - "$SBT transferPublishAndTagResources"
     - TRAVIS_JOB_NUMBER=1 scripts/publishAndTag 'slamdata/quasar-datasource-mongo'
     git:
