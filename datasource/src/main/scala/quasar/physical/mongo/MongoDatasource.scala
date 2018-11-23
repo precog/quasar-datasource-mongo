@@ -22,6 +22,7 @@ import quasar.api.resource._
 import quasar.connector.{MonadResourceErr, QueryResult, ResourceError}
 import quasar.connector.datasource._
 import quasar.physical.mongo.decoder._
+import quasar.physical.mongo.MongoResource.{Database, Collection}
 
 import cats.syntax.eq._
 import cats.syntax.functor._

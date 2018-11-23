@@ -27,11 +27,12 @@ import scalaz.{\/, -\/, \/-}
 sealed trait MongoResource
 
 object MongoResource {
-  def database(name: String): MongoResource = Database(name)
-  def collection(database: Database, name: String): MongoResource = Collection(database, name)
-  def apply(a: MongoResource): MongoResource = a
+  final case class Database(name: String) extends MongoResource
+  final case class Collection(database: Database, name: String) extends MongoResource
 
-  implicit val equal: Eq[MongoResource] = Eq.fromUniversalEquals
+  implicit val eqMongoResource: Eq[MongoResource] = Eq.fromUniversalEquals
+  implicit val eqCollection: Eq[Collection] = Eq.fromUniversalEquals
+  implicit val eqDatabase: Eq[Database] = Eq.fromUniversalEquals
 
   def ofFile(file: AFile): Option[MongoResource] = {
     Path.peel(file) match {
@@ -49,8 +50,4 @@ object MongoResource {
     case \/-(Path.FileName(n)) => n
     case -\/(Path.DirName(n)) => n
   }
-
 }
-
-final case class Database(name: String) extends MongoResource
-final case class Collection(database: Database, name: String) extends MongoResource

@@ -19,6 +19,7 @@ package quasar.physical.mongo
 import slamdata.Predef._
 import quasar.api.resource.{ResourceName, ResourcePath}
 import quasar.connector.{MonadResourceErr, ResourceError}
+import quasar.physical.mongo.MongoResource.{Database, Collection}
 
 import cats.effect.{ConcurrentEffect, IO}
 import cats.syntax.eq._
@@ -36,7 +37,7 @@ class Mongo[F[_]: MonadResourceErr : ConcurrentEffect] private[Mongo](client: Mo
     observableAsStream(client.listDatabaseNames).map(Database(_))
 
   def databaseExists(database: Database): Stream[F, Boolean] =
-    databases.exists(MongoResource(_) === MongoResource(database))
+    databases.exists(_ === database)
 
   def collections(database: Database): Stream[F, Collection] = for {
     dbExists <- databaseExists(database)
@@ -46,7 +47,7 @@ class Mongo[F[_]: MonadResourceErr : ConcurrentEffect] private[Mongo](client: Mo
   } yield res
 
   def collectionExists(collection: Collection): Stream[F, Boolean] =
-    collections(collection.database).exists(MongoResource(_) === MongoResource(collection))
+    collections(collection.database).exists(_ === collection)
 
   def findAll(collection: Collection): Stream[F, BsonValue] = for {
     colExists <- collectionExists(collection)

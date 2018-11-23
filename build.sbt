@@ -22,7 +22,7 @@ val catsEffectVersion = "1.0.0"
 val fs2Version = "1.0.0"
 val shimsVersion = "1.2.1"
 val slf4jVersion = "1.7.25"
-val specsVersion = "4.1.2"
+val specsVersion = "4.3.3"
 val refinedVersion = "0.8.5"
 
 lazy val core = project

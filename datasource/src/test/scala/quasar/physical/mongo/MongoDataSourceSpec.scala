@@ -18,7 +18,9 @@ package quasar.physical.mongo
 
 import slamdata.Predef._
 import quasar.api.resource.{ResourceName, ResourcePath, ResourcePathType}
+import quasar.physical.mongo.MongoResource.Collection
 import quasar.EffectfulQSpec
+
 
 import cats.effect.IO
 import fs2.Stream
