@@ -17,12 +17,12 @@
 package quasar.physical.mongo
 
 import slamdata.Predef._
+import quasar.api.resource.{ResourceName, ResourcePath, ResourcePathType}
+import quasar.EffectfulQSpec
 
 import cats.effect.IO
 import fs2.Stream
 import org.bson._
-import quasar.EffectfulQSpec
-import quasar.api.resource.{ResourceName, ResourcePath, ResourcePathType}
 import testImplicits._
 
 class MongoDataSourceSpec extends EffectfulQSpec[IO] {
@@ -134,10 +134,9 @@ class MongoDataSourceSpec extends EffectfulQSpec[IO] {
       val stream: Stream[IO, Boolean] = for {
         ds <- dsSignal
         col <- MongoSpec.correctCollections ++ MongoSpec.incorrectCollections
-        prefixed <- col match {
-          case Collection(Database(dbName), colName) =>
-            Stream.eval(ds.prefixedChildPaths(ResourcePath.root() / ResourceName(dbName) / ResourceName(colName)))
-        }
+        prefixed <- Stream.eval(ds.prefixedChildPaths(
+          ResourcePath.root() / ResourceName(col.database.name) / ResourceName(col.name)
+        ))
       } yield prefixed.isEmpty
       stream.fold(true)(_ && _).compile.last.map(_.getOrElse(false))
     }
@@ -169,10 +168,9 @@ class MongoDataSourceSpec extends EffectfulQSpec[IO] {
       val stream = for {
         ds <- dsSignal
         col <- MongoSpec.correctCollections
-        res <- col match {
-          case Collection(Database(dbName), colName) =>
-            Stream.eval(ds.pathIsResource(ResourcePath.root() / ResourceName(dbName) / ResourceName(colName)))
-        }
+        res <- Stream.eval(ds.pathIsResource(
+          ResourcePath.root() / ResourceName(col.database.name) / ResourceName(col.name)
+        ))
       } yield res
       stream.fold(true)(_ && _).compile.last.map(_.getOrElse(false))
     }
@@ -180,10 +178,9 @@ class MongoDataSourceSpec extends EffectfulQSpec[IO] {
       val stream = for {
         ds <- dsSignal
         col <- MongoSpec.incorrectCollections
-        res <- col match {
-          case Collection(Database(dbName), colName) =>
-            Stream.eval(ds.pathIsResource(ResourcePath.root() / ResourceName(dbName) / ResourceName(colName)))
-        }
+        res <- Stream.eval(ds.pathIsResource(
+          ResourcePath.root() / ResourceName(col.database.name) / ResourceName(col.name)
+        ))
       } yield res
       stream.fold(false)(_ || _).map(!_).compile.last.map(_.getOrElse(false))
     }

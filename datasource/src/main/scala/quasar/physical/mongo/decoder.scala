@@ -17,13 +17,14 @@
 package quasar.physical.mongo
 
 import slamdata.Predef._
-
-import eu.timepit.refined.auto._
-import java.time._
-import org.bson._
 import qdata._
 import qdata.QType._
+
+import java.time._
 import scala.collection.JavaConverters._
+
+import eu.timepit.refined.auto._
+import org.bson._
 import spire.math.Real
 
 object decoder {

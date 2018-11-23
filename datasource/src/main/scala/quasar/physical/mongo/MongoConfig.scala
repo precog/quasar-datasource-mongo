@@ -53,7 +53,7 @@ object MongoConfig {
   def sanitize(config: Json): Json = config.as[MongoConfig].result match {
     case Left(_) => config
     case Right(MongoConfig(value)) => {
-      MongoConfig(credentialsRegex.replaceFirstIn(value, "://<hidden>:<hidden>@")).asJson
+      MongoConfig(credentialsRegex.replaceFirstIn(value, "://<REDACTED>:<REDACTED>@")).asJson
     }
   }
 }

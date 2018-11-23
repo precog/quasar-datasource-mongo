@@ -17,11 +17,11 @@
 package quasar.physical.mongo
 
 import slamdata.Predef._
-
 import quasar.api.datasource.DatasourceType
 import quasar.api.resource._
 import quasar.connector.{MonadResourceErr, QueryResult, ResourceError}
 import quasar.connector.datasource._
+import quasar.physical.mongo.decoder._
 
 import cats.syntax.eq._
 import cats.syntax.functor._
@@ -30,8 +30,6 @@ import cats.syntax.applicative._
 import cats.syntax.option._
 import eu.timepit.refined.auto._
 import fs2.Stream
-import eu.timepit.refined.auto._
-import quasar.physical.mongo.decoder._
 import shims._
 
 class MongoDataSource[F[_]: ConcurrentEffect: ContextShift: MonadResourceErr: Timer](mongo: Mongo[F])
@@ -65,11 +63,9 @@ class MongoDataSource[F[_]: ConcurrentEffect: ContextShift: MonadResourceErr: Ti
 
   override def prefixedChildPaths(prefixPath: ResourcePath)
     : F[Option[Stream[F, (ResourceName, ResourcePathType)]]] = prefixPath match {
-    case _ if isRoot(prefixPath) => {
-      mongo.databases.map(_ match {
-        case Database(name) => (ResourceName(name), ResourcePathType.prefix)
-      }).some.pure[F]
-    }
+    case _ if isRoot(prefixPath) =>
+      mongo.databases.map(x => (ResourceName(x.name), ResourcePathType.prefix)).some.pure[F]
+
     case ResourcePath.Leaf(file) => MongoResource.ofFile(file) match {
       case None => none.pure[F]
       case Some(Collection(_, _)) => none.pure[F]
@@ -78,9 +74,7 @@ class MongoDataSource[F[_]: ConcurrentEffect: ContextShift: MonadResourceErr: Ti
 
         dbExists.map(exists => {
           if (exists) {
-            mongo.collections(db).map(_ match {
-              case Collection(_, colName) => (ResourceName(colName), ResourcePathType.leafResource)
-            }).some
+            mongo.collections(db).map(x => (ResourceName(x.name), ResourcePathType.leafResource)).some
           } else {
             none
           }
@@ -90,7 +84,6 @@ class MongoDataSource[F[_]: ConcurrentEffect: ContextShift: MonadResourceErr: Ti
   }
   private def isRoot(inp: ResourcePath): Boolean =
     inp === (ResourcePath.root() / ResourceName("")) || inp === ResourcePath.root()
-
 }
 
 object MongoDataSource {

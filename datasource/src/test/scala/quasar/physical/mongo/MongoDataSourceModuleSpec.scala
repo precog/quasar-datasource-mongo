@@ -17,11 +17,11 @@
 package quasar.physical.mongo
 
 import slamdata.Predef._
-
-import cats.effect.IO
 import quasar.EffectfulQSpec
 import quasar.physical.mongo.testImplicits._
+
 import argonaut._, Argonaut._
+import cats.effect.IO
 import shims._
 
 class MongoDataSourceModuleSpec extends EffectfulQSpec[IO] {

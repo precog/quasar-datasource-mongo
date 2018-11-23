@@ -16,15 +16,16 @@
 
 package quasar.physical.mongo
 
+import slamdata.Predef._
+import quasar.api.resource.{ResourceName, ResourcePath}
+import quasar.connector.{MonadResourceErr, ResourceError}
+
 import cats.effect.{ConcurrentEffect, IO}
 import cats.syntax.eq._
 import fs2.Stream
 import fs2.concurrent._
 import org.bson.{Document => _, _}
 import org.mongodb.scala._
-import quasar.connector.{MonadResourceErr, ResourceError}
-import quasar.api.resource.{ResourceName, ResourcePath}
-import slamdata.Predef._
 
 class Mongo[F[_]: MonadResourceErr : ConcurrentEffect] private[Mongo](client: MongoClient) {
   import Mongo._
@@ -37,33 +38,30 @@ class Mongo[F[_]: MonadResourceErr : ConcurrentEffect] private[Mongo](client: Mo
   def databaseExists(database: Database): Stream[F, Boolean] =
     databases.exists(MongoResource(_) === MongoResource(database))
 
-  def collections(database: Database): Stream[F, Collection] = database match {
-    case Database(name) => for {
-      dbExists <- databaseExists(database)
-      res <- if (!dbExists) { Stream.empty } else {
-        observableAsStream(client.getDatabase(name).listCollectionNames()).map(Collection(database, _))
-      }
-    } yield res
-  }
+  def collections(database: Database): Stream[F, Collection] = for {
+    dbExists <- databaseExists(database)
+    res <- if (!dbExists) { Stream.empty } else {
+      observableAsStream(client.getDatabase(database.name).listCollectionNames()).map(Collection(database, _))
+    }
+  } yield res
 
-  def collectionExists(collection: Collection): Stream[F, Boolean] = collection match {
-    case Collection(db, _) => collections(db).exists(MongoResource(_) === MongoResource(collection))
-  }
+  def collectionExists(collection: Collection): Stream[F, Boolean] =
+    collections(collection.database).exists(MongoResource(_) === MongoResource(collection))
 
   def findAll(collection: Collection): Stream[F, BsonValue] = for {
     colExists <- collectionExists(collection)
-    res <- collection match {
-      case Collection(Database(db), coll) => if (colExists) {
-        observableAsStream(client.getDatabase(db).getCollection(coll).find[BsonValue]())
-      } else {
-        Stream.raiseError(
-          ResourceError.throwableP(
-            ResourceError.pathNotFound(
-              ResourcePath.root() / ResourceName(collection.database.name) / ResourceName(collection.name)
-            )
+    res <- if (colExists) {
+      observableAsStream(
+        client.getDatabase(collection.database.name).getCollection(collection.name).find[BsonValue]()
+      )
+    } else {
+      Stream.raiseError(
+        ResourceError.throwableP(
+          ResourceError.pathNotFound(
+            ResourcePath.root() / ResourceName(collection.database.name) / ResourceName(collection.name)
           )
         )
-      }
+      )
     }
   } yield res
 
@@ -86,15 +84,13 @@ object Mongo {
     } yield res
   }
 
-  def apply[F[_]: ConcurrentEffect: MonadResourceErr](config: MongoConfig): Stream[F, Mongo[F]] = config match {
-    case MongoConfig(conn) => {
-      Stream.eval(ConcurrentEffect[F].delay(MongoClient(conn))).flatMap(client => {
-        observableAsStream(
-          client
-            .getDatabase("admin")
-            .runCommand[Document](Document("ping" -> 1)))
-          .map(_ => new Mongo(client))
-      })
-    }
+  def apply[F[_]: ConcurrentEffect: MonadResourceErr](config: MongoConfig): Stream[F, Mongo[F]] = {
+    Stream.eval(ConcurrentEffect[F].delay(MongoClient(config.connectionString))).flatMap(client => {
+      observableAsStream(
+        client
+          .getDatabase("admin")
+          .runCommand[Document](Document("ping" -> 1)))
+        .map(_ => new Mongo(client))
+    })
   }
 }

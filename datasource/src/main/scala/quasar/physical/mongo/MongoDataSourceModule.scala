@@ -18,20 +18,21 @@ package quasar.physical.mongo
 
 import slamdata.Predef._
 
-import quasar.connector.{LightweightDatasourceModule, MonadResourceErr, Datasource, QueryResult}
 import quasar.api.datasource.{DatasourceError, DatasourceType}
 import quasar.api.datasource.DatasourceError.{InitializationError}
 import quasar.api.resource.ResourcePath
+import quasar.connector.{LightweightDatasourceModule, MonadResourceErr, Datasource, QueryResult}
 import quasar.Disposable
 
+import scala.concurrent.ExecutionContext
+
 import argonaut._
-import fs2.Stream
-import cats.syntax.functor._
 import cats.effect.{ConcurrentEffect, Timer, ContextShift}
+import cats.syntax.applicative._
+import cats.syntax.functor._
+import fs2.Stream
 import scalaz.{NonEmptyList, \/}
 import scalaz.syntax.either._
-import cats.syntax.applicative._
-import scala.concurrent.ExecutionContext
 
 object MongoDataSourceModule extends LightweightDatasourceModule {
   type DS[F[_]] = Datasource[F, Stream[F, ?], ResourcePath, QueryResult[F]]

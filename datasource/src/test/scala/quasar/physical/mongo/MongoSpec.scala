@@ -20,12 +20,12 @@ import slamdata.Predef._
 
 import cats.syntax.apply._
 import cats.effect.IO
+import fs2.Stream
 import org.specs2.mutable.Specification
 import org.specs2.execute.AsResult
 import org.mongodb.scala._
 import org.bson.{Document => _, _}
 import scala.io.Source
-import fs2.Stream
 import shims._
 import testImplicits._
 
@@ -119,10 +119,10 @@ class MongoSpec extends Specification {
 
   "findAll returns correct results for existing collections" >> {
     def checkFindAll(client: Mongo[IO], col: Collection): Stream[IO, Boolean] =
-      client.findAll(col).fold(List[BsonValue]())((lst, col) => col :: lst).map(bsons => (bsons, col) match {
-        case (((bson: BsonDocument) :: List()), Collection(Database(dbName), colName)) =>
+      client.findAll(col).fold(List[BsonValue]())((lst, col) => col :: lst).map(bsons => bsons match {
+        case (bson: BsonDocument) :: List() =>
           try {
-            bson.getString(colName).getValue() === dbName
+            bson.getString(col.name).getValue() === col.database.name
           } catch {
             case e: Throwable => false
           }

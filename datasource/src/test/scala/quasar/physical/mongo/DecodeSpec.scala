@@ -17,15 +17,16 @@
 package quasar.physical.mongo
 
 import slamdata.Predef._
+import quasar.physical.mongo.decoder.qdataDecoder
+import qdata.QType._
+
+import java.time._
+import scala.collection.JavaConverters._
 
 import eu.timepit.refined.auto._
-import java.time._
 import org.bson._
 import org.bson.types.{Decimal128, ObjectId}
 import org.specs2.mutable.Specification
-import qdata.QType._
-import quasar.physical.mongo.decoder.qdataDecoder
-import scala.collection.JavaConverters._
 import spire.math.Real
 
 class DecodeSpec extends Specification {

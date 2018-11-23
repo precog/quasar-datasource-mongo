@@ -17,9 +17,10 @@
 package quasar.physical.mongo
 
 import slamdata.Predef._
-import org.specs2.mutable.Specification
-import argonaut.Json
+
 import argonaut.Argonaut._
+import argonaut.Json
+import org.specs2.mutable.Specification
 
 class MongoConfigSpec extends Specification {
   "works for mongodb protocol" >> {

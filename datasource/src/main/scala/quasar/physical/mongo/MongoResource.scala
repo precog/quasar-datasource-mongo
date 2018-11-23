@@ -17,12 +17,12 @@
 package quasar.physical.mongo
 
 import slamdata.Predef._
+import quasar.contrib.pathy.AFile
 
 import cats.kernel.Eq
 import cats.syntax.option._
-import quasar.contrib.pathy.AFile
 import pathy.Path
-import shims._
+import scalaz.{\/, -\/, \/-}
 
 sealed trait MongoResource
 
@@ -36,18 +36,18 @@ object MongoResource {
   def ofFile(file: AFile): Option[MongoResource] = {
     Path.peel(file) match {
       case Some((firstLayer, eitherName)) => Path.peel(firstLayer) match {
-        case None => Database(printName(eitherName.asCats)).some
+        case None => Database(printName(eitherName)).some
         case Some((secondLayer, eitherDb)) => Path.peel(secondLayer) match {
           case Some(_) => none
-          case None => Collection(Database(printName(eitherDb.asCats)), printName(eitherName.asCats)).some
+          case None => Collection(Database(printName(eitherDb)), printName(eitherName)).some
         }
       }
       case None => none
     }
   }
-  private def printName(p: Either[Path.DirName, Path.FileName]): String = p match {
-    case Right(Path.FileName(n)) => n
-    case Left(Path.DirName(n)) => n
+  private def printName(p: Path.DirName \/ Path.FileName): String = p match {
+    case \/-(Path.FileName(n)) => n
+    case -\/(Path.DirName(n)) => n
   }
 
 }
