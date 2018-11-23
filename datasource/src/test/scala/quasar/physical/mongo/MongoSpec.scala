@@ -154,7 +154,6 @@ class MongoSpec extends Specification {
     } yield correct
     stream.fold(true)(_ && _).compile.last.unsafeRunSync().getOrElse(false)
   }
-/*
   "raise errors when mongodb is unreachable" >>  {
     val unreachableURI = "mongodb://unreachable"
     Mongo[IO](MongoConfig(unreachableURI)).attempt.compile.last.unsafeRunSync() match {
@@ -163,7 +162,6 @@ class MongoSpec extends Specification {
       case Some(Right(_)) => AsResult(false).updateMessage("Mongo.apply.attempt worked for incorrect connection string")
     }
   }
- */
 }
 
 object MongoSpec {

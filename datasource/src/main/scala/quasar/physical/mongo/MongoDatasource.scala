@@ -39,14 +39,14 @@ class MongoDataSource[F[_]: ConcurrentEffect: ContextShift: MonadResourceErr: Ti
   val kind = MongoDataSource.kind
 
   override def evaluate(path: ResourcePath): F[QueryResult[F]] = {
-    val errorSignal =
+    val errorStream =
       Stream.raiseError(ResourceError.throwableP(ResourceError.pathNotFound(path)))
 
     val stream = path match {
-      case _ if isRoot(path) => errorSignal
+      case _ if isRoot(path) => errorStream
       case ResourcePath.Leaf(file) => MongoResource.ofFile(file) match {
-        case None => errorSignal
-        case Some(Database(_)) => errorSignal
+        case None => errorStream
+        case Some(Database(_)) => errorStream
         case Some(collection@Collection(_, _)) => mongo.findAll(collection)
       }
     }

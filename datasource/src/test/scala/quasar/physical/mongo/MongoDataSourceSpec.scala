@@ -35,7 +35,7 @@ class MongoDataSourceSpec extends EffectfulQSpec[IO] {
   "evaluate" >> {
     def assertOnlyErrors(paths: List[ResourcePath]) = {
       val stream = for {
-        ds <- dsSignal
+        ds <- dsStream
         path <- Stream.emits(paths)
         queryRes <- Stream.eval(ds.evaluate(path))
         bson <- queryRes.data
@@ -66,7 +66,7 @@ class MongoDataSourceSpec extends EffectfulQSpec[IO] {
       }
 
       val stream: Stream[IO, Boolean] = for {
-        ds <- dsSignal
+        ds <- dsStream
         col <- MongoSpec.correctCollections
         queryRes <- Stream.eval(ds.evaluate(pathOfCollection(col)))
         any <- queryRes.data
@@ -125,7 +125,7 @@ class MongoDataSourceSpec extends EffectfulQSpec[IO] {
     }
     "nonexistent database children are empty" >>* {
       val stream: Stream[IO, Boolean] = for {
-        ds <- dsSignal
+        ds <- dsStream
         db <- Stream.emits(MongoSpec.nonexistentDbs)
         prefixed <- Stream.eval(ds.prefixedChildPaths(ResourcePath.root() / ResourceName(db)))
       } yield prefixed.isEmpty
@@ -134,7 +134,7 @@ class MongoDataSourceSpec extends EffectfulQSpec[IO] {
     }
     "there is no children of collections" >>* {
       val stream: Stream[IO, Boolean] = for {
-        ds <- dsSignal
+        ds <- dsStream
         col <- MongoSpec.correctCollections ++ MongoSpec.incorrectCollections
         prefixed <- Stream.eval(ds.prefixedChildPaths(
           ResourcePath.root() / ResourceName(col.database.name) / ResourceName(col.name)
@@ -160,7 +160,7 @@ class MongoDataSourceSpec extends EffectfulQSpec[IO] {
     }
     "prefix without contents is not a resource" >>* {
       val stream = for {
-        ds <- dsSignal
+        ds <- dsStream
         dbName <- MongoSpec.correctDbs.map(_.name)
         res <- Stream.eval(ds.pathIsResource(ResourcePath.root() / ResourceName(dbName)))
       } yield res
@@ -168,7 +168,7 @@ class MongoDataSourceSpec extends EffectfulQSpec[IO] {
     }
     "existent collections are resources" >>* {
       val stream = for {
-        ds <- dsSignal
+        ds <- dsStream
         col <- MongoSpec.correctCollections
         res <- Stream.eval(ds.pathIsResource(
           ResourcePath.root() / ResourceName(col.database.name) / ResourceName(col.name)
@@ -178,7 +178,7 @@ class MongoDataSourceSpec extends EffectfulQSpec[IO] {
     }
     "non-existent collections aren't resources" >>* {
       val stream = for {
-        ds <- dsSignal
+        ds <- dsStream
         col <- MongoSpec.incorrectCollections
         res <- Stream.eval(ds.pathIsResource(
           ResourcePath.root() / ResourceName(col.database.name) / ResourceName(col.name)
@@ -192,6 +192,6 @@ class MongoDataSourceSpec extends EffectfulQSpec[IO] {
 object MongoDataSourceSpec {
   def mkDataSource: IO[MongoDataSource[IO]] =
     MongoSpec.mkMongo.compile.lastOrError.flatMap(MongoDataSource[IO](_))
-  def dsSignal: Stream[IO, MongoDataSource[IO]] =
+  def dsStream: Stream[IO, MongoDataSource[IO]] =
     MongoSpec.mkMongo.flatMap(client => Stream.eval(MongoDataSource[IO](client)))
 }

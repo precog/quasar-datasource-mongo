@@ -42,7 +42,7 @@ object MongoDataSourceModule extends LightweightDatasourceModule {
 
   private def mkError[F[_]](config: Json, msg: String): ResultOrError[F] =
     DatasourceError
-      .invalidConfiguration[Json, Error](kind, config, NonEmptyList(msg))
+      .invalidConfiguration[Json, Error](kind, sanitizeConfig(config), NonEmptyList(msg))
       .left[Result[F]]
 
   @SuppressWarnings(Array("org.wartremover.warts.ImplicitParameter"))
