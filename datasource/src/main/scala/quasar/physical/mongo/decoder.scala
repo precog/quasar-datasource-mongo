@@ -19,15 +19,41 @@ package quasar.physical.mongo
 import slamdata.Predef._
 import qdata._
 import qdata.QType._
+import quasar.contrib.std.errorImpossible
 
 import java.time._
-import scala.collection.JavaConverters._
+import java.util.{Map, Iterator}
 
 import eu.timepit.refined.auto._
 import org.bson._
 import spire.math.Real
 
 object decoder {
+  @SuppressWarnings(Array("org.wartremover.warts.Var"))
+  class BsonDocumentCursor(document: BsonDocument) {
+
+    val iterator: Iterator[Map.Entry[String, BsonValue]] =
+      document.entrySet().iterator()
+
+    var entry: Option[Map.Entry[String, BsonValue]] = None
+
+    def hasNext(): Boolean = {
+      try {
+        entry = Some(iterator.next())
+        true
+      } catch {
+        case _: Throwable => false
+      }
+    }
+
+    def stepObject(): BsonDocumentCursor = this
+
+    def getObjectKeyAt(): String = entry.getOrElse(errorImpossible).getKey()
+
+    def getObjectValueAt(): BsonValue = entry.getOrElse(errorImpossible).getValue()
+
+  }
+
   val qdataDecoder: QDataDecode[BsonValue] = new QDataDecode[BsonValue] {
     override def tpe(bson: BsonValue): QType = bson.getBsonType() match {
       case BsonType.DOCUMENT => QObject
@@ -54,47 +80,32 @@ object decoder {
       case BsonType.END_OF_DOCUMENT => QNull
     }
 
-    type ArrayCursor = List[BsonValue]
+    type ArrayCursor = Iterator[BsonValue]
 
     override def getArrayCursor(bson: BsonValue): ArrayCursor = bson match {
-      case arr: BsonArray => {
-        arr.getValues().asScala.toList
-      }
+      case arr: BsonArray => arr.getValues().iterator()
     }
-    override def getArrayAt(cursor: ArrayCursor): BsonValue = cursor match {
-      case (hd :: _) => hd
-      case _ => ???
-    }
-    override def hasNextArray(cursor: ArrayCursor): Boolean = cursor match {
-      case (hd :: _) => true
-      case _ => false
-    }
-    override def stepArray(cursor: ArrayCursor): ArrayCursor = cursor match {
-      case (_ :: tl) => tl
-      case c => c
-    }
+    override def getArrayAt(cursor: ArrayCursor): BsonValue =
+      cursor.next()
+    override def hasNextArray(cursor: ArrayCursor): Boolean =
+      cursor.hasNext()
+    override def stepArray(cursor: ArrayCursor): ArrayCursor =
+      cursor
 
-    type ObjectCursor = (List[String], BsonDocument)
+    type ObjectCursor = BsonDocumentCursor
 
     override def getObjectCursor(bson: BsonValue): ObjectCursor = bson match {
-      case obj: BsonDocument => (obj.keySet().asScala.toList, obj)
+      case obj: BsonDocument => new BsonDocumentCursor(obj)
     }
-    override def getObjectKeyAt(cursor: ObjectCursor): String = cursor match {
-      case ((k :: _), obj) => k
-      case _ => ???
-    }
-    override def getObjectValueAt(cursor: ObjectCursor): BsonValue = cursor match {
-      case ((k :: _), obj) => obj.get(k)
-      case _ => ???
-    }
-    override def hasNextObject(cursor: ObjectCursor): Boolean = cursor match {
-      case (List(), _) => false
-      case _ => true
-    }
-    override def stepObject(cursor: ObjectCursor): ObjectCursor = cursor match {
-      case ((_ :: tail), obj) => (tail, obj)
-      case a => a
-    }
+    override def getObjectKeyAt(cursor: ObjectCursor): String =
+      cursor.getObjectKeyAt()
+    override def getObjectValueAt(cursor: ObjectCursor): BsonValue =
+      cursor.getObjectValueAt()
+    override def hasNextObject(cursor: ObjectCursor): Boolean =
+      cursor.hasNext()
+    override def stepObject(cursor: ObjectCursor): ObjectCursor =
+      cursor.stepObject()
+
     override def getBoolean(bson: BsonValue): Boolean = bson match {
       case bool: BsonBoolean => bool.getValue()
     }
@@ -131,14 +142,13 @@ object decoder {
       }
     }
 
-    override def getInterval(a: BsonValue) = ???
-    override def getLocalDate(a: BsonValue) = ???
-    override def getLocalDateTime(a: BsonValue) = ???
-    override def getLocalTime(a: BsonValue) = ???
-    override def getMetaMeta(a: BsonValue) = ???
-    override def getMetaValue(a: BsonValue) = ???
-    override def getOffsetDate(a: BsonValue) = ???
-    override def getOffsetTime(a: BsonValue) = ???
-
+    override def getInterval(a: BsonValue) = errorImpossible
+    override def getLocalDate(a: BsonValue) = errorImpossible
+    override def getLocalDateTime(a: BsonValue) = errorImpossible
+    override def getLocalTime(a: BsonValue) = errorImpossible
+    override def getMetaMeta(a: BsonValue) = errorImpossible
+    override def getMetaValue(a: BsonValue) = errorImpossible
+    override def getOffsetDate(a: BsonValue) = errorImpossible
+    override def getOffsetTime(a: BsonValue) = errorImpossible
   }
 }
