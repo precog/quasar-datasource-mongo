@@ -18,46 +18,47 @@ package quasar.physical.mongo
 
 import slamdata.Predef._
 import quasar.api.resource.{ResourceName, ResourcePath, ResourcePathType}
-import quasar.physical.mongo.MongoResource.Collection
+import quasar.physical.mongo.MongoResource.{Collection, Database}
 import quasar.EffectfulQSpec
-
 
 import cats.effect.IO
 import fs2.Stream
 import org.bson._
+import org.specs2.specification.core._
 import testImplicits._
 
 class MongoDataSourceSpec extends EffectfulQSpec[IO] {
   import MongoDataSourceSpec._
 
+  def pathOfDatabase(db: Database) =
+    ResourcePath.root() / ResourceName(db.name)
+
+  def pathOfCollection(col: Collection) =
+    pathOfDatabase(col.database) / ResourceName(col.name)
+
+  def assertErrors(path: ResourcePath): IO[Boolean] = {
+    val stream = for {
+      ds <- dsStream
+      queryRes <- Stream.eval(ds.evaluate(path))
+      bson <- queryRes.data
+    } yield bson
+
+    stream
+      .attempt
+      .fold(true)((acc: Boolean, errOrRes: Either[Throwable, Any]) => acc && errOrRes.isLeft)
+      .compile
+      .lastOrError
+  }
+
   step(MongoSpec.setupDB)
 
   "evaluate" >> {
-    def assertOnlyErrors(paths: List[ResourcePath]) = {
-      val stream = for {
-        ds <- dsStream
-        path <- Stream.emits(paths)
-        queryRes <- Stream.eval(ds.evaluate(path))
-        bson <- queryRes.data
-      } yield bson
-
-      stream.attempt.compile.toList.map(_.length === paths.length)
-
-      stream
-        .attempt
-        .fold(true)((acc: Boolean, errOrRes: Either[Throwable, Any]) => acc && errOrRes.isLeft)
-        .compile
-        .last
-        .map(_.getOrElse(false))
+    "evaluation root and weirdRoot is error stream" >> {
+      assertErrors(ResourcePath.root()).unsafeRunSync()
+      assertErrors(ResourcePath.root() / ResourceName("")).unsafeRunSync()
     }
-    def pathOfCollection(col: Collection) =
-      ResourcePath.root() / ResourceName(col.database.name) / ResourceName(col.name)
 
-    "evaluation root and weirdRoot is error stream" >>* {
-      val roots = List(ResourcePath.root(), ResourcePath.root() / ResourceName(""))
-      val paths = MongoSpec.dbs.map(db => ResourcePath.root() / ResourceName(db)) ++ roots
-      assertOnlyErrors(paths)
-    }
+
     "evaluation of existing collections is collection content" >>* {
       def checkBson(col: Collection, any: Any): Boolean = any match {
         case bson: BsonValue =>
@@ -67,29 +68,29 @@ class MongoDataSourceSpec extends EffectfulQSpec[IO] {
 
       val stream: Stream[IO, Boolean] = for {
         ds <- dsStream
-        col <- MongoSpec.correctCollections
+        col <- Stream.emits(MongoSpec.correctCollections)
         queryRes <- Stream.eval(ds.evaluate(pathOfCollection(col)))
         any <- queryRes.data
         checked <- Stream.emit(checkBson(col, any))
       } yield checked
 
-      stream.fold(true)(_ && _).compile.last.map(_.getOrElse(false))
+      stream.fold(true)(_ && _).compile.lastOrError
     }
 
-    "evaluation of non-existent collections is error stream" >>* {
-      MongoSpec
-        .incorrectCollections
-        .compile
-        .toList
-        .map(_.map(pathOfCollection(_)))
-        .flatMap(ps => assertOnlyErrors(ps))
-    }
+    "evaluation of non-existent collections is error stream" >>
+      Fragment.foreach(MongoSpec.incorrectCollections)(col =>
+        s"checking ${col.database.name} :: ${col.name}" >>*
+          assertErrors(pathOfCollection(col))
+      )
+    "evaluation of a database is error stream" >>
+      Fragment.foreach(MongoSpec.dbs)(db =>
+        s"checking $db" >>* assertErrors(ResourcePath.root() / ResourceName(db))
+      )
   }
 
-
   "prefixedChildPaths" >> {
-    def assertPrefixed(path: ResourcePath, expected: List[(ResourceName, ResourcePathType)])
-        : IO[Boolean] = {
+    def assertPrefixed(path: ResourcePath, expected: List[(ResourceName, ResourcePathType)]): IO[Boolean] = {
+
       val fStream = for {
         ds <- mkDataSource
         res <- ds.prefixedChildPaths(path)
@@ -121,28 +122,18 @@ class MongoDataSourceSpec extends EffectfulQSpec[IO] {
         db <- Stream.emits(MongoSpec.dbs)
         asserted <- Stream.eval(assertPrefixed(ResourcePath.root() / ResourceName(db), expected))
       } yield asserted
-      stream.fold(true)(_ && _).compile.last.map(_.getOrElse(false))
+      stream.fold(true)(_ && _).compile.lastOrError
     }
-    "nonexistent database children are empty" >>* {
-      val stream: Stream[IO, Boolean] = for {
-        ds <- dsStream
-        db <- Stream.emits(MongoSpec.nonexistentDbs)
-        prefixed <- Stream.eval(ds.prefixedChildPaths(ResourcePath.root() / ResourceName(db)))
-      } yield prefixed.isEmpty
-      stream.map(x => scala.Predef.println(x)).drain
-      stream.fold(true)(_ && _).compile.last.map(_.getOrElse(false))
-    }
-    "there is no children of collections" >>* {
-      val stream: Stream[IO, Boolean] = for {
-        ds <- dsStream
-        col <- MongoSpec.correctCollections ++ MongoSpec.incorrectCollections
-        prefixed <- Stream.eval(ds.prefixedChildPaths(
-          ResourcePath.root() / ResourceName(col.database.name) / ResourceName(col.name)
-        ))
-      } yield prefixed.isEmpty
-      stream.fold(true)(_ && _).compile.last.map(_.getOrElse(false))
-    }
+    "nonexistent database children are empty" >> Fragment.foreach(MongoSpec.incorrectDbs)(db =>
+      s"checking ${db.name}" >>*
+        mkDataSource.flatMap(ds => ds.prefixedChildPaths(pathOfDatabase(db))).map(_.isEmpty)
+    )
 
+    "there is no children of collections" >>
+      Fragment.foreach (MongoSpec.correctCollections ++ MongoSpec.incorrectCollections)(col =>
+        s"checking ${col.database.name} :: ${col.name}" >>*
+          mkDataSource.flatMap(ds => ds.prefixedChildPaths(pathOfCollection(col))).map(_.isEmpty)
+      )
   }
 
   "pathIsResource" >> {
@@ -158,34 +149,19 @@ class MongoDataSourceSpec extends EffectfulQSpec[IO] {
         res <- ds.pathIsResource(ResourcePath.root() / ResourceName(""))
       } yield !res
     }
-    "prefix without contents is not a resource" >>* {
-      val stream = for {
-        ds <- dsStream
-        dbName <- MongoSpec.correctDbs.map(_.name)
-        res <- Stream.eval(ds.pathIsResource(ResourcePath.root() / ResourceName(dbName)))
-      } yield res
-      stream.fold(false)(_ || _).map(!_).compile.last.map(_.getOrElse(false))
-    }
-    "existent collections are resources" >>* {
-      val stream = for {
-        ds <- dsStream
-        col <- MongoSpec.correctCollections
-        res <- Stream.eval(ds.pathIsResource(
-          ResourcePath.root() / ResourceName(col.database.name) / ResourceName(col.name)
-        ))
-      } yield res
-      stream.fold(true)(_ && _).compile.last.map(_.getOrElse(false))
-    }
-    "non-existent collections aren't resources" >>* {
-      val stream = for {
-        ds <- dsStream
-        col <- MongoSpec.incorrectCollections
-        res <- Stream.eval(ds.pathIsResource(
-          ResourcePath.root() / ResourceName(col.database.name) / ResourceName(col.name)
-        ))
-      } yield res
-      stream.fold(false)(_ || _).map(!_).compile.last.map(_.getOrElse(false))
-    }
+    "prefix without contents is not a resource" >> Fragment.foreach(MongoSpec.correctDbs) (db =>
+      s"checking ${db.name}" >>*
+        mkDataSource.flatMap(ds => ds.pathIsResource(pathOfDatabase(db))).map(!_)
+    )
+    "existent collections are resources" >> Fragment.foreach(MongoSpec.correctCollections)(col =>
+      s"checking ${col.database.name} :: ${col.name}" >>*
+        mkDataSource.flatMap(ds => ds.pathIsResource(pathOfCollection(col)))
+    )
+
+    "non-existent collections aren't resources" >> Fragment.foreach(MongoSpec.incorrectCollections)(col =>
+      s"checking ${col.database.name} :: ${col.name}" >>*
+        mkDataSource.flatMap(ds => ds.pathIsResource(pathOfCollection(col))).map(!_)
+    )
   }
 }
 

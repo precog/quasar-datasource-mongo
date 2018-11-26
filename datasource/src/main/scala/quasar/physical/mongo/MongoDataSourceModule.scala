@@ -38,9 +38,9 @@ object MongoDataSourceModule extends LightweightDatasourceModule {
   type DS[F[_]] = Datasource[F, Stream[F, ?], ResourcePath, QueryResult[F]]
   type Result[F[_]] = Disposable[F, DS[F]]
   type Error = InitializationError[Json]
-  type ResultOrError[F[_]] = InitializationError[Json] \/ Result[F]
+  type ErrorOrResult[F[_]] = Error \/ Result[F]
 
-  private def mkError[F[_]](config: Json, msg: String): ResultOrError[F] =
+  private def mkError[F[_]](config: Json, msg: String): ErrorOrResult[F] =
     DatasourceError
       .invalidConfiguration[Json, Error](kind, sanitizeConfig(config), NonEmptyList(msg))
       .left[Result[F]]
@@ -49,7 +49,7 @@ object MongoDataSourceModule extends LightweightDatasourceModule {
   def lightweightDatasource[F[_]: ConcurrentEffect: ContextShift: MonadResourceErr: Timer]
     (config: Json)
     (implicit ec: ExecutionContext)
-    : F[ResultOrError[F]] =
+    : F[ErrorOrResult[F]] =
 
     config.as[MongoConfig].result match {
       case Left((msg, _)) =>

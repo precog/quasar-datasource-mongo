@@ -18,11 +18,13 @@ package quasar.physical.mongo
 
 import slamdata.Predef._
 import quasar.physical.mongo.MongoResource.{Collection, Database}
+import quasar.EffectfulQSpec
 
+import cats.instances.list._
 import cats.syntax.apply._
 import cats.effect.IO
 import fs2.Stream
-import org.specs2.mutable.Specification
+import org.specs2.specification.core._
 import org.specs2.execute.AsResult
 import org.mongodb.scala._
 import org.bson.{Document => _, _}
@@ -30,9 +32,8 @@ import scala.io.Source
 import shims._
 import testImplicits._
 
-class MongoSpec extends Specification {
+class MongoSpec extends EffectfulQSpec[IO] {
   import MongoSpec._
-
 
   step(MongoSpec.setupDB)
 
@@ -50,92 +51,56 @@ class MongoSpec extends Specification {
       databases <- mongo.databases
     } yield databases
     val evaluatedDbs = stream.compile.toList.unsafeRunSync()
-    val expectedDbs = MongoSpec.dbs.map(Database(_))
-    expectedDbs.toSet.subsetOf(evaluatedDbs.toSet)
+    MongoSpec.correctDbs.toSet.subsetOf(evaluatedDbs.toSet)
   }
 
-  "databaseExists returns true for existing dbs" >>  {
-    val stream = for {
-      mongo <- mkMongo
-      db <- MongoSpec.correctDbs
-      exists <- mongo.databaseExists(db)
-    } yield exists
-    stream.fold(true)(_ && _).compile.last.unsafeRunSync().getOrElse(false)
-  }
+  "databaseExists returns true for existing dbs" >> Fragment.foreach(MongoSpec.correctDbs)(db =>
+      s"checking ${db.name}" >>* mkMongo.flatMap(mongo => mongo.databaseExists(db)).compile.lastOrError
+  )
 
-  "databaseExists returns false for non-existing dbs" >> {
-    val stream = for {
-      mongo <- mkMongo
-      db <- MongoSpec.incorrectDbs
-      exists <- mongo.databaseExists(db)
-    } yield exists
-    !stream.fold(false)(_ || _).compile.last.unsafeRunSync().getOrElse(true)
-  }
+  "databaseExists returns false for non-existing dbs" >> Fragment.foreach(MongoSpec.incorrectDbs)(db =>
+    s"checking ${db.name}" >>*
+      mkMongo.flatMap(mongo => mongo.databaseExists(db)).map(!_).compile.lastOrError
+  )
 
-  "collections returns correct collection lists" >> {
-    def checkOneDb(client: Mongo[IO], db: Database): Stream[IO, Boolean] = {
-      client
-        .collections(db)
-        .fold(List[Collection]())((lst, coll) => coll :: lst)
-        .map(collectionList => {
-          collectionList.toSet === MongoSpec.cols.map(c => Collection(db, c)).toSet
-        })
-    }
-    val stream = for {
-      mongo <- mkMongo
-      db <- mongo.databases.filter(db => MongoSpec.dbs.contains(db.name))
-      checked <- checkOneDb(mongo, db)
-    } yield checked
-    stream.fold(true)(_ && _).compile.last.unsafeRunSync().getOrElse(false)
-  }
+  "collections returns correct collection lists" >>
+    Fragment.foreach(MongoSpec.correctDbs)(db =>
+      s"checkgin ${db.name}" >>*
+        mkMongo.flatMap(mongo =>
+          mongo
+            .collections(db)
+            .fold(List[Collection]())((lst, coll) => coll :: lst))
+          .map(collectionList => collectionList.toSet === MongoSpec.cols.map(c => Collection(db, c)).toSet)
+          .compile
+          .lastOrError
+  )
 
-  "collections return error stream for non-existing databases" >> {
-    val stream = for {
-      mongo <- mkMongo
-      db <- MongoSpec.incorrectDbs
-      col <- mongo.collections(db)
-    } yield col
-    stream.compile.toList.unsafeRunSync() === List[Collection]()
-  }
+  "collections return error stream for non-existing databases" >> Fragment.foreach(MongoSpec.incorrectDbs)(db =>
+    s"checking ${db.name}" >>*
+      mkMongo.flatMap(mongo => mongo.collections(db)).compile.toList.map (_ === List[Collection]())
+  )
 
-  "collectionExists returns true for existent collections" >> {
-    val stream = for {
-      mongo <- mkMongo
-      col <- correctCollections
-      exists <- mongo.collectionExists(col)
-    } yield exists
-    stream.fold(true)(_ && _).compile.last.unsafeRunSync().getOrElse(false)
-  }
+  "collectionExists returns true for existent collections" >> Fragment.foreach(MongoSpec.correctCollections)(col =>
+    s"checking ${col.database.name} :: ${col.name}" >>*
+      mkMongo.flatMap(mongo => mongo.collectionExists(col)).compile.lastOrError
+  )
 
-  "collectionExists returns false for non-existent collections" >> {
+  "collectionExists returns false for non-existent collections" >> Fragment.foreach(MongoSpec.incorrectCollections)(col =>
+    s"checking ${col.database.name} :: ${col.name}" >>*
+      mkMongo.flatMap(mongo => mongo.collectionExists(col)).map(!_).compile.lastOrError
+  )
 
-    val stream = for {
-      mongo <- mkMongo
-      col <- incorrectCollections
-      exists <- mongo.collectionExists(col)
-    } yield exists
-
-    !stream.fold(false)(_ || _).compile.last.unsafeRunSync().getOrElse(true)
-  }
-
-  "findAll returns correct results for existing collections" >> {
-    def checkFindAll(client: Mongo[IO], col: Collection): Stream[IO, Boolean] =
-      client.findAll(col).fold(List[BsonValue]())((lst, col) => col :: lst).map(bsons => bsons match {
-        case (bson: BsonDocument) :: List() =>
-          try {
-            bson.getString(col.name).getValue() === col.database.name
-          } catch {
-            case e: Throwable => false
-          }
-        case _ => false
+  "findAll returns correct results for existing collections" >> Fragment.foreach(MongoSpec.correctCollections)(col =>
+    s"checking ${col.database.name} :: ${col.name}" >>*
+      mkMongo.flatMap(mongo =>
+        mongo.findAll(col).fold(List[BsonValue]())((lst, col) => col :: lst))
+      .map(bsons => bsons match {
+        case (bson: BsonDocument) :: List() => AsResult(bson.getString(col.name).getValue() === col.database.name)
+        case _ => AsResult(false)
       })
-    val stream = for {
-      mongo <- mkMongo
-      col <- correctCollections
-      correct <- checkFindAll(mongo, col)
-    } yield correct
-    stream.fold(true)(_ && _).compile.last.unsafeRunSync().getOrElse(false)
-  }
+      .compile
+      .lastOrError
+  )
 
   "findAll returns correct result for nonexisting collections" >> {
     def checkFindAll(client: Mongo[IO], col: Collection): Stream[IO, Boolean] =
@@ -147,13 +112,17 @@ class MongoSpec extends Specification {
           case Left(_) :: List() => true
           case _ => false
         })
-    val stream = for {
-      mongo <- mkMongo
-      col <- incorrectCollections
-      correct <- checkFindAll(mongo, col)
-    } yield correct
-    stream.fold(true)(_ && _).compile.last.unsafeRunSync().getOrElse(false)
+    Fragment.foreach(MongoSpec.incorrectCollections)(col =>
+      s"checking ${col.database.name} :: ${col.name}" >>* {
+        val stream = for {
+          mongo <- mkMongo
+          correct <- checkFindAll(mongo, col)
+        } yield correct
+        stream.compile.lastOrError
+      }
+    )
   }
+
   "raise errors when mongodb is unreachable" >>  {
     val unreachableURI = "mongodb://unreachable"
     Mongo[IO](MongoConfig(unreachableURI)).attempt.compile.last.unsafeRunSync() match {
@@ -177,32 +146,27 @@ object MongoSpec {
   def mkMongo: Stream[IO, Mongo[IO]] =
     Mongo[IO](MongoConfig(connectionString))
 
-  def incorrectCollections: Stream[IO, Collection] = {
+  def incorrectCollections: List[Collection] = {
     val incorrectDbStream =
-      Stream.emits(nonexistentDbs)
+      nonexistentDbs
         .map((dbName: String) => (colName: String) => Collection(Database(dbName), colName))
-        .ap(Stream.emits(cols ++ nonexistentCols))
-        .covary[IO]
+        .ap(cols ++ nonexistentCols)
+
     val incorrectColStream =
-      Stream.emits(nonexistentCols)
+      nonexistentCols
         .map((colName: String) => (dbName: String) => Collection(Database(dbName), colName))
-        .ap(Stream.emits(dbs))
-        .covary[IO]
+        .ap(dbs)
     incorrectDbStream ++ incorrectColStream
   }
 
-  def correctCollections: Stream[IO, Collection] = {
-    Stream.emits(dbs)
-      .map((dbName: String) => (colName: String) => Collection(Database(dbName), colName))
-      .ap(Stream.emits(cols))
-  }
+  def correctCollections: List[Collection] =
+    dbs.map((dbName: String) => (colName: String) => Collection(Database(dbName), colName)).ap(cols)
 
-  def correctDbs: Stream[IO, Database] = {
-    Stream.emits(dbs).map(Database(_))
-  }
-  def incorrectDbs: Stream[IO, Database] = {
-    Stream.emits(nonexistentDbs).map(Database(_))
-  }
+  def correctDbs: List[Database] =
+    dbs.map(Database(_))
+
+  def incorrectDbs: List[Database] =
+    nonexistentDbs.map(Database(_))
 
   def setupDB(): Unit = {
     val stream = for {
