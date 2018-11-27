@@ -28,6 +28,7 @@ import org.specs2.specification.core._
 import testImplicits._
 
 class MongoDataSourceSpec extends EffectfulQSpec[IO] {
+/*
   import MongoDataSourceSpec._
 
   def pathOfDatabase(db: Database) =
@@ -163,11 +164,14 @@ class MongoDataSourceSpec extends EffectfulQSpec[IO] {
         mkDataSource.flatMap(ds => ds.pathIsResource(pathOfCollection(col))).map(!_)
     )
   }
+ */
 }
 
 object MongoDataSourceSpec {
+/*
   def mkDataSource: IO[MongoDataSource[IO]] =
     MongoSpec.mkMongo.compile.lastOrError.flatMap(MongoDataSource[IO](_))
   def dsStream: Stream[IO, MongoDataSource[IO]] =
     MongoSpec.mkMongo.flatMap(client => Stream.eval(MongoDataSource[IO](client)))
+ */
 }

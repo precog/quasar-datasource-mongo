@@ -29,6 +29,7 @@ import scala.concurrent.ExecutionContext
 import argonaut._
 import cats.effect.{ConcurrentEffect, Timer, ContextShift}
 import cats.syntax.applicative._
+import cats.syntax.applicativeError._
 import cats.syntax.functor._
 import fs2.Stream
 import scalaz.{NonEmptyList, \/}
@@ -55,18 +56,12 @@ object MongoDataSourceModule extends LightweightDatasourceModule {
       case Left((msg, _)) =>
         mkError(config, msg).pure[F]
       case Right(mongoConfig) => {
-        Mongo(mongoConfig).attempt.compile.last.map (_ match {
-          case None =>
-            mkError(config, "Incorrect connection string")
-          case Some(Left(e)) =>
-            mkError(config, e.getMessage())
-          case Some(Right(client)) => {
-            val ds: DS[F] = new MongoDataSource(client)
-            Disposable(ds, client.close).right
-          }
-        })
-      }
-    }
+        Mongo(mongoConfig).attempt.map { _ match {
+          case Left(e) => mkError(config, e.getMessage)
+          case Right(disposableClient) =>
+            disposableClient.map(client => (new MongoDataSource(client): DS[F])).right[Error]
+        }}
+    }}
 
   def kind: DatasourceType = MongoDataSource.kind
 

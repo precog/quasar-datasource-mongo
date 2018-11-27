@@ -24,7 +24,6 @@ import quasar.connector.datasource._
 import quasar.physical.mongo.decoder._
 import quasar.physical.mongo.MongoResource.{Database, Collection}
 
-import cats.syntax.eq._
 import cats.syntax.functor._
 import cats.effect._
 import cats.syntax.applicative._
@@ -39,32 +38,33 @@ class MongoDataSource[F[_]: ConcurrentEffect: ContextShift: MonadResourceErr: Ti
   val kind = MongoDataSource.kind
 
   override def evaluate(path: ResourcePath): F[QueryResult[F]] = {
-    val errorStream =
-      Stream.raiseError(ResourceError.throwableP(ResourceError.pathNotFound(path)))
+    val errored =
+      MonadResourceErr.raiseError(ResourceError.pathNotFound(path))
 
-    val stream = path match {
-      case _ if isRoot(path) => errorStream
+    val fStream = path match {
+      case ResourcePath.Root => errored
       case ResourcePath.Leaf(file) => MongoResource.ofFile(file) match {
-        case None => errorStream
-        case Some(Database(_)) => errorStream
+        case None => errored
+        case Some(Database(_)) => errored
         case Some(collection@Collection(_, _)) => mongo.findAll(collection)
       }
     }
-    QueryResult.parsed(qdataDecoder, stream).pure[F]
+    fStream.map(stream => QueryResult.parsed(qdataDecoder, stream))
   }
 
   override def pathIsResource(path: ResourcePath): F[Boolean] = path match {
-    case _ if isRoot(path) => false.pure[F]
+    case ResourcePath.Root => false.pure[F]
     case ResourcePath.Leaf(file) => MongoResource.ofFile(file) match {
       case Some(Database(_)) => false.pure[F]
-      case Some(coll@Collection(_, _)) => mongo.collectionExists(coll).compile.lastOrError
+      case Some(coll@Collection(_, _)) => mongo.collectionExists(coll).compile.last.map(_ getOrElse false)
       case None => false.pure[F]
     }
   }
 
   override def prefixedChildPaths(prefixPath: ResourcePath)
     : F[Option[Stream[F, (ResourceName, ResourcePathType)]]] = prefixPath match {
-    case _ if isRoot(prefixPath) =>
+
+    case ResourcePath.Root =>
       mongo.databases.map(x => (ResourceName(x.name), ResourcePathType.prefix)).some.pure[F]
 
     case ResourcePath.Leaf(file) => MongoResource.ofFile(file) match {
@@ -83,13 +83,8 @@ class MongoDataSource[F[_]: ConcurrentEffect: ContextShift: MonadResourceErr: Ti
       }
     }
   }
-  private def isRoot(inp: ResourcePath): Boolean =
-    inp === (ResourcePath.root() / ResourceName("")) || inp === ResourcePath.root()
 }
 
 object MongoDataSource {
   val kind: DatasourceType = DatasourceType("mongo", 1L)
-
-  def apply[F[_]: ConcurrentEffect: ContextShift: MonadResourceErr: Timer](mongo: Mongo[F])
-    : F[MongoDataSource[F]] = ConcurrentEffect[F].delay(new MongoDataSource[F](mongo))
 }

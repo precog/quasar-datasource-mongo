@@ -33,6 +33,7 @@ import shims._
 import testImplicits._
 
 class MongoSpec extends EffectfulQSpec[IO] {
+/*
   import MongoSpec._
 
   step(MongoSpec.setupDB)
@@ -131,6 +132,7 @@ class MongoSpec extends EffectfulQSpec[IO] {
       case Some(Right(_)) => AsResult(false).updateMessage("Mongo.apply.attempt worked for incorrect connection string")
     }
   }
+ */
 }
 
 object MongoSpec {

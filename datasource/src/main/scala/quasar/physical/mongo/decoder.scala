@@ -23,6 +23,7 @@ import quasar.contrib.std.errorImpossible
 
 import java.time._
 import java.util.{Map, Iterator}
+import scala.collection.JavaConverters._
 
 import eu.timepit.refined.auto._
 import org.bson._
@@ -38,11 +39,11 @@ object decoder {
     var entry: Option[Map.Entry[String, BsonValue]] = None
 
     def hasNext(): Boolean = {
-      try {
+      if (iterator.hasNext()) {
         entry = Some(iterator.next())
         true
-      } catch {
-        case _: Throwable => false
+      } else {
+        false
       }
     }
 
@@ -64,19 +65,19 @@ object decoder {
       case BsonType.DOUBLE => QDouble
       case BsonType.DECIMAL128 => QReal
       case BsonType.BOOLEAN => QBoolean
-      case BsonType.OBJECT_ID => QString
-      case BsonType.DB_POINTER => QString
-      case BsonType.BINARY => QString
+      case BsonType.OBJECT_ID => QMeta
+      case BsonType.DB_POINTER => QMeta
+      case BsonType.BINARY => QMeta
       case BsonType.DATE_TIME => QOffsetDateTime
-      case BsonType.SYMBOL => QString
-      case BsonType.REGULAR_EXPRESSION => QString
-      case BsonType.JAVASCRIPT => QString
+      case BsonType.SYMBOL => QMeta
+      case BsonType.REGULAR_EXPRESSION => QMeta
+      case BsonType.JAVASCRIPT => QMeta
       case BsonType.NULL => QNull
-      case BsonType.TIMESTAMP => QOffsetDateTime
+      case BsonType.TIMESTAMP => QMeta
       case BsonType.UNDEFINED => QNull
-      case BsonType.JAVASCRIPT_WITH_SCOPE => QString
-      case BsonType.MAX_KEY => QString
-      case BsonType.MIN_KEY => QString
+      case BsonType.JAVASCRIPT_WITH_SCOPE => QMeta
+      case BsonType.MAX_KEY => QMeta
+      case BsonType.MIN_KEY => QMeta
       case BsonType.END_OF_DOCUMENT => QNull
     }
 
@@ -120,34 +121,55 @@ object decoder {
     }
     override def getString(bson: BsonValue): String = bson match {
       case str: BsonString => str.getValue()
-      case objId: BsonObjectId => objId.getValue().toHexString()
-      case pointer: BsonDbPointer => {
-        pointer.getNamespace() ++ ":" ++ pointer.getId().toHexString()
-      }
-      case binary: BsonBinary => new String(binary.getData())
-      case symbol: BsonSymbol => symbol.getSymbol()
-      case regexp: BsonRegularExpression => regexp.getPattern()
-      case js: BsonJavaScript => js.getCode()
-      case maxKey: BsonMaxKey => maxKey.toString()
-      case minKey: BsonMinKey => minKey.toString()
-      case jsWithScope: BsonJavaScriptWithScope => jsWithScope.getCode()
     }
-
     override def getOffsetDateTime(bson: BsonValue): OffsetDateTime = bson match {
-      case ts: BsonTimestamp => {
-        Instant.ofEpochSecond(ts.getTime().longValue).atOffset(ZoneOffset.UTC)
-      }
       case date: BsonDateTime => {
         Instant.ofEpochMilli(date.getValue()).atOffset(ZoneOffset.UTC)
       }
+    }
+
+    override def getMetaMeta(bson: BsonValue): BsonValue = bson match {
+      case _: BsonObjectId => new BsonDocument("type", new BsonString("mongo:objectId"))
+      case dbPointer: BsonDbPointer => new BsonDocument(List(
+        new BsonElement("type", new BsonString("mongo:dbPointer")),
+        new BsonElement("namespace",  new BsonString(dbPointer.getNamespace())),
+      ).asJava)
+      case _: BsonBinary => new BsonDocument("type", new BsonString("mongo:binary"))
+      case _: BsonSymbol => new BsonDocument("type", new BsonString("mongo:symbol"))
+      case regex: BsonRegularExpression => new BsonDocument(List(
+        new BsonElement("type", new BsonString("mongo:regex")),
+        new BsonElement("options", new BsonString(regex.getOptions()))
+      ).asJava)
+      case _: BsonJavaScript => new BsonDocument("type", new BsonString("mongo:javascript"))
+      case ts: BsonTimestamp => new BsonDocument(List(
+        new BsonElement("type", new BsonString("mongo:timestamp")),
+        new BsonElement("inc", new BsonInt32(ts.getInc()))
+      ).asJava)
+      case js: BsonJavaScriptWithScope => new BsonDocument(List(
+        new BsonElement("type", new BsonString("mongo:javascriptWithScope")),
+        new BsonElement("scope", js.getScope())
+      ).asJava)
+      case _: BsonMaxKey => new BsonDocument("type", new BsonString("mongo:maxKey"))
+      case _: BsonMinKey => new BsonDocument("type", new BsonString("mongo:minKey"))
+    }
+
+    override def getMetaValue(bson: BsonValue): BsonValue = bson match {
+      case objId: BsonObjectId => new BsonString(objId.getValue().toHexString())
+      case dbPointer: BsonDbPointer => new BsonString(dbPointer.getId().toHexString())
+      case binary: BsonBinary => new BsonString(new String(binary.getData()))
+      case symbol: BsonSymbol => new BsonString(symbol.getSymbol())
+      case regex: BsonRegularExpression => new BsonString(regex.getPattern())
+      case js: BsonJavaScript => new BsonString(js.getCode())
+      case ts: BsonTimestamp => new BsonDateTime(ts.getTime() * 1000L)
+      case js: BsonJavaScriptWithScope => new BsonString(js.getCode())
+      case maxKey: BsonMaxKey => new BsonString("maxKey")
+      case minKey: BsonMinKey => new BsonString("minKey")
     }
 
     override def getInterval(a: BsonValue) = errorImpossible
     override def getLocalDate(a: BsonValue) = errorImpossible
     override def getLocalDateTime(a: BsonValue) = errorImpossible
     override def getLocalTime(a: BsonValue) = errorImpossible
-    override def getMetaMeta(a: BsonValue) = errorImpossible
-    override def getMetaValue(a: BsonValue) = errorImpossible
     override def getOffsetDate(a: BsonValue) = errorImpossible
     override def getOffsetTime(a: BsonValue) = errorImpossible
   }

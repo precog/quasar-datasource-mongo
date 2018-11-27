@@ -17,12 +17,18 @@
 package quasar.physical.mongo
 
 import slamdata.Predef._
-import quasar.api.resource.{ResourceName, ResourcePath}
+
+import quasar.Disposable
 import quasar.connector.{MonadResourceErr, ResourceError}
 import quasar.physical.mongo.MongoResource.{Database, Collection}
 
+import monocle.Prism
 import cats.effect.{ConcurrentEffect, IO}
+import cats.syntax.functor._
+import cats.syntax.flatMap._
+import cats.syntax.applicative._
 import cats.syntax.eq._
+
 import fs2.Stream
 import fs2.concurrent._
 import org.bson.{Document => _, _}
@@ -49,49 +55,117 @@ class Mongo[F[_]: MonadResourceErr : ConcurrentEffect] private[Mongo](client: Mo
   def collectionExists(collection: Collection): Stream[F, Boolean] =
     collections(collection.database).exists(_ === collection)
 
-  def findAll(collection: Collection): Stream[F, BsonValue] = for {
-    colExists <- collectionExists(collection)
-    res <- if (colExists) {
-      observableAsStream(
-        client.getDatabase(collection.database.name).getCollection(collection.name).find[BsonValue]()
-      )
-    } else {
-      Stream.raiseError(
-        ResourceError.throwableP(
-          ResourceError.pathNotFound(
-            ResourcePath.root() / ResourceName(collection.database.name) / ResourceName(collection.name)
-          )
-        )
-      )
-    }
-  } yield res
+  def findAll(collection: Collection): F[Stream[F, BsonValue]] = {
+    def getCollection(mongo: MongoClient) =
+      mongo.getDatabase(collection.database.name).getCollection(collection.name)
 
-  def close: F[Unit] = F.delay(client.close())
-
+    collectionExists(collection).compile.last.map(_ getOrElse false)
+      .flatMap(exists =>
+        if (exists) {
+          observableAsStream(getCollection(client).find[BsonValue]()).pure[F]
+        } else {
+          MonadResourceErr.raiseError(ResourceError.pathNotFound(collection.resourcePath))
+        })
+  }
 }
+
 object Mongo {
+
+  sealed trait FromObservable[+A]
+
+  object FromObservable {
+    final case class Next[A](result: A) extends FromObservable[A]
+    final case class Subscribe(subscription: Subscription) extends FromObservable[Nothing]
+    final case class Error(throwable: Throwable) extends FromObservable[Nothing]
+
+    def subscribeP[A]: Prism[FromObservable[A], Subscription] =
+      Prism.partial[FromObservable[A], Subscription]{
+        case Subscribe(s) => s
+      }(Subscribe(_))
+
+    def eraseSubscription[A](from: FromObservable[A]): Option[Either[Throwable, A]] = from match {
+      case Next(result) => Some(Right(result))
+      case Subscribe(_) => None
+      case Error(e) => Some(Left(e))
+    }
+  }
+  import FromObservable._
+
+
+  def unsubscribe(sub: Option[Subscription]): Unit = sub.map { x =>
+    if (!x.isUnsubscribed()) {
+      x.unsubscribe()
+    }
+  } getOrElse (())
+
   def observableAsStream[F[_], A](obs: Observable[A])(implicit F: ConcurrentEffect[F]): Stream[F, A] = {
-    def handler(cb: Either[Throwable, Option[A]] => Unit): Unit = {
+    @SuppressWarnings(Array("org.wartremover.warts.Var"))
+    def handler(cb: Option[FromObservable[A]] => Unit): Unit = {
       obs.subscribe(new Observer[A] {
-        override def onNext(result: A): Unit = cb(Right(Some(result)))
-        override def onError(e: Throwable): Unit = cb(Left(e))
-        override def onComplete(): Unit = cb(Right(None))
+        private var subscription: Option[Subscription] = None
+
+        override def onSubscribe(sub: Subscription): Unit = {
+          subscription = Some(sub)
+          sub.request(1L)
+          cb(Some(Subscribe(sub)))
+        }
+        override def onNext(result: A): Unit = {
+          subscription.map(_.request(1L)) getOrElse (())
+          cb(Some(Next(result)))
+        }
+        override def onError(e: Throwable): Unit = {
+          unsubscribe(subscription)
+          cb(Some(Error(e)))
+        }
+        override def onComplete(): Unit = {
+          unsubscribe(subscription)
+          cb(None)
+        }
       })
     }
+
+    def mkQueue: Stream[F, NoneTerminatedQueue[F, FromObservable[A]]] =
+      Stream.eval(Queue.boundedNoneTerminated[F, FromObservable[A]](32))
+
+    def enqueueObservable(q: NoneTerminatedQueue[F, FromObservable[A]]): Stream[F, Unit] =
+      Stream.eval { F.delay(handler( r => F.runAsync(q.enqueue1(r))(_ => IO.unit).unsafeRunSync)) }
+
+    def getSubscription(q: NoneTerminatedQueue[F, FromObservable[A]]): Stream[F, Option[Subscription]] =
+      q.dequeue.take(1).map(x => subscribeP.getOption(x))
+
+    def actualData(q: NoneTerminatedQueue[F, FromObservable[A]]): Stream[F, A] =
+      q.dequeue.drop(1).map(eraseSubscription(_)).unNoneTerminate.rethrow
+
     for {
-      q <- Stream.eval(Queue.unbounded[F, Either[Throwable, Option[A]]])
-      _ <- Stream.eval { F.delay(handler(r => F.runAsync(q.enqueue1(r))(_ => IO.unit).unsafeRunSync)) }
-      res <- q.dequeue.rethrow.unNoneTerminate
+      q <- mkQueue
+      _ <- enqueueObservable(q)
+      sub <- getSubscription(q)
+      res <- actualData(q).onFinalize(F.delay(unsubscribe(sub)))
     } yield res
   }
 
-  def apply[F[_]: ConcurrentEffect: MonadResourceErr](config: MongoConfig): Stream[F, Mongo[F]] = {
-    Stream.eval(ConcurrentEffect[F].delay(MongoClient(config.connectionString))).flatMap(client => {
-      observableAsStream(
+  def apply[F[_]: ConcurrentEffect: MonadResourceErr](config: MongoConfig)
+      : F[Disposable[F, Mongo[F]]] = {
+    val mkClient: F[MongoClient] =
+      ConcurrentEffect[F].delay(MongoClient(config.connectionString))
+
+    def runCommand(client: MongoClient): F[Unit] =
+      ConcurrentEffect[F].async { cb: (Either[Throwable, Unit] => Unit) =>
         client
           .getDatabase("admin")
-          .runCommand[Document](Document("ping" -> 1)))
-        .map(_ => new Mongo(client))
-    })
+          .runCommand[Document](Document("ping" -> 1))
+          .subscribe(new Observer[Document] {
+            override def onNext(r: Document): Unit = ()
+            override def onError(e: Throwable): Unit = cb(Left(e))
+            override def onComplete() = cb(Right(()))
+          })
+      }
+    def close(client: MongoClient): F[Unit] =
+      ConcurrentEffect[F].delay(client.close())
+
+    for {
+      client <- mkClient
+      _ <- runCommand(client)
+    } yield Disposable(new Mongo[F](client), close(client))
   }
 }

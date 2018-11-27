@@ -20,6 +20,7 @@ import slamdata.Predef._
 import quasar.physical.mongo.decoder.qdataDecoder
 import qdata.QType._
 
+import cats.effect.IO
 import java.time._
 import scala.collection.JavaConverters._
 
@@ -28,8 +29,23 @@ import org.bson._
 import org.bson.types.{Decimal128, ObjectId}
 import org.specs2.mutable.Specification
 import spire.math.Real
+import fs2.Stream
+import testImplicits._
 
 class DecodeSpec extends Specification {
+  "foo" >> {
+    Stream.emits(List(1, 2, 3, 4))
+      .onFinalize(IO.delay(scala.Predef.println("FINISH")))
+      .take(2)
+      .map(x => scala.Predef.println(x))
+      .compile
+      .toList
+      .unsafeRunSync()
+
+    true
+
+  }
+/*
   "decoder decodes bsons with correct types" >> {
     List(
       qdataDecoder.tpe(new BsonNull()) ==== QNull,
@@ -162,4 +178,5 @@ class DecodeSpec extends Specification {
     val cursor5 = qdataDecoder.stepObject(cursor4)
     qdataDecoder.hasNextObject(cursor5) must beFalse
   }
+ */
 }

@@ -17,6 +17,7 @@
 package quasar.physical.mongo
 
 import slamdata.Predef._
+import quasar.api.resource.{ResourceName, ResourcePath}
 import quasar.contrib.pathy.AFile
 
 import cats.kernel.Eq
@@ -24,11 +25,19 @@ import cats.syntax.option._
 import pathy.Path
 import scalaz.{\/, -\/, \/-}
 
-sealed trait MongoResource
+sealed trait MongoResource {
+  def resourcePath: ResourcePath
+}
 
 object MongoResource {
-  final case class Database(name: String) extends MongoResource
-  final case class Collection(database: Database, name: String) extends MongoResource
+  final case class Database(name: String) extends MongoResource {
+    override def resourcePath: ResourcePath =
+      ResourcePath.root() / ResourceName(name)
+  }
+  final case class Collection(database: Database, name: String) extends MongoResource {
+    override def resourcePath: ResourcePath =
+      database.resourcePath / ResourceName(name)
+  }
 
   implicit val eqMongoResource: Eq[MongoResource] = Eq.fromUniversalEquals
   implicit val eqCollection: Eq[Collection] = Eq.fromUniversalEquals
@@ -46,6 +55,8 @@ object MongoResource {
       case None => none
     }
   }
+
+
   private def printName(p: Path.DirName \/ Path.FileName): String = p match {
     case \/-(Path.FileName(n)) => n
     case -\/(Path.DirName(n)) => n
