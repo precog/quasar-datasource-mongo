@@ -25,7 +25,6 @@ import cats.effect.IO
 import shims._
 
 class MongoDataSourceModuleSpec extends EffectfulQSpec[IO] {
-/*
   "Using incorrect config leads to Left error" >>* {
     val config = Json.obj("foo" -> Json.jString("bar"))
     MongoDataSourceModule.lightweightDatasource[IO](config).map (_.asCats must beLeft)
@@ -38,5 +37,4 @@ class MongoDataSourceModuleSpec extends EffectfulQSpec[IO] {
     val config = MongoConfig("mongodb://unreachable").asJson
     MongoDataSourceModule.lightweightDatasource[IO](config).map (_.asCats must beLeft)
   }
- */
 }

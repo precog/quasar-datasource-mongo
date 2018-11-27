@@ -33,42 +33,29 @@ import fs2.Stream
 import testImplicits._
 
 class DecodeSpec extends Specification {
-  "foo" >> {
-    Stream.emits(List(1, 2, 3, 4))
-      .onFinalize(IO.delay(scala.Predef.println("FINISH")))
-      .take(2)
-      .map(x => scala.Predef.println(x))
-      .compile
-      .toList
-      .unsafeRunSync()
-
-    true
-
-  }
-/*
   "decoder decodes bsons with correct types" >> {
     List(
       qdataDecoder.tpe(new BsonNull()) ==== QNull,
       qdataDecoder.tpe(new BsonInt64(1L)) === QLong,
       qdataDecoder.tpe(new BsonInt32(12)) ===  QLong,
-      qdataDecoder.tpe(new BsonSymbol("symbol")) === QString,
+      qdataDecoder.tpe(new BsonSymbol("symbol")) === QMeta,
       qdataDecoder.tpe(new BsonDouble(1.2)) === QDouble,
       qdataDecoder.tpe(new BsonString("string")) === QString,
-      qdataDecoder.tpe(new BsonBinary(Array[Byte]())) === QString,
-      qdataDecoder.tpe(new BsonMinKey()) === QString,
-      qdataDecoder.tpe(new BsonMaxKey()) === QString,
+      qdataDecoder.tpe(new BsonBinary(Array[Byte]())) === QMeta,
+      qdataDecoder.tpe(new BsonMinKey()) === QMeta,
+      qdataDecoder.tpe(new BsonMaxKey()) === QMeta,
       qdataDecoder.tpe(new BsonBoolean(true)) === QBoolean,
-      qdataDecoder.tpe(new BsonObjectId()) === QString,
+      qdataDecoder.tpe(new BsonObjectId()) === QMeta,
       qdataDecoder.tpe(new BsonDateTime(1000)) === QOffsetDateTime,
       qdataDecoder.tpe(new BsonDocument()) === QObject,
       qdataDecoder.tpe(new BsonArray()) === QArray,
-      qdataDecoder.tpe(new BsonDbPointer("db", new ObjectId())) === QString,
-      qdataDecoder.tpe(new BsonTimestamp(112L)) === QOffsetDateTime,
+      qdataDecoder.tpe(new BsonDbPointer("db", new ObjectId())) === QMeta,
+      qdataDecoder.tpe(new BsonTimestamp(112L)) === QMeta,
       qdataDecoder.tpe(new BsonUndefined()) === QNull,
       qdataDecoder.tpe(new BsonDecimal128(new Decimal128(112L))) === QReal,
-      qdataDecoder.tpe(new BsonJavaScript("val a = undefined")) === QString,
-      qdataDecoder.tpe(new BsonRegularExpression("*")) === QString,
-      qdataDecoder.tpe(new BsonJavaScriptWithScope("val a = undefined", new BsonDocument())) === QString,
+      qdataDecoder.tpe(new BsonJavaScript("val a = undefined")) === QMeta,
+      qdataDecoder.tpe(new BsonRegularExpression("*")) === QMeta,
+      qdataDecoder.tpe(new BsonJavaScriptWithScope("val a = undefined", new BsonDocument())) === QMeta,
     ).forall(x => x)
   }
   "QLong values are correct" >> {
@@ -100,21 +87,12 @@ class DecodeSpec extends Specification {
     List(
       qdataDecoder.getOffsetDateTime(new BsonDateTime(123)) ===
         Instant.ofEpochMilli(123).atOffset(ZoneOffset.UTC),
-      qdataDecoder.getOffsetDateTime(new BsonTimestamp(123456, 0)) ===
-        Instant.ofEpochSecond(123456).atOffset(ZoneOffset.UTC)
     ).forall(x => x)
   }
   "QString values are correct" >> {
-    val objId = new ObjectId()
-    val hexString: String = objId.toHexString()
     List(
-      qdataDecoder.getString(new BsonSymbol("symbol")) === "symbol",
-      qdataDecoder.getString(new BsonBinary("случайная строка".getBytes())) === "случайная строка",
-      qdataDecoder.getString(new BsonObjectId(objId)) === hexString,
-      qdataDecoder.getString(new BsonDbPointer("name", objId)) === ("name:" ++ hexString).toString,
-      qdataDecoder.getString(new BsonJavaScript("undefined")) === "undefined",
-      qdataDecoder.getString(new BsonRegularExpression(".+")) === ".+",
-      qdataDecoder.getString(new BsonJavaScriptWithScope("undefined", new BsonDocument())) === "undefined"
+      qdataDecoder.getString(new BsonString("foo")) == "foo",
+      qdataDecoder.getString(new BsonString("bar")) == "bar"
     ).forall(x => x)
   }
   "QArray works for empty arrays" >> {
@@ -178,5 +156,4 @@ class DecodeSpec extends Specification {
     val cursor5 = qdataDecoder.stepObject(cursor4)
     qdataDecoder.hasNextObject(cursor5) must beFalse
   }
- */
 }
