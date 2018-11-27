@@ -101,7 +101,7 @@ object Mongo {
   def observableAsStream[F[_]: ConcurrentEffect, A](obs: Observable[A]): Stream[F, A] = {
     val F = ConcurrentEffect[F]
     @SuppressWarnings(Array("org.wartremover.warts.Var"))
-    def handler(cb: Option[FromObservable[A]] => Unit): Unit = {
+    def handler(cb: Option[FromObservable[F[A]]] => Unit): Unit = {
       obs.subscribe(new Observer[A] {
         private var subscription: Option[Subscription] = None
 
@@ -111,8 +111,7 @@ object Mongo {
           cb(Some(Subscribe(sub)))
         }
         override def onNext(result: A): Unit = {
-          cb(Some(Next(result)))
-          subscription.map(_.request(1L)) getOrElse (())
+          cb(Some(Next(F.delay(subscription.map(_.request(1L)) getOrElse (())).as(result))))
         }
         override def onError(e: Throwable): Unit = cb(Some(Error(e)))
         override def onComplete(): Unit = cb(None)
@@ -120,7 +119,7 @@ object Mongo {
       })
     }
     def enqueueObservable(
-      obsQ: NoneTerminatedQueue[F, Either[Throwable, A]],
+      obsQ: NoneTerminatedQueue[F, Either[Throwable, F[A]]],
       subQ: NoneTerminatedQueue[F, Subscription]): Stream[F, Unit] =
 
     Stream.eval(F.delay(handler {inp =>
@@ -132,13 +131,13 @@ object Mongo {
         case None => run(obsQ.enqueue1(None))
       }}))
 
-    for {
-      obsQ <- Stream.eval(Queue.boundedNoneTerminated[F, Either[Throwable, A]](32))
+    (for {
+      obsQ <- Stream.eval(Queue.boundedNoneTerminated[F, Either[Throwable, F[A]]](32))
       subQ <- Stream.eval(Queue.boundedNoneTerminated[F, Subscription](1))
       _ <- enqueueObservable(obsQ, subQ)
       sub <- subQ.dequeue.take(1)
       res <- obsQ.dequeue.rethrow.onFinalize(F.delay(sub.unsubscribe))
-    } yield res
+    } yield Stream.eval(res)).flatten
   }
 
   def singleObservableAsF[F[_]: Async, A](obs: SingleObservable[A]): F[A] =
