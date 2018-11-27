@@ -24,6 +24,7 @@ import quasar.physical.mongo.MongoResource.{Database, Collection}
 
 import monocle.Prism
 import cats.effect.{ConcurrentEffect, Async, IO}
+import cats.effect.concurrent.MVar
 import cats.syntax.functor._
 import cats.syntax.flatMap._
 import cats.syntax.applicative._
@@ -120,12 +121,12 @@ object Mongo {
     }
     def enqueueObservable(
       obsQ: NoneTerminatedQueue[F, Either[Throwable, F[A]]],
-      subQ: NoneTerminatedQueue[F, Subscription]): Stream[F, Unit] =
+      subVar: MVar[F, Subscription]): Stream[F, Unit] =
 
     Stream.eval(F.delay(handler {inp =>
       def run(action: F[Unit]): Unit = F.runAsync(action)(_ => IO.unit).unsafeRunSync
       inp match {
-        case Some(Subscribe(sub)) => run(subQ.enqueue1(Some(sub)))
+        case Some(Subscribe(sub)) => run(subVar.put(sub))
         case Some(Error(e)) => run(obsQ.enqueue1(Some(Left(e))))
         case Some(Next(a)) => run(obsQ.enqueue1(Some(Right(a))))
         case None => run(obsQ.enqueue1(None))
@@ -133,9 +134,9 @@ object Mongo {
 
     (for {
       obsQ <- Stream.eval(Queue.boundedNoneTerminated[F, Either[Throwable, F[A]]](32))
-      subQ <- Stream.eval(Queue.boundedNoneTerminated[F, Subscription](1))
-      _ <- enqueueObservable(obsQ, subQ)
-      sub <- subQ.dequeue.take(1)
+      subVar <- Stream.eval(MVar[F].empty[Subscription])
+      _ <- enqueueObservable(obsQ, subVar)
+      sub <- Stream.eval(subVar.take)
       res <- obsQ.dequeue.rethrow.onFinalize(F.delay(sub.unsubscribe))
     } yield Stream.eval(res)).flatten
   }
