@@ -16,12 +16,13 @@
 
 package quasar.physical.mongo
 
+import cats.effect.{IO, Timer, ContextShift}
+
 import quasar.connector.ResourceError
 import quasar.contrib.scalaz.MonadError_
 
 import scala.concurrent.ExecutionContext
 
-import cats.effect.{IO, Timer, ContextShift}
 import shims._
 
 object testImplicits {

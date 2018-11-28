@@ -17,12 +17,15 @@
 package quasar.physical.mongo
 
 import slamdata.Predef._
-import quasar.api.resource.{ResourceName, ResourcePath}
-import quasar.contrib.pathy.AFile
 
 import cats.kernel.Eq
 import cats.syntax.option._
+
 import pathy.Path
+
+import quasar.api.resource.{ResourceName, ResourcePath}
+import quasar.contrib.pathy.AFile
+
 import scalaz.{\/, -\/, \/-}
 
 sealed trait MongoResource {

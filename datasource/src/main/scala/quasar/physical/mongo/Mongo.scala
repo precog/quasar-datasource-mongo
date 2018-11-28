@@ -18,20 +18,22 @@ package quasar.physical.mongo
 
 import slamdata.Predef._
 
-import quasar.Disposable
-import quasar.connector.{MonadResourceErr, ResourceError}
-import quasar.physical.mongo.MongoResource.{Database, Collection}
-
-import monocle.Prism
 import cats.effect.{ConcurrentEffect, Async, IO}
 import cats.effect.concurrent.MVar
-import cats.syntax.functor._
-import cats.syntax.flatMap._
 import cats.syntax.applicative._
 import cats.syntax.eq._
+import cats.syntax.flatMap._
+import cats.syntax.functor._
 
+import fs2.concurrent.{Queue, NoneTerminatedQueue}
 import fs2.Stream
-import fs2.concurrent._
+
+import quasar.connector.{MonadResourceErr, ResourceError}
+import quasar.physical.mongo.MongoResource.{Database, Collection}
+import quasar.Disposable
+
+import monocle.Prism
+
 import org.bson.{Document => _, _}
 import org.mongodb.scala._
 

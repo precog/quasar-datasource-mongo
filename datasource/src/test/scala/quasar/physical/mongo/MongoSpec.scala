@@ -17,20 +17,22 @@
 package quasar.physical.mongo
 
 import slamdata.Predef._
+
+import cats.effect.IO
+import cats.instances.list._
+import cats.syntax.apply._
+import cats.syntax.traverse._
+
 import quasar.physical.mongo.MongoResource.{Collection, Database}
 import quasar.{EffectfulQSpec, Disposable}
 
-import cats.instances.list._
-import cats.syntax.apply._
-import cats.effect.IO
-import cats.syntax.traverse._
-import fs2.Stream
+import org.bson.{Document => _, _}
+import org.mongodb.scala.{MongoClient, Completed, Document}
 import org.specs2.specification.core._
 import org.specs2.execute.AsResult
-import org.specs2.matcher._
-import org.mongodb.scala._
-import org.bson.{Document => _, _}
+
 import scala.io.Source
+
 import shims._
 import testImplicits._
 

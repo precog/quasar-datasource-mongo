@@ -17,22 +17,23 @@
 package quasar.physical.mongo
 
 import slamdata.Predef._
-import quasar.physical.mongo.decoder.qdataDecoder
-import qdata.QType, QType._
 
-import java.time._
-import scala.collection.JavaConverters._
+import java.time.{Instant, ZoneOffset}
 
-import eu.timepit.refined.auto._
 import org.bson._
 import org.bson.types.{Decimal128, ObjectId}
 import org.specs2.mutable.Specification
 import org.specs2.specification.core._
-import org.specs2.execute.AsResult
-import org.specs2.matcher._
+
+import qdata.QType, QType._
+
+import scala.collection.JavaConverters._
+
 import spire.math.Real
 
 class DecodeSpec extends Specification {
+  import decoder.qdataDecoder
+
   "decoder decodes bsons with correct types" >> {
     val large = new Decimal128((BigDecimal.decimal(Double.MaxValue) * BigDecimal.decimal(12.23)).bigDecimal)
     val tiny = new Decimal128((BigDecimal.decimal(Double.MinPositiveValue) * BigDecimal.decimal(0.0000001)).bigDecimal)

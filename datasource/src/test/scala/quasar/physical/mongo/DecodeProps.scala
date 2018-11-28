@@ -18,22 +18,20 @@ package quasar.physical.mongo
 
 import slamdata.Predef._
 
-import qdata.QType, QType._
-
 import org.bson._
 import org.bson.types.{Decimal128, ObjectId}
+import org.specs2.execute.{AsResult, Result}
 import org.specs2.mutable.Specification
 import org.specs2.ScalaCheck
-//import org.specs2.specification.core._
-import org.specs2.execute.Result
-import org.specs2.execute.AsResult
-//import org.specs2.matcher._
-import scala.collection.JavaConverters._
 
-import decoder.qdataDecoder
+import qdata.QType, QType._
+
+import scala.collection.JavaConverters._
 
 class DecodeProps extends Specification with ScalaCheck {
   import BsonValueGen._
+  import decoder.qdataDecoder
+
   "every BsonValue have qtype" >> prop { bsonValue: BsonValue =>
     qdataDecoder.tpe(bsonValue) must not(throwA[Throwable])
   }.set(minTestsOk = 1000)

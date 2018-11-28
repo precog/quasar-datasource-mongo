@@ -17,19 +17,23 @@
 package quasar.physical.mongo
 
 import slamdata.Predef._
-import quasar.api.datasource.DatasourceType
-import quasar.api.resource._
-import quasar.connector.{MonadResourceErr, QueryResult, ResourceError}
-import quasar.connector.datasource._
-import quasar.physical.mongo.decoder._
-import quasar.physical.mongo.MongoResource.{Database, Collection}
 
-import cats.syntax.functor._
 import cats.effect._
 import cats.syntax.applicative._
+import cats.syntax.functor._
 import cats.syntax.option._
+
 import eu.timepit.refined.auto._
+
 import fs2.Stream
+
+import quasar.api.datasource.DatasourceType
+import quasar.api.resource.{ResourcePath, ResourceName, ResourcePathType}
+import quasar.connector.{MonadResourceErr, QueryResult, ResourceError}
+import quasar.connector.datasource.LightweightDatasource
+import quasar.physical.mongo.decoder.qdataDecoder
+import quasar.physical.mongo.MongoResource.{Database, Collection}
+
 import shims._
 
 class MongoDataSource[F[_]: ConcurrentEffect: ContextShift: MonadResourceErr: Timer](mongo: Mongo[F])

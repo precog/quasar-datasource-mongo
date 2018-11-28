@@ -17,20 +17,22 @@
 package quasar.physical.mongo
 
 import slamdata.Predef._
-import qdata._
-import qdata.QType._
-import quasar.contrib.std.errorImpossible
 
 import java.lang.ArithmeticException
-import java.time._
+import java.math.{BigDecimal => JDecimal}
+import java.time.{Instant, OffsetDateTime, ZoneOffset}
 import java.util.{Map, Iterator}
-import scala.collection.JavaConverters._
 
-import eu.timepit.refined.auto._
 import org.bson._
 import org.bson.types.Decimal128
+
+import qdata.{QType, QDataDecode}, QType._
+
+import quasar.contrib.std.errorImpossible
+
+import scala.collection.JavaConverters._
+
 import spire.math.Real
-import java.math.{BigDecimal => JDecimal}
 
 object decoder {
   @SuppressWarnings(Array("org.wartremover.warts.Var"))

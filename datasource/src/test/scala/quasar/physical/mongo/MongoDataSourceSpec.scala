@@ -17,15 +17,18 @@
 package quasar.physical.mongo
 
 import slamdata.Predef._
-import quasar.api.resource.{ResourceName, ResourcePath, ResourcePathType}
-import quasar.physical.mongo.MongoResource.Collection
-import quasar.EffectfulQSpec
-import quasar.Disposable
 
 import cats.effect.IO
+
 import fs2.Stream
+
 import org.bson._
 import org.specs2.specification.core._
+
+import quasar.api.resource.{ResourceName, ResourcePath, ResourcePathType}
+import quasar.physical.mongo.MongoResource.Collection
+import quasar.{EffectfulQSpec, Disposable}
+
 import shims._
 import testImplicits._
 

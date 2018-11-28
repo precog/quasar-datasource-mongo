@@ -19,9 +19,9 @@ package quasar.physical.mongo
 import slamdata.Predef._
 
 import argonaut._, argonaut.Argonaut._
-import argonaut.Json
-import org.specs2.mutable.Specification
+
 import org.specs2.ScalaCheck
+import org.specs2.mutable.Specification
 
 class MongoConfigSpec extends Specification with ScalaCheck {
   "works for mongodb protocol" >> {
