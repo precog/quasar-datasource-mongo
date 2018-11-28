@@ -33,8 +33,8 @@ class MongoDataSourceModuleSpec extends EffectfulQSpec[IO] {
     val config = MongoConfig(MongoSpec.connectionString).asJson
     MongoDataSourceModule.lightweightDatasource[IO](config).map (_.asCats must beRight)
   }
-//  "Using unreachable config produces Left error" >>* {
-//    val config = MongoConfig("mongodb://unreachable").asJson
-//    MongoDataSourceModule.lightweightDatasource[IO](config).map (_.asCats must beLeft)
-//  }
+  "Using unreachable config produces Left error" >>* {
+    val config = MongoConfig("mongodb://unreachable").asJson
+    MongoDataSourceModule.lightweightDatasource[IO](config).map (_.asCats must beLeft)
+  }
 }

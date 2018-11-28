@@ -21,12 +21,14 @@ import qdata._
 import qdata.QType._
 import quasar.contrib.std.errorImpossible
 
+import java.lang.ArithmeticException
 import java.time._
 import java.util.{Map, Iterator}
 import scala.collection.JavaConverters._
 
 import eu.timepit.refined.auto._
 import org.bson._
+import org.bson.types.Decimal128
 import spire.math.Real
 import java.math.{BigDecimal => JDecimal}
 
@@ -60,10 +62,8 @@ object decoder {
     private val moreThanMaxLong: JDecimal = (new JDecimal(Long.MaxValue)).add(new JDecimal(1L))
     private val lessThanMinLong: JDecimal = (new JDecimal(Long.MinValue)).add(new JDecimal(-1L))
     private val tinyDbl: JDecimal = new JDecimal(Double.MinPositiveValue)
-    private val tinyDblPart: JDecimal = (new JDecimal(Double.MinPositiveValue)).divide(new JDecimal(10L))
     private val moreThanMaxDbl: JDecimal = (new JDecimal(Double.MaxValue)).add(tinyDbl.negate())
     private val lessThanMinDbl: JDecimal = (new JDecimal(Double.MinValue)).add(tinyDbl)
-    private val zero: JDecimal = new JDecimal(0)
 
     override def tpe(bson: BsonValue): QType = bson.getBsonType() match {
       case BsonType.DOCUMENT => QObject
@@ -73,20 +73,27 @@ object decoder {
       case BsonType.INT64 => QLong
       case BsonType.DOUBLE => QDouble
       case BsonType.DECIMAL128 => {
-        val decimal: JDecimal = bson.asDecimal128().getValue().bigDecimalValue()
-        if (decimal.scale() < 1 && decimal.compareTo(moreThanMaxLong) < 1 && decimal.compareTo(lessThanMinLong) > -1) {
-          QLong
-        } else {
-          if (decimal.compareTo(zero) > 0 && decimal.compareTo(tinyDbl) < 0) {
-            QReal
-          } else if(decimal.compareTo(zero) < 0 && decimal.compareTo(tinyDbl.negate()) > 0) {
-            QReal
-          } else
-          if (decimal.compareTo(moreThanMaxDbl) < 1 && decimal.compareTo(lessThanMinDbl) > -1) {
-            QDouble
+        val dec128: Decimal128 = bson.asDecimal128().getValue()
+        if (dec128.isNaN()) {
+          QNull
+        } else if (dec128.isInfinite()) {
+          QNull
+        } else try {
+          val decimal: JDecimal = dec128.bigDecimalValue()
+          if (decimal.scale() < 1 && decimal.compareTo(moreThanMaxLong) < 1 && decimal.compareTo(lessThanMinLong) > -1) {
+            QLong
           } else {
-            QReal
+            if (decimal.abs().compareTo(tinyDbl) < 0) {
+              QReal
+            } else
+              if (decimal.compareTo(moreThanMaxDbl) < 1 && decimal.compareTo(lessThanMinDbl) > -1) {
+                QDouble
+              } else {
+                QReal
+              }
           }
+        } catch {
+          case e: ArithmeticException => QLong
         }
       }
       case BsonType.BOOLEAN => QBoolean
@@ -138,7 +145,14 @@ object decoder {
     override def getDouble(bson: BsonValue): Double = bson match {
       case num: BsonNumber => num.doubleValue()
     }
+    @SuppressWarnings(Array("org.wartremover.warts.Equals"))
     override def getLong(bson: BsonValue): Long = bson match {
+      case bsonDecimal: BsonDecimal128 =>
+        try {
+          bsonDecimal.longValue()
+        } catch {
+          case e: ArithmeticException => 0L
+        }
       case num: BsonNumber => num.longValue()
     }
     override def getReal(bson: BsonValue): Real = bson match {

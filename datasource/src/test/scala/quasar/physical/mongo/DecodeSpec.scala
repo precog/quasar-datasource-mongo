@@ -260,4 +260,22 @@ class DecodeSpec extends Specification {
       refined.asString().getValue() === "minKey"
     }
   }
+  "BsonDecimal128 very special cases" >> {
+    val nan = new BsonDecimal128(Decimal128.NaN)
+    val negativeNaN = new BsonDecimal128(Decimal128.NEGATIVE_NaN)
+    val inf = new BsonDecimal128(Decimal128.POSITIVE_INFINITY)
+    val negativeInf = new BsonDecimal128(Decimal128.NEGATIVE_INFINITY)
+    val zero = new BsonDecimal128(Decimal128.POSITIVE_ZERO)
+    val negativeZero = new BsonDecimal128(Decimal128.NEGATIVE_ZERO)
+
+    qdataDecoder.tpe(nan) === QNull
+    qdataDecoder.tpe(negativeNaN) === QNull
+    qdataDecoder.tpe(inf) === QNull
+    qdataDecoder.tpe(negativeInf) === QNull
+    qdataDecoder.tpe(zero) === QLong
+    qdataDecoder.tpe(negativeZero) === QLong
+
+    qdataDecoder.getLong(zero) === 0L
+    qdataDecoder.getLong(negativeZero) === 0L
+  }
 }
