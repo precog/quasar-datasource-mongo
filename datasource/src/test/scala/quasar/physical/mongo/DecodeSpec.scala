@@ -18,9 +18,8 @@ package quasar.physical.mongo
 
 import slamdata.Predef._
 import quasar.physical.mongo.decoder.qdataDecoder
-import qdata.QType._
+import qdata.QType, QType._
 
-import cats.effect.IO
 import java.time._
 import scala.collection.JavaConverters._
 
@@ -28,72 +27,72 @@ import eu.timepit.refined.auto._
 import org.bson._
 import org.bson.types.{Decimal128, ObjectId}
 import org.specs2.mutable.Specification
+import org.specs2.specification.core._
+import org.specs2.execute.AsResult
+import org.specs2.matcher._
 import spire.math.Real
-import fs2.Stream
-import testImplicits._
 
 class DecodeSpec extends Specification {
   "decoder decodes bsons with correct types" >> {
-    List(
-      qdataDecoder.tpe(new BsonNull()) ==== QNull,
-      qdataDecoder.tpe(new BsonInt64(1L)) === QLong,
-      qdataDecoder.tpe(new BsonInt32(12)) ===  QLong,
-      qdataDecoder.tpe(new BsonSymbol("symbol")) === QMeta,
-      qdataDecoder.tpe(new BsonDouble(1.2)) === QDouble,
-      qdataDecoder.tpe(new BsonString("string")) === QString,
-      qdataDecoder.tpe(new BsonBinary(Array[Byte]())) === QMeta,
-      qdataDecoder.tpe(new BsonMinKey()) === QMeta,
-      qdataDecoder.tpe(new BsonMaxKey()) === QMeta,
-      qdataDecoder.tpe(new BsonBoolean(true)) === QBoolean,
-      qdataDecoder.tpe(new BsonObjectId()) === QMeta,
-      qdataDecoder.tpe(new BsonDateTime(1000)) === QOffsetDateTime,
-      qdataDecoder.tpe(new BsonDocument()) === QObject,
-      qdataDecoder.tpe(new BsonArray()) === QArray,
-      qdataDecoder.tpe(new BsonDbPointer("db", new ObjectId())) === QMeta,
-      qdataDecoder.tpe(new BsonTimestamp(112L)) === QMeta,
-      qdataDecoder.tpe(new BsonUndefined()) === QNull,
-      qdataDecoder.tpe(new BsonDecimal128(new Decimal128(112L))) === QReal,
-      qdataDecoder.tpe(new BsonJavaScript("val a = undefined")) === QMeta,
-      qdataDecoder.tpe(new BsonRegularExpression("*")) === QMeta,
-      qdataDecoder.tpe(new BsonJavaScriptWithScope("val a = undefined", new BsonDocument())) === QMeta,
-    ).forall(x => x)
+    val large = new Decimal128((BigDecimal.decimal(Double.MaxValue) * BigDecimal.decimal(12.23)).bigDecimal)
+    val tiny = new Decimal128((BigDecimal.decimal(Double.MinPositiveValue) * BigDecimal.decimal(0.0000001)).bigDecimal)
+    val checks = List(
+      new BsonNull() -> QNull,
+      new BsonInt64(1L) -> QLong,
+      new BsonInt32(12) ->  QLong,
+      new BsonSymbol("symbol") -> QMeta,
+      new BsonDouble(1.2) -> QDouble,
+      new BsonString("string") -> QString,
+      new BsonBinary(Array[Byte]()) -> QMeta,
+      new BsonMinKey() -> QMeta,
+      new BsonMaxKey() -> QMeta,
+      new BsonBoolean(true) -> QBoolean,
+      new BsonObjectId() -> QMeta,
+      new BsonDateTime(1000) -> QOffsetDateTime,
+      new BsonDocument() -> QObject,
+      new BsonArray() -> QArray,
+      new BsonDbPointer("db", new ObjectId()) -> QMeta,
+      new BsonObjectId() -> QMeta,
+      new BsonTimestamp(112L) -> QMeta,
+      new BsonUndefined() -> QNull,
+      new BsonDecimal128(new Decimal128(112L)) -> QLong,
+      new BsonDecimal128(new Decimal128(BigDecimal.decimal(12.23).bigDecimal)) -> QDouble,
+      new BsonDecimal128(large) -> QReal,
+      new BsonDecimal128(tiny) -> QReal,
+      new BsonJavaScript("val a = undefined") -> QMeta,
+      new BsonRegularExpression("*") -> QMeta,
+      new BsonJavaScriptWithScope("val a = undefined", new BsonDocument()) -> QMeta,
+    )
+    Fragment.foreach(checks) (_ match {
+      case (bson: BsonValue, expected: QType) =>
+        s"$bson :-> $expected" >> { qdataDecoder.tpe(bson) === expected }
+    })
   }
   "QLong values are correct" >> {
-    List(
-      qdataDecoder.getLong(new BsonInt64(12L)) === 12L,
-      qdataDecoder.getLong(new BsonInt32(12)) === 12L
-    ).forall(x => x)
+    "for int32" >> { qdataDecoder.getLong(new BsonInt32(12)) === 12L }
+    "for int64" >> { qdataDecoder.getLong(new BsonInt64(12L)) === 12L }
   }
 
   "QDouble values are correct" >> {
-    List(
-      qdataDecoder.getDouble(new BsonDouble(12.2)) === 12.2,
-      qdataDecoder.getDouble(new BsonDouble(-0.212)) === -0.212
-    ).forall(x => x)
+    qdataDecoder.getDouble(new BsonDouble(12.2)) === 12.2
   }
 
   "QReal values are correct" >> {
-    qdataDecoder.getReal(new BsonDecimal128(new Decimal128(112L))) === Real(112L),
+    qdataDecoder.getReal(new BsonDecimal128(new Decimal128(112L))) === Real(112L)
   }
 
   "QBoolean values are correct" >> {
-    List(
-      qdataDecoder.getBoolean(new BsonBoolean(true)) === true,
-      qdataDecoder.getBoolean(new BsonBoolean(false)) === false
-    ).forall(x => x)
+    qdataDecoder.getBoolean(new BsonBoolean(true)) === true
+    qdataDecoder.getBoolean(new BsonBoolean(false)) === false
   }
 
   "QOffsetDateTime values are correct" >> {
-    List(
-      qdataDecoder.getOffsetDateTime(new BsonDateTime(123)) ===
-        Instant.ofEpochMilli(123).atOffset(ZoneOffset.UTC),
-    ).forall(x => x)
+    qdataDecoder.getOffsetDateTime(new BsonDateTime(123)) ===
+      Instant.ofEpochMilli(123).atOffset(ZoneOffset.UTC),
   }
   "QString values are correct" >> {
-    List(
-      qdataDecoder.getString(new BsonString("foo")) == "foo",
-      qdataDecoder.getString(new BsonString("bar")) == "bar"
-    ).forall(x => x)
+    qdataDecoder.getString(new BsonString("foo")) == "foo"
+    qdataDecoder.getString(new BsonString("bar")) == "bar"
   }
   "QArray works for empty arrays" >> {
     val bsonArr = new BsonArray()
@@ -155,5 +154,110 @@ class DecodeSpec extends Specification {
     qdataDecoder.getObjectValueAt(cursor4).isNull() must beTrue
     val cursor5 = qdataDecoder.stepObject(cursor4)
     qdataDecoder.hasNextObject(cursor5) must beFalse
+  }
+
+  "QMeta meta checks" >> {
+    def getVal(meta: BsonValue, key: String): BsonValue =
+      meta.asDocument().get(key)
+
+    def getStringVal(meta: BsonValue, key: String): String =
+      getVal(meta, key).asString().getValue()
+
+    def getIntVal(meta: BsonValue, key: String): Int =
+      getVal(meta, key).asInt32().getValue()
+
+    "objectId" >> {
+      val obj = new BsonObjectId()
+      val meta = qdataDecoder.getMetaMeta(obj)
+      val refined = qdataDecoder.getMetaValue(obj)
+      meta must haveClass[BsonDocument]
+      getStringVal(meta, "type") === "mongo:objectId"
+      refined must haveClass[BsonString]
+    }
+    "dbPointer" >> {
+      val obj = new BsonDbPointer("namespace", new ObjectId())
+      val meta = qdataDecoder.getMetaMeta(obj)
+      val refined = qdataDecoder.getMetaValue(obj)
+      meta must haveClass[BsonDocument]
+      getStringVal(meta, "type") === "mongo:dbPointer"
+      getStringVal(meta, "namespace") === "namespace"
+      refined must haveClass[BsonString]
+    }
+    "binary" >> {
+      val obj = new BsonBinary(Array[Byte]())
+      val meta = qdataDecoder.getMetaMeta(obj)
+      val refined = qdataDecoder.getMetaValue(obj)
+      meta must haveClass[BsonDocument]
+      getStringVal(meta, "type") === "mongo:binary"
+      refined must haveClass[BsonString]
+      refined.asString().getValue() === ""
+    }
+    "symbol" >> {
+      val obj = new BsonSymbol("1234")
+      val meta = qdataDecoder.getMetaMeta(obj)
+      val refined = qdataDecoder.getMetaValue(obj)
+      meta must haveClass[BsonDocument]
+      getStringVal(meta, "type") === "mongo:symbol"
+      refined must haveClass[BsonString]
+      refined.asString().getValue() === "1234"
+    }
+    "regex" >> {
+      val obj = new BsonRegularExpression("*+", "i")
+      val meta = qdataDecoder.getMetaMeta(obj)
+      val refined = qdataDecoder.getMetaValue(obj)
+      meta must haveClass[BsonDocument]
+      getStringVal(meta, "type") === "mongo:regex"
+      getStringVal(meta, "options") === "i"
+      refined must haveClass[BsonString]
+      refined.asString().getValue === "*+"
+    }
+    "javascript" >> {
+      val obj = new BsonJavaScript("undefined")
+      val meta = qdataDecoder.getMetaMeta(obj)
+      val refined = qdataDecoder.getMetaValue(obj)
+      meta must haveClass[BsonDocument]
+      getStringVal(meta, "type") === "mongo:javascript"
+      refined must haveClass[BsonString]
+      refined.asString().getValue() === "undefined"
+    }
+    "timestamp" >> {
+      val obj = new BsonTimestamp(0, 42)
+      val meta = qdataDecoder.getMetaMeta(obj)
+      val refined = qdataDecoder.getMetaValue(obj)
+      meta must haveClass[BsonDocument]
+      getStringVal(meta, "type") === "mongo:timestamp"
+      getIntVal(meta, "inc") === 42
+      refined must haveClass[BsonDateTime]
+      refined.asDateTime().getValue() === 0L
+    }
+    "javascriptWithScope" >> {
+      val obj = new BsonJavaScriptWithScope("x.a", new BsonDocument("x", new BsonInt32(42)))
+      val meta = qdataDecoder.getMetaMeta(obj)
+      val refined = qdataDecoder.getMetaValue(obj)
+      meta must haveClass[BsonDocument]
+      getStringVal(meta, "type") === "mongo:javascriptWithScope"
+      val scope = getVal(meta, "scope")
+      getIntVal(scope, "x") === 42
+      refined must haveClass[BsonString]
+      refined.asString().getValue() === "x.a"
+    }
+    "maxKey" >> {
+      val obj = new BsonMaxKey()
+      val meta = qdataDecoder.getMetaMeta(obj)
+      val refined = qdataDecoder.getMetaValue(obj)
+      meta must haveClass[BsonDocument]
+      getStringVal(meta, "type") === "mongo:maxKey"
+      refined must haveClass[BsonString]
+      refined.asString().getValue() === "maxKey"
+    }
+    "minKey" >> {
+      val obj = new BsonMinKey()
+      val meta = qdataDecoder.getMetaMeta(obj)
+      val refined = qdataDecoder.getMetaValue(obj)
+      meta must haveClass[BsonDocument]
+      getStringVal(meta, "type") === "mongo:minKey"
+      refined must haveClass[BsonString]
+      refined.asString().getValue() === "minKey"
+    }
   }
 }

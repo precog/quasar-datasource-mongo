@@ -28,6 +28,7 @@ import scala.collection.JavaConverters._
 import eu.timepit.refined.auto._
 import org.bson._
 import spire.math.Real
+import java.math.{BigDecimal => JDecimal}
 
 object decoder {
   @SuppressWarnings(Array("org.wartremover.warts.Var"))
@@ -56,6 +57,14 @@ object decoder {
   }
 
   val qdataDecoder: QDataDecode[BsonValue] = new QDataDecode[BsonValue] {
+    private val moreThanMaxLong: JDecimal = (new JDecimal(Long.MaxValue)).add(new JDecimal(1L))
+    private val lessThanMinLong: JDecimal = (new JDecimal(Long.MinValue)).add(new JDecimal(-1L))
+    private val tinyDbl: JDecimal = new JDecimal(Double.MinPositiveValue)
+    private val tinyDblPart: JDecimal = (new JDecimal(Double.MinPositiveValue)).divide(new JDecimal(10L))
+    private val moreThanMaxDbl: JDecimal = (new JDecimal(Double.MaxValue)).add(tinyDbl.negate())
+    private val lessThanMinDbl: JDecimal = (new JDecimal(Double.MinValue)).add(tinyDbl)
+    private val zero: JDecimal = new JDecimal(0)
+
     override def tpe(bson: BsonValue): QType = bson.getBsonType() match {
       case BsonType.DOCUMENT => QObject
       case BsonType.ARRAY => QArray
@@ -63,7 +72,23 @@ object decoder {
       case BsonType.INT32 => QLong
       case BsonType.INT64 => QLong
       case BsonType.DOUBLE => QDouble
-      case BsonType.DECIMAL128 => QReal
+      case BsonType.DECIMAL128 => {
+        val decimal: JDecimal = bson.asDecimal128().getValue().bigDecimalValue()
+        if (decimal.scale() < 1 && decimal.compareTo(moreThanMaxLong) < 1 && decimal.compareTo(lessThanMinLong) > -1) {
+          QLong
+        } else {
+          if (decimal.compareTo(zero) > 0 && decimal.compareTo(tinyDbl) < 0) {
+            QReal
+          } else if(decimal.compareTo(zero) < 0 && decimal.compareTo(tinyDbl.negate()) > 0) {
+            QReal
+          } else
+          if (decimal.compareTo(moreThanMaxDbl) < 1 && decimal.compareTo(lessThanMinDbl) > -1) {
+            QDouble
+          } else {
+            QReal
+          }
+        }
+      }
       case BsonType.BOOLEAN => QBoolean
       case BsonType.OBJECT_ID => QMeta
       case BsonType.DB_POINTER => QMeta
@@ -132,7 +157,7 @@ object decoder {
       case _: BsonObjectId => new BsonDocument("type", new BsonString("mongo:objectId"))
       case dbPointer: BsonDbPointer => new BsonDocument(List(
         new BsonElement("type", new BsonString("mongo:dbPointer")),
-        new BsonElement("namespace",  new BsonString(dbPointer.getNamespace())),
+        new BsonElement("namespace", new BsonString(dbPointer.getNamespace())),
       ).asJava)
       case _: BsonBinary => new BsonDocument("type", new BsonString("mongo:binary"))
       case _: BsonSymbol => new BsonDocument("type", new BsonString("mongo:symbol"))

@@ -116,7 +116,6 @@ object Mongo {
         }
         override def onError(e: Throwable): Unit = cb(Some(Error(e)))
         override def onComplete(): Unit = cb(None)
-
       })
     }
     def enqueueObservable(
@@ -131,6 +130,7 @@ object Mongo {
         case Some(Next(a)) => run(obsQ.enqueue1(Some(Right(a))))
         case None => run(obsQ.enqueue1(None))
       }}))
+
 
     (for {
       obsQ <- Stream.eval(Queue.boundedNoneTerminated[F, Either[Throwable, F[A]]](32))
@@ -149,7 +149,6 @@ object Mongo {
         override def onComplete() = ()
       })
     }
-
 
   def apply[F[_]: ConcurrentEffect: MonadResourceErr](config: MongoConfig): F[Disposable[F, Mongo[F]]] = {
 
