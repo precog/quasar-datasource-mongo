@@ -262,12 +262,47 @@ class DecodeSpec extends Specification {
     }
   }
   "BsonDecimal128 very special cases" >> {
-    val nan = new BsonDecimal128(Decimal128.NaN)
-    val negativeNaN = new BsonDecimal128(Decimal128.NEGATIVE_NaN)
-    val inf = new BsonDecimal128(Decimal128.POSITIVE_INFINITY)
-    val negativeInf = new BsonDecimal128(Decimal128.NEGATIVE_INFINITY)
-    val zero = new BsonDecimal128(Decimal128.POSITIVE_ZERO)
-    val negativeZero = new BsonDecimal128(Decimal128.NEGATIVE_ZERO)
+    val nan =
+      new BsonDecimal128(Decimal128.NaN)
+    val negativeNaN =
+      new BsonDecimal128(Decimal128.NEGATIVE_NaN)
+    val inf =
+      new BsonDecimal128(Decimal128.POSITIVE_INFINITY)
+    val negativeInf =
+      new BsonDecimal128(Decimal128.NEGATIVE_INFINITY)
+    val zero =
+      new BsonDecimal128(Decimal128.POSITIVE_ZERO)
+    val negativeZero =
+      new BsonDecimal128(Decimal128.NEGATIVE_ZERO)
+    val maxLong =
+      new BsonDecimal128(new Decimal128(Long.MaxValue))
+    val minLong =
+      new BsonDecimal128(new Decimal128(Long.MinValue))
+    val maxDouble =
+      new BsonDecimal128(new Decimal128(BigDecimal(Double.MaxValue).bigDecimal))
+    val minDouble =
+      new BsonDecimal128(new Decimal128(BigDecimal(Double.MinValue).bigDecimal))
+    val tinyDouble =
+      new BsonDecimal128(new Decimal128(
+        BigDecimal(Double.MinPositiveValue).bigDecimal
+      ))
+    val moreThanMaxLong =
+      new BsonDecimal128(new Decimal128((BigDecimal(Long.MaxValue) + BigDecimal(1L)).bigDecimal))
+    val lessThanMinLong =
+      new BsonDecimal128(new Decimal128((BigDecimal(Long.MinValue) + BigDecimal(-1L)).bigDecimal))
+    val moreThanMaxDouble =
+      new BsonDecimal128(new Decimal128(
+        (BigDecimal(Double.MaxValue) * 1.1).bigDecimal
+      ))
+    val lessThanMinDouble =
+      new BsonDecimal128(new Decimal128(
+        (BigDecimal(Double.MinValue) * 1.1).bigDecimal
+      ))
+
+    val tinierThanTiny =
+      new BsonDecimal128(new Decimal128(
+        (BigDecimal(Double.MinPositiveValue) / 2).bigDecimal
+      ))
 
     qdataDecoder.tpe(nan) === QNull
     qdataDecoder.tpe(negativeNaN) === QNull
@@ -275,8 +310,28 @@ class DecodeSpec extends Specification {
     qdataDecoder.tpe(negativeInf) === QNull
     qdataDecoder.tpe(zero) === QLong
     qdataDecoder.tpe(negativeZero) === QLong
+    qdataDecoder.tpe(maxLong) === QLong
+    qdataDecoder.tpe(minLong) === QLong
+    qdataDecoder.tpe(maxDouble) === QDouble
+    qdataDecoder.tpe(minDouble) === QDouble
+    qdataDecoder.tpe(tinyDouble) === QDouble
+    qdataDecoder.tpe(moreThanMaxLong) === QDouble
+    qdataDecoder.tpe(lessThanMinLong) === QDouble
+    qdataDecoder.tpe(moreThanMaxDouble) === QReal
+    qdataDecoder.tpe(lessThanMinDouble) === QReal
+    qdataDecoder.tpe(tinierThanTiny) === QReal
 
     qdataDecoder.getLong(zero) === 0L
     qdataDecoder.getLong(negativeZero) === 0L
+    qdataDecoder.getLong(maxLong) === Long.MaxValue
+    qdataDecoder.getLong(minLong) === Long.MinValue
+    qdataDecoder.getDouble(maxDouble) === Double.MaxValue
+    qdataDecoder.getDouble(minDouble) === Double.MinValue
+    qdataDecoder.getDouble(tinyDouble) === Double.MinPositiveValue
+    qdataDecoder.getDouble(moreThanMaxLong) === Long.MaxValue + 1.0
+    qdataDecoder.getDouble(lessThanMinLong) === Long.MinValue - 1.0
+    qdataDecoder.getReal(moreThanMaxDouble) === Real(BigDecimal(Double.MaxValue) * 1.1)
+    qdataDecoder.getReal(lessThanMinDouble) === Real(BigDecimal(Double.MinValue) * 1.1)
+    qdataDecoder.getReal(tinierThanTiny) === Real(BigDecimal(Double.MinPositiveValue) / 2)
   }
 }

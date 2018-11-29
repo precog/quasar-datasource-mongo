@@ -20,7 +20,6 @@ import slamdata.Predef._
 
 import cats.effect.{ConcurrentEffect, Async, IO}
 import cats.effect.concurrent.MVar
-import cats.syntax.applicative._
 import cats.syntax.eq._
 import cats.syntax.flatMap._
 import cats.syntax.functor._
@@ -31,8 +30,6 @@ import fs2.Stream
 import quasar.connector.{MonadResourceErr, ResourceError}
 import quasar.physical.mongo.MongoResource.{Database, Collection}
 import quasar.Disposable
-
-import monocle.Prism
 
 import org.bson.{Document => _, _}
 import org.mongodb.scala._
@@ -65,7 +62,7 @@ class Mongo[F[_]: MonadResourceErr : ConcurrentEffect] private[Mongo](client: Mo
     collectionExists(collection).compile.last.map(_ getOrElse false)
       .flatMap(exists =>
         if (exists) {
-          observableAsStream(getCollection(client).find[BsonValue]()).pure[F]
+          F.delay(observableAsStream(getCollection(client).find[BsonValue]()))
         } else {
           MonadResourceErr.raiseError(ResourceError.pathNotFound(collection.resourcePath))
         })
@@ -74,72 +71,45 @@ class Mongo[F[_]: MonadResourceErr : ConcurrentEffect] private[Mongo](client: Mo
 
 object Mongo {
 
-  sealed trait FromObservable[+A]
-
-  object FromObservable {
-    final case class Next[A](result: A) extends FromObservable[A]
-    final case class Subscribe(subscription: Subscription) extends FromObservable[Nothing]
-    final case class Error(throwable: Throwable) extends FromObservable[Nothing]
-
-    def subscribeP[A]: Prism[FromObservable[A], Subscription] =
-      Prism.partial[FromObservable[A], Subscription]{
-        case Subscribe(s) => s
-      }(Subscribe(_))
-
-    def eraseSubscription[A](from: FromObservable[A]): Option[Either[Throwable, A]] = from match {
-      case Next(result) => Some(Right(result))
-      case Subscribe(_) => None
-      case Error(e) => Some(Left(e))
-    }
-  }
-  import FromObservable._
-
-
-  def unsubscribe(sub: Option[Subscription]): Unit = sub.map { x =>
-    if (!x.isUnsubscribed()) {
-      x.unsubscribe()
-    }
-  } getOrElse (())
-
   def observableAsStream[F[_]: ConcurrentEffect, A](obs: Observable[A]): Stream[F, A] = {
     val F = ConcurrentEffect[F]
-    @SuppressWarnings(Array("org.wartremover.warts.Var"))
-    def handler(cb: Option[FromObservable[F[A]]] => Unit): Unit = {
-      obs.subscribe(new Observer[A] {
-        private var subscription: Option[Subscription] = None
 
+    def run(action: F[Unit]): Unit = F.runAsync(action)(_ => IO.unit).unsafeRunSync
+
+    def handler(subVar: MVar[F, Subscription], cb: Option[Either[Throwable, F[A]]] => Unit): Unit = {
+      obs.subscribe(new Observer[A] {
         override def onSubscribe(sub: Subscription): Unit = {
-          subscription = Some(sub)
+          run(subVar.put(sub))
           sub.request(1L)
-          cb(Some(Subscribe(sub)))
         }
         override def onNext(result: A): Unit = {
-          cb(Some(Next(F.delay(subscription.map(_.request(1L)) getOrElse (())).as(result))))
+          cb(Some(Right(subVar.read.map(_.request(1L)).as(result))))
         }
-        override def onError(e: Throwable): Unit = cb(Some(Error(e)))
+        override def onError(e: Throwable): Unit = cb(Some(Left(e)))
+
         override def onComplete(): Unit = cb(None)
       })
     }
+
+    def unsubscribe(s: Subscription): F[Unit] = F.delay {
+      if (!s.isUnsubscribed()) {
+        s.unsubscribe()
+      } else {
+        ()
+      }
+    }
+
     def enqueueObservable(
-      obsQ: NoneTerminatedQueue[F, Either[Throwable, F[A]]],
-      subVar: MVar[F, Subscription]): Stream[F, Unit] =
-
-    Stream.eval(F.delay(handler {inp =>
-      def run(action: F[Unit]): Unit = F.runAsync(action)(_ => IO.unit).unsafeRunSync
-      inp match {
-        case Some(Subscribe(sub)) => run(subVar.put(sub))
-        case Some(Error(e)) => run(obsQ.enqueue1(Some(Left(e))))
-        case Some(Next(a)) => run(obsQ.enqueue1(Some(Right(a))))
-        case None => run(obsQ.enqueue1(None))
-      }}))
-
+        obsQ: NoneTerminatedQueue[F, Either[Throwable, F[A]]],
+        subVar: MVar[F, Subscription])
+        : Stream[F, Unit] =
+      Stream.eval(F.delay(handler(subVar, { x => run(obsQ.enqueue1(x)) })))
 
     (for {
       obsQ <- Stream.eval(Queue.boundedNoneTerminated[F, Either[Throwable, F[A]]](32))
       subVar <- Stream.eval(MVar[F].empty[Subscription])
       _ <- enqueueObservable(obsQ, subVar)
-      sub <- Stream.eval(subVar.take)
-      res <- obsQ.dequeue.rethrow.onFinalize(F.delay(sub.unsubscribe))
+      res <- obsQ.dequeue.rethrow.onFinalize(subVar.take.flatMap(unsubscribe))
     } yield Stream.eval(res)).flatten
   }
 
@@ -157,9 +127,10 @@ object Mongo {
     val mkClient: F[MongoClient] =
       ConcurrentEffect[F].delay(MongoClient(config.connectionString))
 
-    def runCommand(client: MongoClient): F[Unit] = singleObservableAsF[F, Unit](
-      client.getDatabase("admin").runCommand[Document](Document("ping" -> 1)).map(_ => ())
-    )
+    def runCommand(client: MongoClient): F[Unit] =
+      ConcurrentEffect[F].suspend(singleObservableAsF[F, Unit](
+        client.getDatabase("admin").runCommand[Document](Document("ping" -> 1)).map(_ => ())
+      ))
 
     def close(client: MongoClient): F[Unit] =
       ConcurrentEffect[F].delay(client.close())

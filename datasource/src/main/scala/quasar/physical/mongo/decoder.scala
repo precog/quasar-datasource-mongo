@@ -61,11 +61,11 @@ object decoder {
   }
 
   val qdataDecoder: QDataDecode[BsonValue] = new QDataDecode[BsonValue] {
-    private val moreThanMaxLong: JDecimal = (new JDecimal(Long.MaxValue)).add(new JDecimal(1L))
-    private val lessThanMinLong: JDecimal = (new JDecimal(Long.MinValue)).add(new JDecimal(-1L))
-    private val tinyDbl: JDecimal = new JDecimal(Double.MinPositiveValue)
-    private val moreThanMaxDbl: JDecimal = (new JDecimal(Double.MaxValue)).add(tinyDbl.negate())
-    private val lessThanMinDbl: JDecimal = (new JDecimal(Double.MinValue)).add(tinyDbl)
+    private val maxLong: JDecimal = BigDecimal.decimal(Long.MaxValue).bigDecimal
+    private val minLong: JDecimal = BigDecimal.decimal(Long.MinValue).bigDecimal
+    private val tinyDbl: JDecimal = BigDecimal.decimal(Double.MinPositiveValue).bigDecimal
+    private val maxDbl: JDecimal = BigDecimal.decimal(Double.MaxValue).bigDecimal
+    private val minDbl: JDecimal = BigDecimal.decimal(Double.MinValue).bigDecimal
 
     override def tpe(bson: BsonValue): QType = bson.getBsonType() match {
       case BsonType.DOCUMENT => QObject
@@ -75,6 +75,7 @@ object decoder {
       case BsonType.INT64 => QLong
       case BsonType.DOUBLE => QDouble
       case BsonType.DECIMAL128 => {
+
         val dec128: Decimal128 = bson.asDecimal128().getValue()
         if (dec128.isNaN()) {
           QNull
@@ -82,13 +83,13 @@ object decoder {
           QNull
         } else try {
           val decimal: JDecimal = dec128.bigDecimalValue()
-          if (decimal.scale() < 1 && decimal.compareTo(moreThanMaxLong) < 1 && decimal.compareTo(lessThanMinLong) > -1) {
+          if (decimal.scale() < 1 && decimal.compareTo(maxLong) < 1 && decimal.compareTo(minLong) > -1) {
             QLong
           } else {
             if (decimal.abs().compareTo(tinyDbl) < 0) {
               QReal
             } else
-              if (decimal.compareTo(moreThanMaxDbl) < 1 && decimal.compareTo(lessThanMinDbl) > -1) {
+              if (decimal.compareTo(maxDbl) < 1 && decimal.compareTo(minDbl) > -1) {
                 QDouble
               } else {
                 QReal
