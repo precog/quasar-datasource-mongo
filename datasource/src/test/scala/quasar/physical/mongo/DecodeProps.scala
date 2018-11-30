@@ -77,12 +77,9 @@ class DecodeProps extends Specification with ScalaCheck {
         AsResult(decimal128.isNaN() || decimal128.isInfinite())
           .updateMessage("BsonDecimal128 should be decoded to QNull iff it's either NaN or Infinite")
       case QReal => {
-        val bdv = decimal128.bigDecimalValue()
-        val moreThanMax = AsResult(bdv.compareTo(BigDecimal(Double.MaxValue).bigDecimal) > 0)
-        val lessThanMin = AsResult(bdv.compareTo(BigDecimal(Double.MinValue).bigDecimal) < 0)
-        val isTiny = AsResult(bdv.abs().compareTo(BigDecimal(Double.MinPositiveValue).bigDecimal) < 0)
-
-        moreThanMax or lessThanMin or isTiny
+        val bdv = BigDecimal(decimal128.bigDecimalValue())
+        AsResult(!bdv.isDecimalDouble && !bdv.isValidLong)
+          .updateMessage("All decimals converted to real shouldn't be valid doubles and longs")
       }
       case _ => AsResult(false).updateMessage("BsonDecimal128 should be decoded to number")
     }

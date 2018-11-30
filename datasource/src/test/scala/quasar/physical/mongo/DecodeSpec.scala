@@ -289,7 +289,7 @@ class DecodeSpec extends Specification {
     val moreThanMaxLong =
       new BsonDecimal128(new Decimal128((BigDecimal(Long.MaxValue) + BigDecimal(1L)).bigDecimal))
     val lessThanMinLong =
-      new BsonDecimal128(new Decimal128((BigDecimal(Long.MinValue) + BigDecimal(-1L)).bigDecimal))
+      new BsonDecimal128(new Decimal128((BigDecimal(Long.MinValue) - BigDecimal(1L)).bigDecimal))
     val moreThanMaxDouble =
       new BsonDecimal128(new Decimal128(
         (BigDecimal(Double.MaxValue) * 1.1).bigDecimal
@@ -298,40 +298,55 @@ class DecodeSpec extends Specification {
       new BsonDecimal128(new Decimal128(
         (BigDecimal(Double.MinValue) * 1.1).bigDecimal
       ))
-
     val tinierThanTiny =
       new BsonDecimal128(new Decimal128(
         (BigDecimal(Double.MinPositiveValue) / 2).bigDecimal
       ))
+    val rational =
+      new BsonDecimal128(new Decimal128(
+        (BigDecimal(1L) / BigDecimal(3L)).bigDecimal
+      ))
+    val doubleRational =
+      new BsonDecimal128(new Decimal128(
+        BigDecimal(1.0 / 3.0).bigDecimal
+      ))
 
-    qdataDecoder.tpe(nan) === QNull
-    qdataDecoder.tpe(negativeNaN) === QNull
-    qdataDecoder.tpe(inf) === QNull
-    qdataDecoder.tpe(negativeInf) === QNull
-    qdataDecoder.tpe(zero) === QLong
-    qdataDecoder.tpe(negativeZero) === QLong
-    qdataDecoder.tpe(maxLong) === QLong
-    qdataDecoder.tpe(minLong) === QLong
-    qdataDecoder.tpe(maxDouble) === QDouble
-    qdataDecoder.tpe(minDouble) === QDouble
-    qdataDecoder.tpe(tinyDouble) === QDouble
-    qdataDecoder.tpe(moreThanMaxLong) === QDouble
-    qdataDecoder.tpe(lessThanMinLong) === QDouble
-    qdataDecoder.tpe(moreThanMaxDouble) === QReal
-    qdataDecoder.tpe(lessThanMinDouble) === QReal
-    qdataDecoder.tpe(tinierThanTiny) === QReal
+    "tpe" >> {
+      "nan" >> (qdataDecoder.tpe(nan) === QNull)
+      "-nan" >> (qdataDecoder.tpe(negativeNaN) === QNull)
+      "inf" >> (qdataDecoder.tpe(inf) === QNull)
+      "-inf" >> (qdataDecoder.tpe(negativeInf) === QNull)
+      "0" >> (qdataDecoder.tpe(zero) === QLong)
+      "---0" >> (qdataDecoder.tpe(negativeZero) === QLong)
+      "maxlong" >> (qdataDecoder.tpe(maxLong) === QLong)
+      "minlong" >> (qdataDecoder.tpe(minLong) === QLong)
+      "maxdouble" >> (qdataDecoder.tpe(maxDouble) === QDouble)
+      "mindouble" >> (qdataDecoder.tpe(minDouble) === QDouble)
+      "tinydouble" >> (qdataDecoder.tpe(tinyDouble) === QDouble)
+      ">maxlong" >> (qdataDecoder.tpe(moreThanMaxLong) === QReal)
+      "<minLong" >> (qdataDecoder.tpe(lessThanMinLong) === QReal)
+      ">maxdouble" >> (qdataDecoder.tpe(moreThanMaxDouble) === QReal)
+      "<mindouble" >> (qdataDecoder.tpe(lessThanMinDouble) === QReal)
+      "abs < tinydouble" >> (qdataDecoder.tpe(tinierThanTiny) === QReal)
+      "rational" >> (qdataDecoder.tpe(rational) === QReal)
+      "doublerational" >> (qdataDecoder.tpe(doubleRational) === QDouble)
+    }
 
-    qdataDecoder.getLong(zero) === 0L
-    qdataDecoder.getLong(negativeZero) === 0L
-    qdataDecoder.getLong(maxLong) === Long.MaxValue
-    qdataDecoder.getLong(minLong) === Long.MinValue
-    qdataDecoder.getDouble(maxDouble) === Double.MaxValue
-    qdataDecoder.getDouble(minDouble) === Double.MinValue
-    qdataDecoder.getDouble(tinyDouble) === Double.MinPositiveValue
-    qdataDecoder.getDouble(moreThanMaxLong) === Long.MaxValue + 1.0
-    qdataDecoder.getDouble(lessThanMinLong) === Long.MinValue - 1.0
-    qdataDecoder.getReal(moreThanMaxDouble) === Real(BigDecimal(Double.MaxValue) * 1.1)
-    qdataDecoder.getReal(lessThanMinDouble) === Real(BigDecimal(Double.MinValue) * 1.1)
-    qdataDecoder.getReal(tinierThanTiny) === Real(BigDecimal(Double.MinPositiveValue) / 2)
+    "getValue" >> {
+      "0" >> (qdataDecoder.getLong(zero) === 0L)
+      "---0" >> (qdataDecoder.getLong(negativeZero) === 0L)
+      "maxlong" >> (qdataDecoder.getLong(maxLong) === Long.MaxValue)
+      "minlong" >> (qdataDecoder.getLong(minLong) === Long.MinValue)
+      "maxdouble" >> (qdataDecoder.getDouble(maxDouble) === Double.MaxValue)
+      "mindouble" >> (qdataDecoder.getDouble(minDouble) === Double.MinValue)
+      "tinydouble" >> (qdataDecoder.getDouble(tinyDouble) === Double.MinPositiveValue)
+      ">maxlong" >> (qdataDecoder.getReal(moreThanMaxLong) === Real(Long.MaxValue) + 1.0)
+      "<minlong" >> (qdataDecoder.getReal(lessThanMinLong) === Real(Long.MinValue) - 1.0)
+      ">maxdouble" >> (qdataDecoder.getReal(moreThanMaxDouble) === Real(BigDecimal(Double.MaxValue) * 1.1))
+      "<mindouble" >> (qdataDecoder.getReal(lessThanMinDouble) === Real(BigDecimal(Double.MinValue) * 1.1))
+      "abs < tinydouble" >> (qdataDecoder.getReal(tinierThanTiny) === Real(BigDecimal(Double.MinPositiveValue) / 2))
+      "rational" >> (qdataDecoder.getReal(rational) === Real(BigDecimal(1L) / BigDecimal(3L)))
+      "doublerational" >> (qdataDecoder.getDouble(doubleRational) === 1.0 / 3.0)
+    }
   }
 }

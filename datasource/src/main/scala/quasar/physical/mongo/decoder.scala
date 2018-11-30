@@ -18,8 +18,10 @@ package quasar.physical.mongo
 
 import slamdata.Predef._
 
+import cats.syntax.eq._
+import cats.instances.string._
+
 import java.lang.ArithmeticException
-import java.math.{BigDecimal => JDecimal}
 import java.time.{Instant, OffsetDateTime, ZoneOffset}
 import java.util.{Map, Iterator}
 
@@ -60,13 +62,8 @@ object decoder {
 
   }
 
-  val qdataDecoder: QDataDecode[BsonValue] = new QDataDecode[BsonValue] {
-    private val maxLong: JDecimal = BigDecimal.decimal(Long.MaxValue).bigDecimal
-    private val minLong: JDecimal = BigDecimal.decimal(Long.MinValue).bigDecimal
-    private val tinyDbl: JDecimal = BigDecimal.decimal(Double.MinPositiveValue).bigDecimal
-    private val maxDbl: JDecimal = BigDecimal.decimal(Double.MaxValue).bigDecimal
-    private val minDbl: JDecimal = BigDecimal.decimal(Double.MinValue).bigDecimal
 
+  val qdataDecoder: QDataDecode[BsonValue] = new QDataDecode[BsonValue] {
     override def tpe(bson: BsonValue): QType = bson.getBsonType() match {
       case BsonType.DOCUMENT => QObject
       case BsonType.ARRAY => QArray
@@ -75,30 +72,20 @@ object decoder {
       case BsonType.INT64 => QLong
       case BsonType.DOUBLE => QDouble
       case BsonType.DECIMAL128 => {
-
         val dec128: Decimal128 = bson.asDecimal128().getValue()
-        if (dec128.isNaN()) {
-          QNull
-        } else if (dec128.isInfinite()) {
-          QNull
-        } else try {
-          val decimal: JDecimal = dec128.bigDecimalValue()
-          if (decimal.scale() < 1 && decimal.compareTo(maxLong) < 1 && decimal.compareTo(minLong) > -1) {
-            QLong
-          } else {
-            if (decimal.abs().compareTo(tinyDbl) < 0) {
-              QReal
-            } else
-              if (decimal.compareTo(maxDbl) < 1 && decimal.compareTo(minDbl) > -1) {
-                QDouble
-              } else {
-                QReal
-              }
-          }
+        if (dec128.isNaN()) QNull
+        else if (dec128.isInfinite()) QNull
+        else try {
+          val decimal: BigDecimal = BigDecimal(dec128.bigDecimalValue())
+          if (decimal.isValidLong) QLong
+          else if (decimal.isDecimalDouble) QDouble
+          else QReal
         } catch {
-          case e: ArithmeticException => QLong
+          case e: ArithmeticException
+            if e.getMessage() === "Negative zero can not be converted to a BigDecimal" => QLong
         }
       }
+
       case BsonType.BOOLEAN => QBoolean
       case BsonType.OBJECT_ID => QMeta
       case BsonType.DB_POINTER => QMeta
@@ -154,7 +141,8 @@ object decoder {
         try {
           bsonDecimal.longValue()
         } catch {
-          case e: ArithmeticException => 0L
+          case e: ArithmeticException
+            if e.getMessage() === "Negative zero can not be converted to a BigDecimal" => 0L
         }
       case num: BsonNumber => num.longValue()
     }

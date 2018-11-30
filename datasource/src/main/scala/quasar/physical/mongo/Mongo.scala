@@ -92,11 +92,7 @@ object Mongo {
     }
 
     def unsubscribe(s: Subscription): F[Unit] = F.delay {
-      if (!s.isUnsubscribed()) {
-        s.unsubscribe()
-      } else {
-        ()
-      }
+      if (!s.isUnsubscribed()) s.unsubscribe()
     }
 
     def enqueueObservable(
@@ -106,7 +102,7 @@ object Mongo {
       Stream.eval(F.delay(handler(subVar, { x => run(obsQ.enqueue1(x)) })))
 
     (for {
-      obsQ <- Stream.eval(Queue.boundedNoneTerminated[F, Either[Throwable, F[A]]](32))
+      obsQ <- Stream.eval(Queue.boundedNoneTerminated[F, Either[Throwable, F[A]]](1))
       subVar <- Stream.eval(MVar[F].empty[Subscription])
       _ <- enqueueObservable(obsQ, subVar)
       res <- obsQ.dequeue.rethrow.onFinalize(subVar.take.flatMap(unsubscribe))
