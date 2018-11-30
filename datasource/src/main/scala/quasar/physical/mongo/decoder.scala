@@ -18,6 +18,9 @@ package quasar.physical.mongo
 
 import slamdata.Predef._
 
+import cats.syntax.eq._
+import cats.instances.string._
+
 import java.lang.ArithmeticException
 import java.time.{Instant, OffsetDateTime, ZoneOffset}
 import java.util.{Map, Iterator}
@@ -78,7 +81,8 @@ object decoder {
           else if (decimal.isDecimalDouble) QDouble
           else QReal
         } catch {
-          case e: ArithmeticException => QLong
+          case e: ArithmeticException
+            if e.getMessage() === "Negative zero can not be converted to a BigDecimal" => QLong
         }
       }
 
@@ -137,7 +141,8 @@ object decoder {
         try {
           bsonDecimal.longValue()
         } catch {
-          case e: ArithmeticException => 0L
+          case e: ArithmeticException
+            if e.getMessage() === "Negative zero can not be converted to a BigDecimal" => 0L
         }
       case num: BsonNumber => num.longValue()
     }
