@@ -1,7 +1,5 @@
 import scala.collection.Seq
 
-performMavenCentralSync in ThisBuild := false
-
 publishAsOSSProject in ThisBuild := true
 
 homepage in ThisBuild := Some(url("https://github.com/slamdata/quasar-datasource-mongo"))
