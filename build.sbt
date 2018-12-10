@@ -22,6 +22,7 @@ val shimsVersion = "1.2.1"
 val slf4jVersion = "1.7.25"
 val specsVersion = "4.3.3"
 val refinedVersion = "0.8.5"
+val nettyVersion = "4.1.28.Final"
 
 lazy val core = project
   .in(file("datasource"))
@@ -39,6 +40,7 @@ lazy val core = project
       "org.mongodb.scala"          %% "mongo-scala-driver"         % mongoVersion,
       "com.slamdata"               %% "qdata-json"                 % qdataVersion,
 
+      "io.netty"                   %  "netty-all"                  % nettyVersion,
       "com.slamdata"               %% "quasar-foundation-internal" % quasarVersion % Test classifier "tests",
       "org.mongodb.scala"          %% "mongo-scala-driver"         % mongoVersion % Test classifier "tests",
       "com.slamdata"               %% "qdata-json"                 % qdataVersion % Test,

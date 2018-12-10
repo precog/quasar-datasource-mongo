@@ -31,8 +31,11 @@ import quasar.connector.{MonadResourceErr, ResourceError}
 import quasar.physical.mongo.MongoResource.{Database, Collection}
 import quasar.Disposable
 
+import com.mongodb.ConnectionString
+
 import org.bson.{Document => _, _}
 import org.mongodb.scala._
+import org.mongodb.scala.connection.NettyStreamFactoryFactory
 
 class Mongo[F[_]: MonadResourceErr : ConcurrentEffect] private[Mongo](client: MongoClient) {
   import Mongo._
@@ -82,9 +85,9 @@ object Mongo {
           run(subVar.put(sub))
           sub.request(1L)
         }
-        override def onNext(result: A): Unit = {
+        override def onNext(result: A): Unit =
           cb(Some(Right(subVar.read.map(_.request(1L)).as(result))))
-        }
+
         override def onError(e: Throwable): Unit = cb(Some(Left(e)))
 
         override def onComplete(): Unit = cb(None)
@@ -120,8 +123,16 @@ object Mongo {
 
   def apply[F[_]: ConcurrentEffect: MonadResourceErr](config: MongoConfig): F[Disposable[F, Mongo[F]]] = {
 
-    val mkClient: F[MongoClient] =
-      ConcurrentEffect[F].delay(MongoClient(config.connectionString))
+    def delay[A](a: A): F[A] = ConcurrentEffect[F].delay(a)
+
+    val mkClient: F[MongoClient] = for {
+      connString <- delay(new ConnectionString(config.connectionString))
+      connStringSettings <- delay(MongoClientSettings.builder().applyConnectionString(connString).build())
+      settings <- delay(if (connStringSettings.getSslSettings.isEnabled) {
+        MongoClientSettings.builder(connStringSettings).streamFactoryFactory(NettyStreamFactoryFactory()).build()
+      } else connStringSettings)
+      client <- delay(MongoClient(settings))
+    } yield client
 
     def runCommand(client: MongoClient): F[Unit] =
       ConcurrentEffect[F].suspend(singleObservableAsF[F, Unit](
