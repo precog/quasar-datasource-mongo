@@ -50,6 +50,7 @@ class MongoSpec extends EffectfulQSpec[IO] {
     "for unreachable config" >> {
       Mongo[IO](MongoConfig("mongodb://unreachable")).unsafeRunSync() must throwA[Throwable]
     }
+
   }
 
   "getting databases works correctly" >>* mkMongo.flatMap(_ { mongo =>

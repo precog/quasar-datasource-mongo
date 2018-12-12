@@ -75,18 +75,20 @@ class Mongo[F[_]: MonadResourceErr : ConcurrentEffect] private[Mongo](client: Mo
 object Mongo {
 
   def observableAsStream[F[_]: ConcurrentEffect, A](obs: Observable[A]): Stream[F, A] = {
+    val queueSize: Int = 2048
+
     val F = ConcurrentEffect[F]
 
     def run(action: F[Unit]): Unit = F.runAsync(action)(_ => IO.unit).unsafeRunSync
 
-    def handler(subVar: MVar[F, Subscription], cb: Option[Either[Throwable, F[A]]] => Unit): Unit = {
+    def handler(subVar: MVar[F, Subscription], cb: Option[Either[Throwable, A]] => Unit): Unit = {
       obs.subscribe(new Observer[A] {
         override def onSubscribe(sub: Subscription): Unit = {
           run(subVar.put(sub))
-          sub.request(1L)
+          sub.request(queueSize.toLong)
         }
         override def onNext(result: A): Unit =
-          cb(Some(Right(subVar.read.map(_.request(1L)).as(result))))
+          cb(Some(Right(result)))
 
         override def onError(e: Throwable): Unit = cb(Some(Left(e)))
 
@@ -99,18 +101,21 @@ object Mongo {
     }
 
     def enqueueObservable(
-        obsQ: NoneTerminatedQueue[F, Either[Throwable, F[A]]],
+        obsQ: NoneTerminatedQueue[F, Either[Throwable, A]],
         subVar: MVar[F, Subscription])
         : Stream[F, Unit] =
       Stream.eval(F.delay(handler(subVar, { x => run(obsQ.enqueue1(x)) })))
 
     (for {
-      obsQ <- Stream.eval(Queue.boundedNoneTerminated[F, Either[Throwable, F[A]]](1))
+      obsQ <- Stream.eval(Queue.boundedNoneTerminated[F, Either[Throwable, A]](queueSize))
       subVar <- Stream.eval(MVar[F].empty[Subscription])
       _ <- enqueueObservable(obsQ, subVar)
-      res <- obsQ.dequeue.rethrow.onFinalize(subVar.take.flatMap(unsubscribe))
-    } yield Stream.eval(res)).flatten
+      res <- obsQ.dequeue.chunkN(queueSize, true).flatMap( c =>
+        Stream.evalUnChunk(subVar.read.map(_.request(c.size.toLong)).as(c))
+      ).rethrow.onFinalize(subVar.take.flatMap(unsubscribe))
+    } yield res)
   }
+
 
   def singleObservableAsF[F[_]: Async, A](obs: SingleObservable[A]): F[A] =
     Async[F].async { cb: (Either[Throwable, A] => Unit) =>
