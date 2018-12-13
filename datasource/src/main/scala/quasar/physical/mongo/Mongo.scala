@@ -37,10 +37,46 @@ import org.bson.{Document => _, _}
 import org.mongodb.scala._
 import org.mongodb.scala.connection.NettyStreamFactoryFactory
 
-class Mongo[F[_]: MonadResourceErr : ConcurrentEffect] private[Mongo](client: MongoClient) {
-  import Mongo._
-
+class Mongo[F[_]: MonadResourceErr : ConcurrentEffect] private[Mongo](client: MongoClient, queueSize: Int) {
   val F: ConcurrentEffect[F] = ConcurrentEffect[F]
+
+  private def observableAsStream[A](obs: Observable[A]): Stream[F, A] = {
+    def run(action: F[Unit]): Unit = F.runAsync(action)(_ => IO.unit).unsafeRunSync
+
+    def handler(subVar: MVar[F, Subscription], cb: Option[Either[Throwable, A]] => Unit): Unit = {
+      obs.subscribe(new Observer[A] {
+        override def onSubscribe(sub: Subscription): Unit = {
+          run(subVar.put(sub))
+          sub.request(queueSize.toLong)
+        }
+        override def onNext(result: A): Unit =
+          cb(Some(Right(result)))
+
+        override def onError(e: Throwable): Unit = cb(Some(Left(e)))
+
+        override def onComplete(): Unit = cb(None)
+      })
+    }
+
+    def unsubscribe(s: Subscription): F[Unit] = F.delay {
+      if (!s.isUnsubscribed()) s.unsubscribe()
+    }
+
+    def enqueueObservable(
+        obsQ: NoneTerminatedQueue[F, Either[Throwable, A]],
+        subVar: MVar[F, Subscription])
+        : Stream[F, Unit] =
+      Stream.eval(F.delay(handler(subVar, { x => run(obsQ.enqueue1(x)) })))
+
+    (for {
+      obsQ <- Stream.eval(Queue.boundedNoneTerminated[F, Either[Throwable, A]](queueSize))
+      subVar <- Stream.eval(MVar[F].empty[Subscription])
+      _ <- enqueueObservable(obsQ, subVar)
+      res <- obsQ.dequeueChunk(queueSize).chunks.flatMap( c =>
+        Stream.evalUnChunk(subVar.read.map(_.request(c.size.toLong)).as(c))
+      ).rethrow.onFinalize(subVar.take.flatMap(unsubscribe))
+    } yield res)
+  }
 
   def databases: Stream[F, Database] =
     observableAsStream(client.listDatabaseNames).map(Database(_))
@@ -73,45 +109,6 @@ class Mongo[F[_]: MonadResourceErr : ConcurrentEffect] private[Mongo](client: Mo
 }
 
 object Mongo {
-
-  def observableAsStream[F[_]: ConcurrentEffect, A](obs: Observable[A]): Stream[F, A] = {
-    val F = ConcurrentEffect[F]
-
-    def run(action: F[Unit]): Unit = F.runAsync(action)(_ => IO.unit).unsafeRunSync
-
-    def handler(subVar: MVar[F, Subscription], cb: Option[Either[Throwable, F[A]]] => Unit): Unit = {
-      obs.subscribe(new Observer[A] {
-        override def onSubscribe(sub: Subscription): Unit = {
-          run(subVar.put(sub))
-          sub.request(1L)
-        }
-        override def onNext(result: A): Unit =
-          cb(Some(Right(subVar.read.map(_.request(1L)).as(result))))
-
-        override def onError(e: Throwable): Unit = cb(Some(Left(e)))
-
-        override def onComplete(): Unit = cb(None)
-      })
-    }
-
-    def unsubscribe(s: Subscription): F[Unit] = F.delay {
-      if (!s.isUnsubscribed()) s.unsubscribe()
-    }
-
-    def enqueueObservable(
-        obsQ: NoneTerminatedQueue[F, Either[Throwable, F[A]]],
-        subVar: MVar[F, Subscription])
-        : Stream[F, Unit] =
-      Stream.eval(F.delay(handler(subVar, { x => run(obsQ.enqueue1(x)) })))
-
-    (for {
-      obsQ <- Stream.eval(Queue.boundedNoneTerminated[F, Either[Throwable, F[A]]](1))
-      subVar <- Stream.eval(MVar[F].empty[Subscription])
-      _ <- enqueueObservable(obsQ, subVar)
-      res <- obsQ.dequeue.rethrow.onFinalize(subVar.take.flatMap(unsubscribe))
-    } yield Stream.eval(res)).flatten
-  }
-
   def singleObservableAsF[F[_]: Async, A](obs: SingleObservable[A]): F[A] =
     Async[F].async { cb: (Either[Throwable, A] => Unit) =>
       obs.subscribe(new Observer[A] {
@@ -121,30 +118,29 @@ object Mongo {
       })
     }
 
-  def apply[F[_]: ConcurrentEffect: MonadResourceErr](config: MongoConfig): F[Disposable[F, Mongo[F]]] = {
-
-    def delay[A](a: A): F[A] = ConcurrentEffect[F].delay(a)
+  def apply[F[_]: ConcurrentEffect: MonadResourceErr](config: MongoConfig, queueSize: Int): F[Disposable[F, Mongo[F]]] = {
+    val F = ConcurrentEffect[F]
 
     val mkClient: F[MongoClient] = for {
-      connString <- delay(new ConnectionString(config.connectionString))
-      connStringSettings <- delay(MongoClientSettings.builder().applyConnectionString(connString).build())
-      settings <- delay(if (connStringSettings.getSslSettings.isEnabled) {
+      connString <- F.delay(new ConnectionString(config.connectionString))
+      connStringSettings <- F.delay(MongoClientSettings.builder().applyConnectionString(connString).build())
+      settings <- F.delay(if (connStringSettings.getSslSettings.isEnabled) {
         MongoClientSettings.builder(connStringSettings).streamFactoryFactory(NettyStreamFactoryFactory()).build()
       } else connStringSettings)
-      client <- delay(MongoClient(settings))
+      client <- F.delay(MongoClient(settings))
     } yield client
 
     def runCommand(client: MongoClient): F[Unit] =
-      ConcurrentEffect[F].suspend(singleObservableAsF[F, Unit](
+      F.suspend(singleObservableAsF[F, Unit](
         client.getDatabase("admin").runCommand[Document](Document("ping" -> 1)).map(_ => ())
       ))
 
     def close(client: MongoClient): F[Unit] =
-      ConcurrentEffect[F].delay(client.close())
+      F.delay(client.close())
 
     for {
       client <- mkClient
       _ <- runCommand(client)
-    } yield Disposable(new Mongo[F](client), close(client))
+    } yield Disposable(new Mongo[F](client, queueSize), close(client))
   }
 }
