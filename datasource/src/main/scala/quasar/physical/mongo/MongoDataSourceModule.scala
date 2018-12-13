@@ -43,6 +43,8 @@ object MongoDataSourceModule extends LightweightDatasourceModule {
   type Error = InitializationError[Json]
   type ErrorOrResult[F[_]] = Error \/ Result[F]
 
+  val defaultQueueSize: Int = 2048
+
   private def mkError[F[_]](config: Json, msg: String): ErrorOrResult[F] =
     DatasourceError
       .invalidConfiguration[Json, Error](kind, sanitizeConfig(config), NonEmptyList(msg))
@@ -58,7 +60,7 @@ object MongoDataSourceModule extends LightweightDatasourceModule {
       case Left((msg, _)) =>
         mkError(config, msg).pure[F]
       case Right(mongoConfig) => {
-        Mongo(mongoConfig).attempt.map { _ match {
+        Mongo(mongoConfig, defaultQueueSize).attempt.map { _ match {
           case Left(e) => mkError(config, e.getMessage)
           case Right(disposableClient) =>
             disposableClient.map(client => (new MongoDataSource(client): DS[F])).right[Error]

@@ -45,10 +45,10 @@ class MongoSpec extends EffectfulQSpec[IO] {
 
   "can't create client from incorrect connection string" >> {
     "for incorrect protocol" >> {
-      Mongo[IO](MongoConfig("http://localhost")).unsafeRunSync() must throwA[Throwable]
+      Mongo[IO](MongoConfig("http://localhost"), testQueueSize).unsafeRunSync() must throwA[Throwable]
     }
     "for unreachable config" >> {
-      Mongo[IO](MongoConfig("mongodb://unreachable")).unsafeRunSync() must throwA[Throwable]
+      Mongo[IO](MongoConfig("mongodb://unreachable"), testQueueSize).unsafeRunSync() must throwA[Throwable]
     }
 
   }
@@ -130,8 +130,10 @@ object MongoSpec {
 
   lazy val connectionString = Source.fromFile("./datasource/src/test/resources/mongo-connection").mkString.trim
 
+  val testQueueSize: Int = 64
+
   def mkMongo: IO[Disposable[IO, Mongo[IO]]] =
-    Mongo[IO](MongoConfig(connectionString))
+    Mongo[IO](MongoConfig(connectionString), testQueueSize)
 
   def incorrectCollections: List[Collection] = {
     val incorrectDbStream =
