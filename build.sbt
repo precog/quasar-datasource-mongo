@@ -39,9 +39,8 @@ lazy val core = project
       "org.typelevel"              %% "cats-effect"                % catsEffectVersion,
       "org.mongodb.scala"          %% "mongo-scala-driver"         % mongoVersion,
       "com.slamdata"               %% "qdata-json"                 % qdataVersion,
-
       "io.netty"                   %  "netty-all"                  % nettyVersion,
-      "com.slamdata"               %% "quasar-foundation-internal" % quasarVersion % Test classifier "tests",
+      "com.slamdata"               %% "quasar-foundation"          % quasarVersion % Test classifier "tests",
       "org.mongodb.scala"          %% "mongo-scala-driver"         % mongoVersion % Test classifier "tests",
       "com.slamdata"               %% "qdata-json"                 % qdataVersion % Test,
       "org.slf4j"                  %  "slf4j-log4j12"              % slf4jVersion % Test,
