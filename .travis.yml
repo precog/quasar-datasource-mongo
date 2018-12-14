@@ -1,48 +1,73 @@
 language: scala
 scala: 2.12.6
 jdk: oraclejdk8
+
 stages:
 - name: test
 - name: publish
   if: NOT type = pull_request
+
 services:
-- docker
+  - docker
+
 cache:
   directories:
-  - "$HOME/.ivy2/cache"
-  - "$HOME/.sbt"
-  - "$HOME/.coursier/cache"
-  - ".hoarder-cache"
+    - "$HOME/.ivy2/cache"
+    - "$HOME/.sbt"
+    - "$HOME/.coursier/cache"
+    - ".hoarder-cache"
+
 env:
   global:
-  - COURSIER_PROGRESS=0
-  - SBT=./sbt
-  - secure: Lu01RAVsTV1RwEL7WD18V6II1MsYiDkzkdmxL3Pbx3ZTAXsvbjWm+lJNt5ezUFUtlSRbdvnCldaTlE4Y3oK6EucM8C1I90SuO6mWd3lWhy3UYz49z3bfvHYiH/7hcgOXqKDIXxJwuKBLgv6Mvnid56kABZPOn1hAImV+KzCEgwFC+uU13bnxK6lDXSRF9Nv4Nh/NZsiEhYbZWSqQ78Z/Jdk4iLxUXiifX1CoorFzYMugsEn2KyZE2JvUTzzK94XXSgdHKvTpMiMqy7pq+anc/BxS/tczHBnJxAPGPbZBc6+nFeSafZWFNWvI4jJ9MSv50/GdclvyjOdeqHkiJMJ72vNnf51QzpbULXAw5DdbIosYaWA/va1XIF8IAwGdQ3HaD3v9aiuCF9fR8252ZYXTMutsGkEWuqTLhteSBTB6ueji9m6BSqtE8d6SBQpK67xKnJ2DphGAix0cNl2rkGMwR/c+qYIAh0VFXlud+NYzV+yzU9zgx/js89cJZMUwZLhMEL5sEiScqjhzcPJxiSyaGB3wb2fTbX8kMmaqBgAQYfJ8NQP9IBRGEH92tW9NVdfCt1234G8Gqo762bY9m2zF97mBnYHVj9diUznISTUX1enzmbi9AjviSEQrozV3//X4WMJP9FaApCl1cu0al0tMCSZYNCd/ULRA8/YJKkoN/gA=
-  - secure: FLlEQrOvAb2X1yia3RFRPk6w/jCzCRujYz5Oj6EVA+oSsiUkWyqT7XeeJodsABJK/7t24nxAQcYaD4LcBA1pYmKKRXYW4ffhlUrVzUdWk1QJPCHKw17PlJpr4orKQzyBKuAk4TTMzNTLtg6eB6mQgqL8uMUT2Gj6bxRy6+7i/SY5CP8c6iYTiz8l1cAreNmsyu40LMnZKNAEfSWvQi7GmTPk2w7/9wmDT0MUglbvhvnkYQAkEkEEWSItzWWjXgSVKL+SBPM8wRfub71sGoYhFYQV5Ae7mgikC0j9O+tBCOYA1qOPw3BIufuo/Lr+LM1OH/xc2rWpy98fwgmQUPFv60SbfKa4O0Rm+wY6TJjyFtX8MdJT0O+Jx80ATi5MeY1yoI4fuC1Lm2g++M06aKPHU2/yCphNRJE4g13Wh5Fk6dR3jO1uqbBB5F7v0aW9385BwCVAed/YzCa6AC8eGzgE7Hn5e7+GMn/T9X/deWxDJr2B1wTKUF3pHWiQV7Yv74CvfoiPGSpQeeuUrU2UBtKOvw7qrTJB8vy+ANf5FWO4TlfHfWBsMVcMQZ0pcAuyx3yXaiPKGATUSnQZULx3JsqqJ3msKdF7Clk4qWhYhj9UiZNNT4mYm3nbuPStWPM3ojDInrlRYr9nQssFmKEQ/d2h3D8x3HINje899kqGtH1PfKY=
-  - secure: MMhDBthoEpiKVRGm2O9BWX+wjjWmVci+LAasyxLwZg0jiK05OyZH8XdeOs8wVYmZTbE0rYBEge9dL974cPHcK5oJwEVPFSsyJk6ySF31qm3clqJZegOYWkvOK0n+9PqAvPyovwBriRSDybrQzSfNxzhCiBLG3/CZhinbFt9SnU3QjuwEClg2AXsGiIAtuq/g3akAB3qSDVoV0IjEKVsoUXSsDgEeJ2UtlV+MUwm0QFzFbiXUmIck6YXnUB09dgBJMBuP+HYcLo2h12wypTJJnWN6o7C/x/JcDJuu2HEj1g7bg0f6+tV6iITYyiPHLvSFGeZN+yNanVvw7mJhDBfak4wxljx6pri9QTIkT7ju5dgh1M8IjJy42MhmCLtenBVURbHsTUY/hGmdqZhrc7cJ1sJOQ71jmFzZi5jsxtsIlPEvmZTZRdU1c5PWnL7zkFCig9I3Qb+rsia2CH0uWUPCBhEyPzZI47nrDRuVidjcVo1QuTd/9zUcwsuj2X1IUfsp4hBrEGGxPZLO7HlOfR63c68WnmtPLsDQs4seuKcA9mwgoJJ1U0Pdkut1rAlm6MbjkXrC3cnR+p3hm1gDJIF8+0uz07/nsByD4nUwFsJy3zRNeCUJudldkQPuWk+9OUQya+zy8O4kz57zS/rBOppdUUjMoGHxbO9dt9GEri7FvEQ=
-  - secure: eo/y90f8TVkTBqdnBaaGKdJp7Z0qM1VyiqvnMJyUH8o4BM352iT+gFRoAHl3mfRpUAPg+2hkF9yvzxgvEGH1npyECnF1FEnqZdnykgX9bwvHguZzPHpkeKN57GftiXPYa2rnzlwnwWtz4PeSWs5GZOAmZ0DEaNXoQK+dT2iHQI+c5Yt+5OR56TCcs9JLzWBfydOTFep6jDAh/nEph1PTMhPkReHZIa1LuIc9ZOyr1Xo6vwECVSRDdqsg7LRAOCMi65OIae39oiwfR4EEI8JArN4kLFsr1qO9b35nQmRZPPSVko2RTigKrcqlhuV4MaKBSv3ekZU/me6c1ju7WwJ9QRJLov9o9R5CqInhqBVP9A66rw53s/TqlLhwBG5M+nWvG3/NHAgn0sw2PsSGVIZCIiRVwSxwM4BjbloHEO25D9Se5jCHDDrWH8RyTXistyK+XHzha9Tv25JDtGunIG0sl1AU723xnfGaLN+SDCpObTJtFVDN2QyHPDZ5d17ur8qqwYasmYLh3WMZfmez9KbvUSQPWKbflsPHqrwTD3JRtVTfgDIpluolq4yrZpwi+fyzmtNMiR1cfd1Wacad8WjAUtED3wcghrtooskQ7PB+4QwnFR/Bd47IUnkRzYuVrKI1jpVYQFWCyYiTraJI/d7zQSz1BL9cynIU6t8ZVmI/vcE=
+    - COURSIER_PROGRESS=0
+    - SBT=./sbt
+    - secure: Lu01RAVsTV1RwEL7WD18V6II1MsYiDkzkdmxL3Pbx3ZTAXsvbjWm+lJNt5ezUFUtlSRbdvnCldaTlE4Y3oK6EucM8C1I90SuO6mWd3lWhy3UYz49z3bfvHYiH/7hcgOXqKDIXxJwuKBLgv6Mvnid56kABZPOn1hAImV+KzCEgwFC+uU13bnxK6lDXSRF9Nv4Nh/NZsiEhYbZWSqQ78Z/Jdk4iLxUXiifX1CoorFzYMugsEn2KyZE2JvUTzzK94XXSgdHKvTpMiMqy7pq+anc/BxS/tczHBnJxAPGPbZBc6+nFeSafZWFNWvI4jJ9MSv50/GdclvyjOdeqHkiJMJ72vNnf51QzpbULXAw5DdbIosYaWA/va1XIF8IAwGdQ3HaD3v9aiuCF9fR8252ZYXTMutsGkEWuqTLhteSBTB6ueji9m6BSqtE8d6SBQpK67xKnJ2DphGAix0cNl2rkGMwR/c+qYIAh0VFXlud+NYzV+yzU9zgx/js89cJZMUwZLhMEL5sEiScqjhzcPJxiSyaGB3wb2fTbX8kMmaqBgAQYfJ8NQP9IBRGEH92tW9NVdfCt1234G8Gqo762bY9m2zF97mBnYHVj9diUznISTUX1enzmbi9AjviSEQrozV3//X4WMJP9FaApCl1cu0al0tMCSZYNCd/ULRA8/YJKkoN/gA=
+    - secure: FLlEQrOvAb2X1yia3RFRPk6w/jCzCRujYz5Oj6EVA+oSsiUkWyqT7XeeJodsABJK/7t24nxAQcYaD4LcBA1pYmKKRXYW4ffhlUrVzUdWk1QJPCHKw17PlJpr4orKQzyBKuAk4TTMzNTLtg6eB6mQgqL8uMUT2Gj6bxRy6+7i/SY5CP8c6iYTiz8l1cAreNmsyu40LMnZKNAEfSWvQi7GmTPk2w7/9wmDT0MUglbvhvnkYQAkEkEEWSItzWWjXgSVKL+SBPM8wRfub71sGoYhFYQV5Ae7mgikC0j9O+tBCOYA1qOPw3BIufuo/Lr+LM1OH/xc2rWpy98fwgmQUPFv60SbfKa4O0Rm+wY6TJjyFtX8MdJT0O+Jx80ATi5MeY1yoI4fuC1Lm2g++M06aKPHU2/yCphNRJE4g13Wh5Fk6dR3jO1uqbBB5F7v0aW9385BwCVAed/YzCa6AC8eGzgE7Hn5e7+GMn/T9X/deWxDJr2B1wTKUF3pHWiQV7Yv74CvfoiPGSpQeeuUrU2UBtKOvw7qrTJB8vy+ANf5FWO4TlfHfWBsMVcMQZ0pcAuyx3yXaiPKGATUSnQZULx3JsqqJ3msKdF7Clk4qWhYhj9UiZNNT4mYm3nbuPStWPM3ojDInrlRYr9nQssFmKEQ/d2h3D8x3HINje899kqGtH1PfKY=
+    - secure: MMhDBthoEpiKVRGm2O9BWX+wjjWmVci+LAasyxLwZg0jiK05OyZH8XdeOs8wVYmZTbE0rYBEge9dL974cPHcK5oJwEVPFSsyJk6ySF31qm3clqJZegOYWkvOK0n+9PqAvPyovwBriRSDybrQzSfNxzhCiBLG3/CZhinbFt9SnU3QjuwEClg2AXsGiIAtuq/g3akAB3qSDVoV0IjEKVsoUXSsDgEeJ2UtlV+MUwm0QFzFbiXUmIck6YXnUB09dgBJMBuP+HYcLo2h12wypTJJnWN6o7C/x/JcDJuu2HEj1g7bg0f6+tV6iITYyiPHLvSFGeZN+yNanVvw7mJhDBfak4wxljx6pri9QTIkT7ju5dgh1M8IjJy42MhmCLtenBVURbHsTUY/hGmdqZhrc7cJ1sJOQ71jmFzZi5jsxtsIlPEvmZTZRdU1c5PWnL7zkFCig9I3Qb+rsia2CH0uWUPCBhEyPzZI47nrDRuVidjcVo1QuTd/9zUcwsuj2X1IUfsp4hBrEGGxPZLO7HlOfR63c68WnmtPLsDQs4seuKcA9mwgoJJ1U0Pdkut1rAlm6MbjkXrC3cnR+p3hm1gDJIF8+0uz07/nsByD4nUwFsJy3zRNeCUJudldkQPuWk+9OUQya+zy8O4kz57zS/rBOppdUUjMoGHxbO9dt9GEri7FvEQ=
+    - secure: eo/y90f8TVkTBqdnBaaGKdJp7Z0qM1VyiqvnMJyUH8o4BM352iT+gFRoAHl3mfRpUAPg+2hkF9yvzxgvEGH1npyECnF1FEnqZdnykgX9bwvHguZzPHpkeKN57GftiXPYa2rnzlwnwWtz4PeSWs5GZOAmZ0DEaNXoQK+dT2iHQI+c5Yt+5OR56TCcs9JLzWBfydOTFep6jDAh/nEph1PTMhPkReHZIa1LuIc9ZOyr1Xo6vwECVSRDdqsg7LRAOCMi65OIae39oiwfR4EEI8JArN4kLFsr1qO9b35nQmRZPPSVko2RTigKrcqlhuV4MaKBSv3ekZU/me6c1ju7WwJ9QRJLov9o9R5CqInhqBVP9A66rw53s/TqlLhwBG5M+nWvG3/NHAgn0sw2PsSGVIZCIiRVwSxwM4BjbloHEO25D9Se5jCHDDrWH8RyTXistyK+XHzha9Tv25JDtGunIG0sl1AU723xnfGaLN+SDCpObTJtFVDN2QyHPDZ5d17ur8qqwYasmYLh3WMZfmez9KbvUSQPWKbflsPHqrwTD3JRtVTfgDIpluolq4yrZpwi+fyzmtNMiR1cfd1Wacad8WjAUtED3wcghrtooskQ7PB+4QwnFR/Bd47IUnkRzYuVrKI1jpVYQFWCyYiTraJI/d7zQSz1BL9cynIU6t8ZVmI/vcE=
+
+install:
+  - gem install octokit
+
+  - git config --global user.email "bot@slamdata.com"
+  - git config --global user.name "SlamData Bot"
+
 jobs:
   include:
   - stage: test
     script:
-    - docker run -d -p 127.0.0.1:27018:27017 --name mongodb bitnami/mongodb:4.1.4
-    - set -e
-    - "$SBT ++$TRAVIS_SCALA_VERSION test"
+      - docker run -d -p 127.0.0.1:27018:27017 --name mongodb bitnami/mongodb:4.1.4
+      - set -e
+      - "$SBT ++$TRAVIS_SCALA_VERSION test"
   - stage: publish
     script:
-    - set -e
-    - "$SBT transferPublishAndTagResources"
-    - TRAVIS_JOB_NUMBER=1 scripts/publishAndTag 'slamdata/quasar-datasource-mongo'
+      - set -e
+      - "$SBT transferPublishAndTagResources"
+      - TRAVIS_JOB_NUMBER=1 scripts/publishAndTag 'slamdata/quasar-datasource-mongo'
     git:
       depth: false
+
 after_success:
-- scripts/discordTravisPost success https://discordapp.com/api/webhooks/$DISCORD_WEBHOOK_TOKENS
+  - |
+    if [ $TRAVIS_PULL_REQUEST != "false" ] && [[ $TRAVIS_PULL_REQUEST_BRANCH =~ 'version-bump' ]]; then
+      clone_dir=$(mktemp -d "/tmp/slamdata-bump.XXXXXXXX")
+      git clone --depth 1 https://$GITHUB_TOKEN@github.com/slamdata/devtools.git $clone_dir
+
+      for t in "$(scripts/listLabels | grep 'version: revision')"; do
+        $clone_dir/bin/sdmerge $TRAVIS_REPO_SLUG $TRAVIS_PULL_REQUEST
+      done
+    fi
+
+  - scripts/discordTravisPost success https://discordapp.com/api/webhooks/$DISCORD_WEBHOOK_TOKENS
+
 after_failure:
-- scripts/discordTravisPost failure https://discordapp.com/api/webhooks/$DISCORD_WEBHOOK_TOKENS
+  - scripts/discordTravisPost failure https://discordapp.com/api/webhooks/$DISCORD_WEBHOOK_TOKENS
+
 branches:
   only:
   - master
   - "/^backport.*$/"
+
 before_cache:
 - find "$HOME/.sbt/" -name '*.lock' -print0 | xargs -0 rm
 - find "$HOME/.ivy2/" -name 'ivydata-*.properties' -print0 | xargs -0 rm
