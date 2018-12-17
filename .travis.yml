@@ -31,10 +31,9 @@ env:
     - secure: "Tdo5hv1fq4SCg4/HSoGjdLAEY4fZQgQkD9S9pqpPUtrTInzgzO8lm+YYO+DwmjWHfSGz+Orr2fdrciYjymPWobKMAY3PGJHfKF7HGu+dXZAkYN1xOEBmfiXYkK4muy/pmknDu3j//8MMRmHQBvhgu55qinV/IO5LBNgIvq1RHm6veUa8pB8i5NRIy7Rg076cBFzeUM/LAVv5zvZqdYvIeXYtvJ+gNctr+PW+7n5grJF1kNRdB35zUJ7c4/UG1hWuyx+Aih26OARd8UG/EYXTbAjeFa+Ylor10mXAIMpa4/i5yYSMlxndLrox18aO+zY5Gxwz+grxUVBfyy1+j/XeYh+lluyNe6n7HWmjQ+2rxUKZ1AIfhMIYEj3q5rDCp/ievVBQtCCUyOslG3cNhptHWpErAkLu5kNf55cgqBqp1jEJoYsYqR81c3LNtCgLiR8Sn+wGByEcXdHJH+0hvZJtqPwLk4EXHsBwE4Ot7T5XYvZ9ChI8DqPksX7+95fYis4NRYWYoRuEBCwoHAn4Xdjk5p/VgzVAh/Bk897C9f3XlUoC481ww4X/N4RLVoyXYsoohHvqE/hrJzxv+rsjp8Jcvbfs4TCm5KBhw6mDnfb+r6sRIGtwDxELiB7wLFiwUImqMDAc7DWdO8gtkuwX687xsWPt1IbKbGbS6OvYVLWm+x4="
 
 install:
-  - gem install octokit
-
-  - git config --global user.email "bot@slamdata.com"
-  - git config --global user.name "SlamData Bot"
+  - mkdir scripts
+  - $SBT transferCommonResources
+  - scripts/commonSetup
 
 jobs:
   include:
@@ -52,18 +51,7 @@ jobs:
       depth: false
 
 after_success:
-  - |
-    if [ $TRAVIS_PULL_REQUEST != "false" ] && [[ $TRAVIS_PULL_REQUEST_BRANCH =~ 'version-bump' ]]; then
-      if [[ "$(git diff HEAD^ | grep -e '^[-+][0-9]' | sed 's/^[+\-]//' | sed 's/\.[0-9]*$//' | uniq | wc -l)" -eq 2 ]]; then
-        clone_dir=$(mktemp -d "/tmp/slamdata-bump.XXXXXXXX")
-        git clone --depth 1 https://$GITHUB_TOKEN@github.com/slamdata/devtools.git $clone_dir
-
-        for t in "$(scripts/listLabels | grep 'version: revision')"; do
-          $clone_dir/bin/sdmerge $TRAVIS_REPO_SLUG $TRAVIS_PULL_REQUEST
-        done
-      fi
-    fi
-
+  - scripts/checkAndAutoMerge
   - scripts/discordTravisPost success https://discordapp.com/api/webhooks/$DISCORD_WEBHOOK_TOKENS
 
 after_failure:
