@@ -33,6 +33,7 @@ import quasar.connector.{MonadResourceErr, QueryResult, ResourceError}
 import quasar.connector.datasource.LightweightDatasource
 import quasar.physical.mongo.decoder.qdataDecoder
 import quasar.physical.mongo.MongoResource.{Database, Collection}
+import quasar.qscript.InterpretedRead
 
 import shims._
 
@@ -41,7 +42,8 @@ class MongoDataSource[F[_]: ConcurrentEffect: ContextShift: MonadResourceErr: Ti
 
   val kind = MongoDataSource.kind
 
-  override def evaluate(path: ResourcePath): F[QueryResult[F]] = {
+  override def evaluate(iRead: InterpretedRead[ResourcePath]): F[QueryResult[F]] = {
+    val path = iRead.path
     val errored =
       MonadResourceErr.raiseError(ResourceError.pathNotFound(path))
 
@@ -53,7 +55,7 @@ class MongoDataSource[F[_]: ConcurrentEffect: ContextShift: MonadResourceErr: Ti
         case Some(collection@Collection(_, _)) => mongo.findAll(collection)
       }
     }
-    fStream.map(stream => QueryResult.parsed(qdataDecoder, stream))
+    fStream.map(stream => QueryResult.parsed(qdataDecoder, stream, iRead.instructions))
   }
 
   override def pathIsResource(path: ResourcePath): F[Boolean] = path match {

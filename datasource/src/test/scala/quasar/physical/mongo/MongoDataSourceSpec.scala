@@ -27,6 +27,7 @@ import org.specs2.specification.core._
 
 import quasar.api.resource.{ResourceName, ResourcePath, ResourcePathType}
 import quasar.physical.mongo.MongoResource.Collection
+import quasar.qscript.InterpretedRead
 import quasar.{EffectfulQSpec, Disposable}
 
 import shims._
@@ -38,14 +39,16 @@ class MongoDataSourceSpec extends EffectfulQSpec[IO] {
 
   step(MongoSpec.setupDB)
 
+  private def iRead[A](path: A): InterpretedRead[A] = InterpretedRead(path, List())
+
   "evaluation" >> {
     "of root should raises an error" >> {
-      mkDataSource.flatMap(_ { _.evaluate(ResourcePath.root())}).unsafeRunSync() must throwA[Throwable]
+      mkDataSource.flatMap(_ { _.evaluate(iRead(ResourcePath.root()))}).unsafeRunSync() must throwA[Throwable]
     }
     "of a database raises an error" >>
       Fragment.foreach(MongoSpec.correctDbs ++ MongoSpec.incorrectDbs)(db =>
         s"checking ${db.name}" >> {
-          mkDataSource.flatMap(_ { _.evaluate(db.resourcePath) }).unsafeRunSync() must throwA[Throwable]
+          mkDataSource.flatMap(_ { _.evaluate(iRead(db.resourcePath)) }).unsafeRunSync() must throwA[Throwable]
         }
       )
     "of existing collections is collection content" >>
@@ -57,7 +60,7 @@ class MongoDataSourceSpec extends EffectfulQSpec[IO] {
             case _ => false
           }
           mkDataSource.flatMap(_ { ds =>
-            val fStream: IO[Stream[IO, Any]] = ds.evaluate(coll.resourcePath).map(_.data)
+            val fStream: IO[Stream[IO, Any]] = ds.evaluate(iRead(coll.resourcePath)).map(_.data)
             val fList: IO[List[Any]] = Stream.force(fStream).compile.toList
             fList.map(checkBson(coll, _))
           })
@@ -65,7 +68,7 @@ class MongoDataSourceSpec extends EffectfulQSpec[IO] {
     "of non-existent collections raises error" >>
       Fragment.foreach(MongoSpec.incorrectCollections)(col =>
         s"checking ${col.database.name} :: ${col.name}" >> {
-          mkDataSource.flatMap(_ { _.evaluate(col.resourcePath) }).unsafeRunSync() must throwA[Throwable]
+          mkDataSource.flatMap(_ { _.evaluate(iRead(col.resourcePath)) }).unsafeRunSync() must throwA[Throwable]
         }
       )
   }
