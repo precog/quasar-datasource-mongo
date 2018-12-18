@@ -16,7 +16,6 @@ lazy val root = project
 val quasarVersion = IO.read(file("./quasar-version")).trim
 val mongoVersion = "2.5.0"
 val catsEffectVersion = "1.0.0"
-val fs2Version = "1.0.0"
 val shimsVersion = "1.2.1"
 val slf4jVersion = "1.7.25"
 val specsVersion = "4.3.3"
@@ -37,11 +36,9 @@ lazy val core = project
       "eu.timepit"                 %% "refined-scalacheck"         % refinedVersion,
       "org.typelevel"              %% "cats-effect"                % catsEffectVersion,
       "org.mongodb.scala"          %% "mongo-scala-driver"         % mongoVersion,
-      "com.slamdata"               %% "quasar-foundation"          % quasarVersion,
-
       "io.netty"                   %  "netty-all"                  % nettyVersion,
+
       "com.slamdata"               %% "quasar-foundation"          % quasarVersion % Test classifier "tests",
-      "org.mongodb.scala"          %% "mongo-scala-driver"         % mongoVersion % Test classifier "tests",
       "org.slf4j"                  %  "slf4j-log4j12"              % slf4jVersion % Test,
       "org.specs2"                 %% "specs2-core"                % specsVersion % Test,
       "org.specs2"                 %% "specs2-scalaz"              % specsVersion % Test,
