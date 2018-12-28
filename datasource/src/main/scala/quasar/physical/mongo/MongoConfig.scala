@@ -20,18 +20,18 @@ import slamdata.Predef._
 
 import argonaut._, Argonaut._
 
-final case class MongoConfig(connectionString: String)
+final case class MongoConfig(connectionString: String, bsonBatchSize: Option[Int])
 
 object MongoConfig {
   implicit val codecMongoConfig: CodecJson[MongoConfig] =
-    casecodec1(MongoConfig.apply, MongoConfig.unapply)("connectionString")
+    casecodec2(MongoConfig.apply, MongoConfig.unapply)("connectionString", "bsonBatchSize")
 
   private val credentialsRegex = "://[^@+]+@".r
 
   def sanitize(config: Json): Json = config.as[MongoConfig].result match {
     case Left(_) => config
-    case Right(MongoConfig(value)) => {
-      MongoConfig(credentialsRegex.replaceFirstIn(value, "://<REDACTED>:<REDACTED>@")).asJson
+    case Right(MongoConfig(value, mem)) => {
+      MongoConfig(credentialsRegex.replaceFirstIn(value, "://<REDACTED>:<REDACTED>@"), mem).asJson
     }
   }
 }

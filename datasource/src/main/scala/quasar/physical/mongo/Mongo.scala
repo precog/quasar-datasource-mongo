@@ -37,18 +37,21 @@ import org.bson.{Document => _, _}
 import org.mongodb.scala._
 import org.mongodb.scala.connection.NettyStreamFactoryFactory
 
-class Mongo[F[_]: MonadResourceErr : ConcurrentEffect] private[Mongo](client: MongoClient, queueSize: Int) {
+class Mongo[F[_]: MonadResourceErr : ConcurrentEffect] private[Mongo](client: MongoClient, maxMemory: Int) {
+  import Mongo._
+
   val F: ConcurrentEffect[F] = ConcurrentEffect[F]
 
-  private def observableAsStream[A](obs: Observable[A]): Stream[F, A] = {
+  private def observableAsStream[A](obs: Observable[A], queueSize: Long): Stream[F, A] = {
     def run(action: F[Unit]): Unit = F.runAsync(action)(_ => IO.unit).unsafeRunSync
 
     def handler(subVar: MVar[F, Subscription], cb: Option[Either[Throwable, A]] => Unit): Unit = {
       obs.subscribe(new Observer[A] {
         override def onSubscribe(sub: Subscription): Unit = {
           run(subVar.put(sub))
-          sub.request(queueSize.toLong)
+          sub.request(queueSize)
         }
+
         override def onNext(result: A): Unit =
           cb(Some(Right(result)))
 
@@ -69,17 +72,19 @@ class Mongo[F[_]: MonadResourceErr : ConcurrentEffect] private[Mongo](client: Mo
       Stream.eval(F.delay(handler(subVar, { x => run(obsQ.enqueue1(x)) })))
 
     (for {
-      obsQ <- Stream.eval(Queue.boundedNoneTerminated[F, Either[Throwable, A]](queueSize))
+      obsQ <- Stream.eval(Queue.boundedNoneTerminated[F, Either[Throwable, A]](queueSize.toInt))
       subVar <- Stream.eval(MVar[F].empty[Subscription])
       _ <- enqueueObservable(obsQ, subVar)
-      res <- obsQ.dequeueChunk(queueSize).chunks.flatMap( c =>
+      res <- obsQ.dequeue.chunks.flatMap( c =>
         Stream.evalUnChunk(subVar.read.map(_.request(c.size.toLong)).as(c))
       ).rethrow.onFinalize(subVar.take.flatMap(unsubscribe))
     } yield res)
   }
 
+
+
   def databases: Stream[F, Database] =
-    observableAsStream(client.listDatabaseNames).map(Database(_))
+    observableAsStream(client.listDatabaseNames, DefaultQueueSize).map(Database(_))
 
   def databaseExists(database: Database): Stream[F, Boolean] =
     databases.exists(_ === database)
@@ -87,7 +92,7 @@ class Mongo[F[_]: MonadResourceErr : ConcurrentEffect] private[Mongo](client: Mo
   def collections(database: Database): Stream[F, Collection] = for {
     dbExists <- databaseExists(database)
     res <- if (!dbExists) { Stream.empty } else {
-      observableAsStream(client.getDatabase(database.name).listCollectionNames()).map(Collection(database, _))
+      observableAsStream(client.getDatabase(database.name).listCollectionNames(), DefaultQueueSize).map(Collection(database, _))
     }
   } yield res
 
@@ -95,20 +100,45 @@ class Mongo[F[_]: MonadResourceErr : ConcurrentEffect] private[Mongo](client: Mo
     collections(collection.database).exists(_ === collection)
 
   def findAll(collection: Collection): F[Stream[F, BsonValue]] = {
-    def getCollection(mongo: MongoClient) =
-      mongo.getDatabase(collection.database.name).getCollection(collection.name)
-
     collectionExists(collection).compile.last.map(_ getOrElse false)
       .flatMap(exists =>
         if (exists) {
-          F.delay(observableAsStream(getCollection(client).find[BsonValue]()))
+          getQueueSize(collection).map { (qs: Long) =>
+            observableAsStream(getCollection(collection).find[BsonValue](), qs)
+          }
         } else {
           MonadResourceErr.raiseError(ResourceError.pathNotFound(collection.resourcePath))
         })
   }
+
+  def getQueueSize(collection: Collection): F[Long] = {
+    val getStats: F[Document] = F.suspend(singleObservableAsF[F, Document](
+      client.getDatabase(collection.database.name).runCommand[Document](Document(
+        "collStats" -> collection.name,
+        "scale" -> 1
+      ))
+    ))
+
+    val max = if (maxMemory > MaxBsonBatch) MaxBsonBatch else maxMemory.toLong
+
+    getStats map { doc =>
+      val avgObjSize = doc.get("avgObjSize").fold(0)(_.asInt32.getValue)
+      val res = max / avgObjSize.toLong
+      if (res < 1L) 1L else if (res < MaxQueueSize) res else MaxQueueSize
+    }
+  }
+
+  private def getCollection(collection: Collection): MongoCollection[Document] =
+    client.getDatabase(collection.database.name).getCollection(collection.name)
+
 }
 
 object Mongo {
+  val DefaultBsonBatch: Int = 1024 * 128
+  val MaxBsonBatch: Long = 128L * 1024L * 1024L
+  val DefaultQueueSize: Long = 64L
+  val MaxQueueSize: Long = 2048L
+
   def singleObservableAsF[F[_]: Async, A](obs: SingleObservable[A]): F[A] =
     Async[F].async { cb: (Either[Throwable, A] => Unit) =>
       obs.subscribe(new Observer[A] {
@@ -118,7 +148,7 @@ object Mongo {
       })
     }
 
-  def apply[F[_]: ConcurrentEffect: MonadResourceErr](config: MongoConfig, queueSize: Int): F[Disposable[F, Mongo[F]]] = {
+  def apply[F[_]: ConcurrentEffect: MonadResourceErr](config: MongoConfig): F[Disposable[F, Mongo[F]]] = {
     val F = ConcurrentEffect[F]
 
     val mkClient: F[MongoClient] = for {
@@ -141,6 +171,6 @@ object Mongo {
     for {
       client <- mkClient
       _ <- runCommand(client)
-    } yield Disposable(new Mongo[F](client, queueSize), close(client))
+    } yield Disposable(new Mongo[F](client, config.bsonBatchSize.getOrElse(DefaultBsonBatch)), close(client))
   }
 }

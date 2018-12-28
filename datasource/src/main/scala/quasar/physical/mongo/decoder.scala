@@ -102,7 +102,6 @@ object decoder {
       case BsonType.MIN_KEY => QMeta
       case BsonType.END_OF_DOCUMENT => QNull
     }
-
     type ArrayCursor = Iterator[BsonValue]
 
     override def getArrayCursor(bson: BsonValue): ArrayCursor = bson match {
