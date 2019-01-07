@@ -18,13 +18,12 @@ package quasar.physical.mongo
 
 import slamdata.Predef._
 
-import cats.effect.{ConcurrentEffect, Async, IO}
-import cats.effect.concurrent.MVar
+import cats.effect.{Async, ConcurrentEffect, IO}
 import cats.syntax.eq._
 import cats.syntax.flatMap._
 import cats.syntax.functor._
 
-import fs2.concurrent.{Queue, NoneTerminatedQueue}
+import fs2.concurrent.Queue
 import fs2.Stream
 
 import quasar.connector.{MonadResourceErr, ResourceError}
@@ -41,41 +40,36 @@ class Mongo[F[_]: MonadResourceErr : ConcurrentEffect] private[Mongo](client: Mo
   val F: ConcurrentEffect[F] = ConcurrentEffect[F]
 
   private def observableAsStream[A](obs: Observable[A]): Stream[F, A] = {
-    def run(action: F[Unit]): Unit = F.runAsync(action)(_ => IO.unit).unsafeRunSync
+    val back = for {
+      as <- Queue.boundedNoneTerminated[F, Either[Throwable, A]](queueSize)
 
-    def handler(subVar: MVar[F, Subscription], cb: Option[Either[Throwable, A]] => Unit): Unit = {
-      obs.subscribe(new Observer[A] {
-        override def onSubscribe(sub: Subscription): Unit = {
-          run(subVar.put(sub))
-          sub.request(queueSize.toLong)
-        }
-        override def onNext(result: A): Unit =
-          cb(Some(Right(result)))
+      sub <- F.async[Subscription] { k =>
+        obs.subscribe(new Observer[A] {
 
-        override def onError(e: Throwable): Unit = cb(Some(Left(e)))
+          override def onSubscribe(sub: Subscription): Unit =
+            k(Right(sub))
 
-        override def onComplete(): Unit = cb(None)
-      })
-    }
+          override def onNext(result: A): Unit =
+            toIO(as.enqueue1(Some(Right(result)))).unsafeRunSync()
 
-    def unsubscribe(s: Subscription): F[Unit] = F.delay {
-      if (!s.isUnsubscribed()) s.unsubscribe()
-    }
+          override def onError(e: Throwable): Unit = {
+            k(Left(e))    // callbacks are idempotent, so this is okay; it will produce the subscription error if we failed to subscribe
+            toIO(as.enqueue1(Some(Left(e)))).unsafeRunSync()
+          }
 
-    def enqueueObservable(
-        obsQ: NoneTerminatedQueue[F, Either[Throwable, A]],
-        subVar: MVar[F, Subscription])
-        : Stream[F, Unit] =
-      Stream.eval(F.delay(handler(subVar, { x => run(obsQ.enqueue1(x)) })))
+          override def onComplete(): Unit =
+            toIO(as.enqueue1(None)).unsafeRunSync()
 
-    (for {
-      obsQ <- Stream.eval(Queue.boundedNoneTerminated[F, Either[Throwable, A]](queueSize))
-      subVar <- Stream.eval(MVar[F].empty[Subscription])
-      _ <- enqueueObservable(obsQ, subVar)
-      res <- obsQ.dequeueChunk(queueSize).chunks.flatMap( c =>
-        Stream.evalUnChunk(subVar.read.map(_.request(c.size.toLong)).as(c))
-      ).rethrow.onFinalize(subVar.take.flatMap(unsubscribe))
-    } yield res)
+          private[this] def toIO(fu: F[Unit]): IO[Unit] =
+            IO.asyncF(k => F.runAsync(fu)(e => IO(k(e))).toIO)
+        })
+      }
+
+      // request queueSize, then take from the queue until we get that much, or until we barf; rechunking is dynamic depending on downstream consumption rate
+      step = Stream.eval_(F.delay(sub.request(queueSize.toLong))) ++ as.dequeue.rethrow.take(queueSize.toLong)
+    } yield step.repeat.onComplete(Stream.eval_(F.delay(if (!sub.isUnsubscribed()) sub.unsubscribe())))
+
+    Stream.eval(back).flatten
   }
 
   def databases: Stream[F, Database] =
