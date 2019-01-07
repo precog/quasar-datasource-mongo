@@ -52,10 +52,8 @@ class Mongo[F[_]: MonadResourceErr : ConcurrentEffect] private[Mongo](client: Mo
           override def onNext(result: A): Unit =
             toIO(as.enqueue1(Some(Right(result)))).unsafeRunSync()
 
-          override def onError(e: Throwable): Unit = {
-            k(Left(e))    // callbacks are idempotent, so this is okay; it will produce the subscription error if we failed to subscribe
+          override def onError(e: Throwable): Unit =
             toIO(as.enqueue1(Some(Left(e)))).unsafeRunSync()
-          }
 
           override def onComplete(): Unit =
             toIO(as.enqueue1(None)).unsafeRunSync()
