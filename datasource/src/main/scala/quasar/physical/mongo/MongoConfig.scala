@@ -20,11 +20,11 @@ import slamdata.Predef._
 
 import argonaut._, Argonaut._
 
-final case class MongoConfig(connectionString: String, bsonBatchSize: Option[Int])
+final case class MongoConfig(connectionString: String, resultBatchSizeBytes: Option[Int])
 
 object MongoConfig {
   implicit val codecMongoConfig: CodecJson[MongoConfig] =
-    casecodec2(MongoConfig.apply, MongoConfig.unapply)("connectionString", "bsonBatchSize")
+    casecodec2(MongoConfig.apply, MongoConfig.unapply)("connectionString", "resultBatchSizeBytes")
 
   private val credentialsRegex = "://[^@+]+@".r
 

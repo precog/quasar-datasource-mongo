@@ -32,12 +32,19 @@ class MongoConfigSpec extends Specification with ScalaCheck {
   }
 
   "sanitized config hides credentials" >> {
-    val input = Json.obj("connectionString" -> jString("mongodb://user:password@anyhost:2980/database"), "bsonBatchSize" -> jNumber(128))
-    val expected = Json.obj("connectionString" -> jString("mongodb://<REDACTED>:<REDACTED>@anyhost:2980/database"), "bsonBatchSize" -> jNumber(128))
+    val input = Json.obj(
+      "connectionString" -> jString("mongodb://user:password@anyhost:2980/database"),
+      "resultBatchSizeBytes" -> jNumber(128))
+    val expected = Json.obj(
+      "connectionString" -> jString("mongodb://<REDACTED>:<REDACTED>@anyhost:2980/database"),
+      "resultBatchSizeBytes" -> jNumber(128))
+
     MongoConfig.sanitize(input) === expected
   }
   "sanitized config without credentials isn't changed" >> {
-    val input = Json.obj("connectionString" -> jString("mongodb://host:1234/db?foo=bar"), "bsonBatchSize" -> jNumber(234))
+    val input = Json.obj(
+      "connectionString" -> jString("mongodb://host:1234/db?foo=bar"),
+      "resultBatchSizeBytes" -> jNumber(234))
     MongoConfig.sanitize(input) === input
   }
 

@@ -111,6 +111,8 @@ class Mongo[F[_]: MonadResourceErr : ConcurrentEffect] private[Mongo](client: Mo
         })
   }
 
+  private val maximumBatchBytes: Long = if (maxMemory > MaxBsonBatch) MaxBsonBatch else maxMemory.toLong
+
   def getQueueSize(collection: Collection): F[Long] = {
     val getStats: F[Document] = F.suspend(singleObservableAsF[F, Document](
       client.getDatabase(collection.database.name).runCommand[Document](Document(
@@ -119,12 +121,9 @@ class Mongo[F[_]: MonadResourceErr : ConcurrentEffect] private[Mongo](client: Mo
       ))
     ))
 
-    val max = if (maxMemory > MaxBsonBatch) MaxBsonBatch else maxMemory.toLong
-
     getStats map { doc =>
-      val avgObjSize = doc.get("avgObjSize").fold(0)(_.asInt32.getValue)
-      val res = max / avgObjSize.toLong
-      if (res < 1L) 1L else if (res < MaxQueueSize) res else MaxQueueSize
+      val avgObjSize = doc.get("avgObjSize").fold(1)(_.asInt32.getValue)
+      maximumBatchBytes / avgObjSize.toLong
     }
   }
 
@@ -137,7 +136,6 @@ object Mongo {
   val DefaultBsonBatch: Int = 1024 * 128
   val MaxBsonBatch: Long = 128L * 1024L * 1024L
   val DefaultQueueSize: Long = 64L
-  val MaxQueueSize: Long = 2048L
 
   def singleObservableAsF[F[_]: Async, A](obs: SingleObservable[A]): F[A] =
     Async[F].async { cb: (Either[Throwable, A] => Unit) =>
@@ -171,6 +169,6 @@ object Mongo {
     for {
       client <- mkClient
       _ <- runCommand(client)
-    } yield Disposable(new Mongo[F](client, config.bsonBatchSize.getOrElse(DefaultBsonBatch)), close(client))
+    } yield Disposable(new Mongo[F](client, config.resultBatchSizeBytes.getOrElse(DefaultBsonBatch)), close(client))
   }
 }
