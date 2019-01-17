@@ -122,8 +122,12 @@ class Mongo[F[_]: MonadResourceErr : ConcurrentEffect] private[Mongo](client: Mo
     ))
 
     getStats map { doc =>
-      val avgObjSize = doc.get("avgObjSize").fold(1)(_.asInt32.getValue)
-      maximumBatchBytes / avgObjSize.toLong
+      val optSize: Option[Long] = doc.get("avgObjSize").flatMap(_ match {
+        case x: BsonInt32 => Some(x.getValue().toLong)
+        case x: BsonInt64 => Some(x.getValue())
+        case _ => None
+      })
+      optSize.fold(DefaultQueueSize)(x => maximumBatchBytes / x)
     }
   }
 
@@ -135,7 +139,7 @@ class Mongo[F[_]: MonadResourceErr : ConcurrentEffect] private[Mongo](client: Mo
 object Mongo {
   val DefaultBsonBatch: Int = 1024 * 128
   val MaxBsonBatch: Long = 128L * 1024L * 1024L
-  val DefaultQueueSize: Long = 64L
+  val DefaultQueueSize: Long = 256L
 
   def singleObservableAsF[F[_]: Async, A](obs: SingleObservable[A]): F[A] =
     Async[F].async { cb: (Either[Throwable, A] => Unit) =>
