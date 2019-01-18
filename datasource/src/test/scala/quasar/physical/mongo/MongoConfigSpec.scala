@@ -26,24 +26,31 @@ import org.specs2.mutable.Specification
 class MongoConfigSpec extends Specification with ScalaCheck {
   "works for mongodb protocol" >> {
     Json.obj("connectionString" -> jString("mongodb://localhost"))
-      .as[MongoConfig].toEither === Right(MongoConfig("mongodb://localhost"))
+      .as[MongoConfig].toEither === Right(MongoConfig("mongodb://localhost", None))
     Json.obj("connectionString" -> jString("mongodb://user:password@anyhost:2980/database?a=b&c=d"))
-      .as[MongoConfig].toEither === Right(MongoConfig("mongodb://user:password@anyhost:2980/database?a=b&c=d"))
+      .as[MongoConfig].toEither === Right(MongoConfig("mongodb://user:password@anyhost:2980/database?a=b&c=d", None))
   }
 
   "sanitized config hides credentials" >> {
-    val input = Json.obj("connectionString" -> jString("mongodb://user:password@anyhost:2980/database"))
-    val expected = Json.obj("connectionString" -> jString("mongodb://<REDACTED>:<REDACTED>@anyhost:2980/database"))
+    val input = Json.obj(
+      "connectionString" -> jString("mongodb://user:password@anyhost:2980/database"),
+      "resultBatchSizeBytes" -> jNumber(128))
+    val expected = Json.obj(
+      "connectionString" -> jString("mongodb://<REDACTED>:<REDACTED>@anyhost:2980/database"),
+      "resultBatchSizeBytes" -> jNumber(128))
+
     MongoConfig.sanitize(input) === expected
   }
   "sanitized config without credentials isn't changed" >> {
-    val input = Json.obj("connectionString" -> jString("mongodb://host:1234/db?foo=bar"))
+    val input = Json.obj(
+      "connectionString" -> jString("mongodb://host:1234/db?foo=bar"),
+      "resultBatchSizeBytes" -> jNumber(234))
     MongoConfig.sanitize(input) === input
   }
 
   "json codec" >> {
-    "lawful" >> prop { connectionString: String  =>
-      CodecJson.codecLaw(MongoConfig.codecMongoConfig)(MongoConfig(connectionString))
+    "lawful" >> prop { params: (String, Option[Int])  =>
+      CodecJson.codecLaw(MongoConfig.codecMongoConfig)(MongoConfig(params._1, params._2))
     }
   }
 }
