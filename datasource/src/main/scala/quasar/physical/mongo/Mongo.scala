@@ -87,10 +87,13 @@ class Mongo[F[_]: MonadResourceErr : ConcurrentEffect] private[Mongo](
   def databases: Stream[F, Database] =
     observableAsStream(client.listDatabaseNames, DefaultQueueSize)
       .map(Database(_))
-      .handleErrorWith { thr: Throwable => accessedResource match {
-        case None => Stream.raiseError(thr)
-        case Some(Collection(db, _)) => Stream.emit(db)
-        case Some(db @ Database(_)) => Stream.emit(db)
+      .handleErrorWith { _ match {
+        case ex: MongoSecurityException => accessedResource match {
+          case None => Stream.raiseError(ex)
+          case Some(Collection(db, _)) => Stream.emit(db)
+          case Some(db @ Database(_)) => Stream.emit(db)
+        }
+        case thr: Throwable => Stream.raiseError(thr)
       }}
 
   def databaseExists(database: Database): Stream[F, Boolean] =
@@ -100,9 +103,12 @@ class Mongo[F[_]: MonadResourceErr : ConcurrentEffect] private[Mongo](
     dbExists <- databaseExists(database)
     res <- if (!dbExists) { Stream.empty } else {
       observableAsStream(client.getDatabase(database.name).listCollectionNames(), DefaultQueueSize).map(Collection(database, _))
-        .handleErrorWith{ thr: Throwable => accessedResource match {
-          case Some(coll @ Collection(_, _)) if database === coll.database => Stream.emit(coll)
-          case _ => Stream.raiseError(thr)
+        .handleErrorWith{ _ match {
+          case ex: MongoSecurityException => accessedResource match {
+            case Some(coll @ Collection(_, _)) if database === coll.database => Stream.emit(coll)
+            case _ => Stream.raiseError(ex)
+          }
+          case thr: Throwable => Stream.raiseError(thr)
         }}
     }
   } yield res
@@ -132,7 +138,7 @@ class Mongo[F[_]: MonadResourceErr : ConcurrentEffect] private[Mongo](
         "scale" -> 1
       ))
     ))).map(_ match {
-      case Left(_) => None
+      case Left(e) => None
       case Right(a) => Some(a)
     })
 
