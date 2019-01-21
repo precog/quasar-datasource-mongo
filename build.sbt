@@ -47,6 +47,6 @@ lazy val core = project
 
       // mongo's `getDatabase` and `getCollection` have `Nullable` annotations and they raise
       // warnings w/o this dependency
-      "com.google.code.findbugs"   %  "jsr305"                      % jsrVersion
+      "com.google.code.findbugs"   %  "jsr305"                      % jsrVersion % Provided
     ))
   .enablePlugins(AutomateHeaderPlugin, DatasourcePlugin)
