@@ -39,7 +39,7 @@ jobs:
   include:
   - stage: test
     script:
-      - docker run -d -p 127.0.0.1:27018:27017 --name mongodb bitnami/mongodb:4.1.4
+      - docker run -d -p 127.0.0.1:27018:27017 --name mongodb bitnami/mongodb:4.1.4 -e MONGODB_ROOT_PASSWORD=secret
       - set -e
       - "$SBT ++$TRAVIS_SCALA_VERSION test"
   - stage: publish

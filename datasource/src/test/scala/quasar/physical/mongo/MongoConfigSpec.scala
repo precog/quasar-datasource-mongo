@@ -23,6 +23,8 @@ import argonaut._, argonaut.Argonaut._
 import org.specs2.ScalaCheck
 import org.specs2.mutable.Specification
 
+import quasar.physical.mongo.MongoResource.{Database, Collection}
+
 class MongoConfigSpec extends Specification with ScalaCheck {
   "works for mongodb protocol" >> {
     Json.obj("connectionString" -> jString("mongodb://localhost"))
@@ -46,6 +48,18 @@ class MongoConfigSpec extends Specification with ScalaCheck {
       "connectionString" -> jString("mongodb://host:1234/db?foo=bar"),
       "resultBatchSizeBytes" -> jNumber(234))
     MongoConfig.sanitize(input) === input
+  }
+
+  "accessed resource" >> {
+    "for default params is None" >> {
+      MongoConfig("mongodb://localhost", None).accessedResource === None
+    }
+    "for db provided is Some(Database(_))" >> {
+      MongoConfig("mongodb://localhost/db", None).accessedResource === Some(Database("db"))
+    }
+    "for collection provided is Some(Collection(_, _))" >> {
+      MongoConfig("mongodb://localhost/db.coll", None).accessedResource === Some(Collection(Database("db"), "coll"))
+    }
   }
 
   "json codec" >> {

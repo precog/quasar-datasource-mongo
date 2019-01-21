@@ -40,7 +40,7 @@ import org.mongodb.scala.connection.NettyStreamFactoryFactory
 class Mongo[F[_]: MonadResourceErr : ConcurrentEffect] private[Mongo](
     client: MongoClient,
     maxMemory: Int,
-    accessedResource: Option[MongoResource]) {
+    val accessedResource: Option[MongoResource]) {
   import Mongo._
 
   val F: ConcurrentEffect[F] = ConcurrentEffect[F]
@@ -84,34 +84,41 @@ class Mongo[F[_]: MonadResourceErr : ConcurrentEffect] private[Mongo](
     } yield res)
   }
 
-  def databases: Stream[F, Database] =
+  def databases: Stream[F, Database] = {
+    def handle(ex: Throwable) = accessedResource match {
+      case None => Stream.raiseError(ex)
+      case Some(Collection(db, _)) => Stream.emit(db)
+      case Some(db @ Database(_)) => Stream.emit(db)
+    }
     observableAsStream(client.listDatabaseNames, DefaultQueueSize)
       .map(Database(_))
       .handleErrorWith { _ match {
-        case ex: MongoSecurityException => accessedResource match {
-          case None => Stream.raiseError(ex)
-          case Some(Collection(db, _)) => Stream.emit(db)
-          case Some(db @ Database(_)) => Stream.emit(db)
-        }
+        case ex: MongoCommandException => handle(ex)
+        case ex: MongoSecurityException => handle(ex)
         case thr: Throwable => Stream.raiseError(thr)
       }}
+  }
 
   def databaseExists(database: Database): Stream[F, Boolean] =
     databases.exists(_ === database)
 
-  def collections(database: Database): Stream[F, Collection] = for {
-    dbExists <- databaseExists(database)
-    res <- if (!dbExists) { Stream.empty } else {
-      observableAsStream(client.getDatabase(database.name).listCollectionNames(), DefaultQueueSize).map(Collection(database, _))
-        .handleErrorWith{ _ match {
-          case ex: MongoSecurityException => accessedResource match {
-            case Some(coll @ Collection(_, _)) if database === coll.database => Stream.emit(coll)
-            case _ => Stream.raiseError(ex)
-          }
-          case thr: Throwable => Stream.raiseError(thr)
-        }}
+  def collections(database: Database): Stream[F, Collection] = {
+    def handle(ex: Throwable) = accessedResource match {
+      case Some(coll @ Collection(_, _)) if database === coll.database => Stream.emit(coll)
+      case _ => Stream.raiseError(ex)
     }
-  } yield res
+    for {
+      dbExists <- databaseExists(database)
+      res <- if (!dbExists) { Stream.empty } else {
+        observableAsStream(client.getDatabase(database.name).listCollectionNames(), DefaultQueueSize).map(Collection(database, _))
+          .handleErrorWith{ _ match {
+            case ex: MongoSecurityException => handle(ex)
+            case ex: MongoCommandException => handle(ex)
+            case thr: Throwable => Stream.raiseError(thr)
+          }}
+      }
+    } yield res
+  }
 
 
   def collectionExists(collection: Collection): Stream[F, Boolean] =
@@ -137,17 +144,14 @@ class Mongo[F[_]: MonadResourceErr : ConcurrentEffect] private[Mongo](
         "collStats" -> collection.name,
         "scale" -> 1
       ))
-    ))).map(_ match {
-      case Left(e) => None
-      case Right(a) => Some(a)
-    })
+    ))).map(_.toOption)
 
     getStats map { doc =>
-      val optSize: Option[Long] = doc flatMap (_.get("avgObjSize") flatMap (_ match {
+      val optSize: Option[Long] = doc.flatMap (_.get("avgObjSize")) flatMap (_ match {
         case x: BsonInt32 => Some(x.getValue().toLong)
         case x: BsonInt64 => Some(x.getValue())
         case _ => None
-      }))
+      })
       optSize.fold(DefaultQueueSize)(x => maximumBatchBytes / x)
     }
   }
@@ -171,26 +175,17 @@ object Mongo {
       })
     }
 
-  private def accessedResource(connString: ConnectionString): Option[MongoResource] = {
-    val dbStr = Option(connString.getDatabase())
-    val collStr = Option(connString.getCollection())
-    dbStr.map(Database(_)).flatMap((db: Database) => collStr match {
-      case None => Some(db)
-      case Some(cn) => Some(Collection(db, cn))
-    })
-  }
-
   def apply[F[_]: ConcurrentEffect: MonadResourceErr](config: MongoConfig): F[Disposable[F, Mongo[F]]] = {
     val F = ConcurrentEffect[F]
 
-    val mkClient: F[(MongoClient, Option[MongoResource])] = for {
+    val mkClient: F[MongoClient] = for {
       connString <- F.delay(new ConnectionString(config.connectionString))
       connStringSettings <- F.delay(MongoClientSettings.builder().applyConnectionString(connString).build())
       settings <- F.delay(if (connStringSettings.getSslSettings.isEnabled) {
         MongoClientSettings.builder(connStringSettings).streamFactoryFactory(NettyStreamFactoryFactory()).build()
       } else connStringSettings)
       client <- F.delay(MongoClient(settings))
-    } yield (client, accessedResource(connString))
+    } yield client
 
     def runCommand(client: MongoClient): F[Unit] =
       F.suspend(singleObservableAsF[F, Unit](
@@ -201,8 +196,13 @@ object Mongo {
       F.delay(client.close())
 
     for {
-      (client, optRes) <- mkClient
+      client <- mkClient
       _ <- runCommand(client)
-    } yield Disposable(new Mongo[F](client, config.resultBatchSizeBytes.getOrElse(DefaultBsonBatch), optRes), close(client))
+    } yield Disposable(
+      new Mongo[F](
+        client,
+        config.resultBatchSizeBytes.getOrElse(DefaultBsonBatch),
+        config.accessedResource),
+      close(client))
   }
 }
