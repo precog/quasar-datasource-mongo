@@ -108,6 +108,7 @@ class Mongo[F[_]: MonadResourceErr : ConcurrentEffect] private[Mongo](
   def collections(database: Database): Stream[F, Collection] = {
     def handle(oldStream: Stream[F, Collection]) = accessedResource match {
       case Some(coll @ Collection(_, _)) if database === coll.database => Stream.emit(coll)
+      case Some(db @ Database(_)) if db === database => Stream.empty
       case _ => oldStream
     }
     val cols = for {

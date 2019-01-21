@@ -62,7 +62,7 @@ class MongoSpec extends EffectfulQSpec[IO] {
   "getting databases for constrained role works correctly B" >>* mkBMongo.flatMap(_ { mongo =>
     mongo.databases.compile.toList.map { _ === List(Database("B")) }})
 
-  "getting databases for constrained role raises an error if incorrect auth db specified" >> {
+  "it's impossible to make mongo with incorrect auth" >> {
     mkInvalidAMongo.unsafeRunSync() must throwA[Throwable]
   }
 
@@ -88,8 +88,12 @@ class MongoSpec extends EffectfulQSpec[IO] {
     })
   )
 
-  "collections returns correct collection lists for constrained roles" >>* mkBMongo.flatMap(_ { mongo =>
-    mongo.collections(Database("B")).compile.toList.map { _ === List(Collection(Database("B"), "b"))}})
+  "collections returns correct collection lists for constrained roles B" >> {
+    "B" >>* mkBMongo.flatMap(_ { mongo =>
+      mongo.collections(Database("B")).compile.toList.map { _ === List() }})
+    "B.b" >>* mkBBMongo.flatMap(_ { mongo =>
+      mongo.collections(Database("B")).compile.toList.map { _ == List(Collection(Database("B"), "b")) }})
+  }
 
   "collections return empty stream for non-existing databases" >> Fragment.foreach(MongoSpec.incorrectDbs)(db =>
     s"checking ${db.name}" >>* mkMongo.flatMap(_ { mongo =>
@@ -141,7 +145,10 @@ object MongoSpec {
   val connectionString: String = "mongodb://root:secret@127.0.0.1:27018"
   val aConnectionString: String = "mongodb://aUser:aPassword@127.0.0.1:27018/A.a"
   val invalidAConnectionString: String = "mongodb://aUser:aPassword@127.0.0.1:27018"
-  val bConnectionString: String = "mongodb://bUser:bPassword@127.0.0.1:27018/B.b"
+  // Note, there is no collection, only db
+  val bConnectionString: String = "mongodb://bUser:bPassword@127.0.0.1:27018/B"
+  // And, there we have collection .b
+  val bbConnectionString: String = "mongodb://bUser:bPassword@127.0.0.1:27018/B.b"
 
   def mkMongo: IO[Disposable[IO, Mongo[IO]]] =
     Mongo[IO](MongoConfig(connectionString, None))
@@ -154,6 +161,9 @@ object MongoSpec {
 
   def mkBMongo: IO[Disposable[IO, Mongo[IO]]] =
     Mongo[IO](MongoConfig(bConnectionString, None))
+  def mkBBMongo: IO[Disposable[IO, Mongo[IO]]] =
+    Mongo[IO](MongoConfig(bbConnectionString, None))
+
 
   def incorrectCollections: List[Collection] = {
     val incorrectDbStream =
@@ -190,7 +200,7 @@ object MongoSpec {
           "createUser" -> "aUser",
           "pwd" -> "aPassword",
           "roles" -> List(Document("role" -> "read", "db" -> "A"))))).attempt
-        // bUser:bPassword --> can do anything with "B" roles, but can't do anything with data evel listCollections
+        // bUser:bPassword --> can do anything with "B" roles, but can't do anything with data level listCollections
         bDatabase <- IO.delay(client.getDatabase("B"))
         _ <- singleObservableAsF[IO, Document](bDatabase.runCommand[Document](Document(
           "createUser" -> "bUser",
