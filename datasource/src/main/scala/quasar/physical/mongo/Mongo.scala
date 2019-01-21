@@ -171,25 +171,26 @@ object Mongo {
       })
     }
 
-  private def resourceFromStrings(dbStr: Option[String], collStr: Option[String]): Option[MongoResource] =
+  private def accessedResource(connString: ConnectionString): Option[MongoResource] = {
+    val dbStr = Option(connString.getDatabase())
+    val collStr = Option(connString.getCollection())
     dbStr.map(Database(_)).flatMap((db: Database) => collStr match {
       case None => Some(db)
       case Some(cn) => Some(Collection(db, cn))
     })
+  }
 
   def apply[F[_]: ConcurrentEffect: MonadResourceErr](config: MongoConfig): F[Disposable[F, Mongo[F]]] = {
     val F = ConcurrentEffect[F]
 
     val mkClient: F[(MongoClient, Option[MongoResource])] = for {
       connString <- F.delay(new ConnectionString(config.connectionString))
-      databaseString = Option(connString.getDatabase())
-      collectionString = Option(connString.getCollection())
       connStringSettings <- F.delay(MongoClientSettings.builder().applyConnectionString(connString).build())
       settings <- F.delay(if (connStringSettings.getSslSettings.isEnabled) {
         MongoClientSettings.builder(connStringSettings).streamFactoryFactory(NettyStreamFactoryFactory()).build()
       } else connStringSettings)
       client <- F.delay(MongoClient(settings))
-    } yield (client, resourceFromStrings(databaseString, collectionString))
+    } yield (client, accessedResource(connString))
 
     def runCommand(client: MongoClient): F[Unit] =
       F.suspend(singleObservableAsF[F, Unit](

@@ -21,6 +21,7 @@ val slf4jVersion = "1.7.25"
 val specsVersion = "4.3.3"
 val refinedVersion = "0.8.5"
 val nettyVersion = "4.1.28.Final"
+val jsrVersion = "3.0.2"
 
 lazy val core = project
   .in(file("datasource"))
@@ -42,6 +43,10 @@ lazy val core = project
       "org.slf4j"                  %  "slf4j-log4j12"              % slf4jVersion % Test,
       "org.specs2"                 %% "specs2-core"                % specsVersion % Test,
       "org.specs2"                 %% "specs2-scalaz"              % specsVersion % Test,
-      "org.specs2"                 %% "specs2-scalacheck"          % specsVersion % Test
+      "org.specs2"                 %% "specs2-scalacheck"          % specsVersion % Test,
+
+      // mongo's `getDatabase` and `getCollection` have `Nullable` annotations and they raise
+      // warnings w/o this dependency
+      "com.google.code.findbugs"   %  "jsr305"                      % jsrVersion % Optional
     ))
   .enablePlugins(AutomateHeaderPlugin, DatasourcePlugin)
