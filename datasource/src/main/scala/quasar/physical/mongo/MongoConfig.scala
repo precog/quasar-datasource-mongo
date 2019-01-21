@@ -20,7 +20,21 @@ import slamdata.Predef._
 
 import argonaut._, Argonaut._
 
-final case class MongoConfig(connectionString: String, resultBatchSizeBytes: Option[Int])
+import com.mongodb.ConnectionString
+
+import quasar.physical.mongo.MongoResource.{Database, Collection}
+
+final case class MongoConfig(connectionString: String, resultBatchSizeBytes: Option[Int]) {
+  def accessedResource: Option[MongoResource] = {
+    val connString = new ConnectionString(connectionString)
+    val dbStr = Option(connString.getDatabase())
+    val collStr = Option(connString.getCollection())
+    dbStr.map(Database(_)).flatMap((db: Database) => collStr match {
+      case None => Some(db)
+      case Some(cn) => Some(Collection(db, cn))
+    })
+  }
+}
 
 object MongoConfig {
   implicit val codecMongoConfig: CodecJson[MongoConfig] =

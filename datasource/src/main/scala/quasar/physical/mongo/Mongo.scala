@@ -37,7 +37,10 @@ import org.bson.{Document => _, _}
 import org.mongodb.scala._
 import org.mongodb.scala.connection.NettyStreamFactoryFactory
 
-class Mongo[F[_]: MonadResourceErr : ConcurrentEffect] private[Mongo](client: MongoClient, maxMemory: Int) {
+class Mongo[F[_]: MonadResourceErr : ConcurrentEffect] private[Mongo](
+    client: MongoClient,
+    maxMemory: Int,
+    val accessedResource: Option[MongoResource]) {
   import Mongo._
 
   val F: ConcurrentEffect[F] = ConcurrentEffect[F]
@@ -81,20 +84,49 @@ class Mongo[F[_]: MonadResourceErr : ConcurrentEffect] private[Mongo](client: Mo
     } yield res)
   }
 
-
-
-  def databases: Stream[F, Database] =
-    observableAsStream(client.listDatabaseNames, DefaultQueueSize).map(Database(_))
+  def databases: Stream[F, Database] = {
+    def handle(oldStream: Stream[F, Database]) = accessedResource match {
+      case None => oldStream
+      case Some(Collection(db, _)) => Stream.emit(db)
+      case Some(db @ Database(_)) => Stream.emit(db)
+    }
+    val dbs = observableAsStream(client.listDatabaseNames, DefaultQueueSize)
+      .map(Database(_))
+      .handleErrorWith { _ match {
+        case ex: MongoCommandException => handle(Stream.raiseError(ex))
+        case ex: MongoSecurityException => handle(Stream.raiseError(ex))
+        case thr: Throwable => Stream.raiseError(thr)
+      }}
+    Stream.force(dbs.compile.toList.map { (list: List[Database]) =>
+      if (list.isEmpty) handle(Stream.empty) else Stream.emits(list)
+    })
+  }
 
   def databaseExists(database: Database): Stream[F, Boolean] =
     databases.exists(_ === database)
 
-  def collections(database: Database): Stream[F, Collection] = for {
-    dbExists <- databaseExists(database)
-    res <- if (!dbExists) { Stream.empty } else {
-      observableAsStream(client.getDatabase(database.name).listCollectionNames(), DefaultQueueSize).map(Collection(database, _))
+  def collections(database: Database): Stream[F, Collection] = {
+    def handle(oldStream: Stream[F, Collection]) = accessedResource match {
+      case Some(coll @ Collection(_, _)) if database === coll.database => Stream.emit(coll)
+      case Some(db @ Database(_)) if db === database => Stream.empty
+      case _ => oldStream
     }
-  } yield res
+    val cols = for {
+      dbExists <- databaseExists(database)
+      res <- if (!dbExists) { Stream.empty } else {
+        observableAsStream(client.getDatabase(database.name).listCollectionNames(), DefaultQueueSize).map(Collection(database, _))
+          .handleErrorWith{ _ match {
+            case ex: MongoSecurityException => handle(Stream.raiseError(ex))
+            case ex: MongoCommandException => handle(Stream.raiseError(ex))
+            case thr: Throwable => Stream.raiseError(thr)
+          }}
+      }
+    } yield res
+    Stream.force(cols.compile.toList.map { (list: List[Collection]) =>
+      if (list.isEmpty) handle(Stream.empty) else Stream.emits(list)
+    })
+  }
+
 
   def collectionExists(collection: Collection): Stream[F, Boolean] =
     collections(collection.database).exists(_ === collection)
@@ -114,15 +146,15 @@ class Mongo[F[_]: MonadResourceErr : ConcurrentEffect] private[Mongo](client: Mo
   private val maximumBatchBytes: Long = if (maxMemory > MaxBsonBatch) MaxBsonBatch else maxMemory.toLong
 
   def getQueueSize(collection: Collection): F[Long] = {
-    val getStats: F[Document] = F.suspend(singleObservableAsF[F, Document](
+    val getStats: F[Option[Document]] = F.attempt(F.suspend(singleObservableAsF[F, Document](
       client.getDatabase(collection.database.name).runCommand[Document](Document(
         "collStats" -> collection.name,
         "scale" -> 1
       ))
-    ))
+    ))).map(_.toOption)
 
     getStats map { doc =>
-      val optSize: Option[Long] = doc.get("avgObjSize").flatMap(_ match {
+      val optSize: Option[Long] = doc.flatMap (_.get("avgObjSize")) flatMap (_ match {
         case x: BsonInt32 => Some(x.getValue().toLong)
         case x: BsonInt64 => Some(x.getValue())
         case _ => None
@@ -173,6 +205,11 @@ object Mongo {
     for {
       client <- mkClient
       _ <- runCommand(client)
-    } yield Disposable(new Mongo[F](client, config.resultBatchSizeBytes.getOrElse(DefaultBsonBatch)), close(client))
+    } yield Disposable(
+      new Mongo[F](
+        client,
+        config.resultBatchSizeBytes.getOrElse(DefaultBsonBatch),
+        config.accessedResource),
+      close(client))
   }
 }

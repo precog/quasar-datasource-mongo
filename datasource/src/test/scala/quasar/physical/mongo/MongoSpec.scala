@@ -31,8 +31,6 @@ import org.mongodb.scala.{MongoClient, Completed, Document}
 import org.specs2.specification.core._
 import org.specs2.execute.AsResult
 
-import scala.io.Source
-
 import shims._
 import testImplicits._
 
@@ -50,7 +48,6 @@ class MongoSpec extends EffectfulQSpec[IO] {
     "for unreachable config" >> {
       Mongo[IO](MongoConfig("mongodb://unreachable", Some(128))).unsafeRunSync() must throwA[Throwable]
     }
-
   }
 
   "getting databases works correctly" >>* mkMongo.flatMap(_ { mongo =>
@@ -58,6 +55,16 @@ class MongoSpec extends EffectfulQSpec[IO] {
       MongoSpec.correctDbs.toSet.subsetOf(evaluatedDbs.toSet)
     }
   })
+
+  "getting databases for constrained role works correctly A" >>* mkAMongo.flatMap(_ { mongo =>
+    mongo.databases.compile.toList.map { _ === List(Database("A")) }})
+
+  "getting databases for constrained role works correctly B" >>* mkBMongo.flatMap(_ { mongo =>
+    mongo.databases.compile.toList.map { _ === List(Database("B")) }})
+
+  "it's impossible to make mongo with incorrect auth" >> {
+    mkInvalidAMongo.unsafeRunSync() must throwA[Throwable]
+  }
 
   "databaseExists returns true for existing dbs" >> Fragment.foreach(MongoSpec.correctDbs)(db =>
       s"checking ${db.name}" >>* mkMongo.flatMap(_ { mongo =>
@@ -80,6 +87,13 @@ class MongoSpec extends EffectfulQSpec[IO] {
         .lastOrError
     })
   )
+
+  "collections returns correct collection lists for constrained roles B" >> {
+    "B" >>* mkBMongo.flatMap(_ { mongo =>
+      mongo.collections(Database("B")).compile.toList.map { _ === List() }})
+    "B.b" >>* mkBBMongo.flatMap(_ { mongo =>
+      mongo.collections(Database("B")).compile.toList.map { _ == List(Collection(Database("B"), "b")) }})
+  }
 
   "collections return empty stream for non-existing databases" >> Fragment.foreach(MongoSpec.incorrectDbs)(db =>
     s"checking ${db.name}" >>* mkMongo.flatMap(_ { mongo =>
@@ -128,10 +142,28 @@ object MongoSpec {
   val nonexistentDbs = List("Z", "Y")
   val nonexistentCols = List("z", "y")
 
-  lazy val connectionString = Source.fromFile("./datasource/src/test/resources/mongo-connection").mkString.trim
+  val connectionString: String = "mongodb://root:secret@127.0.0.1:27018"
+  val aConnectionString: String = "mongodb://aUser:aPassword@127.0.0.1:27018/A.a"
+  val invalidAConnectionString: String = "mongodb://aUser:aPassword@127.0.0.1:27018"
+  // Note, there is no collection, only db
+  val bConnectionString: String = "mongodb://bUser:bPassword@127.0.0.1:27018/B"
+  // And, there we have collection .b
+  val bbConnectionString: String = "mongodb://bUser:bPassword@127.0.0.1:27018/B.b"
 
   def mkMongo: IO[Disposable[IO, Mongo[IO]]] =
     Mongo[IO](MongoConfig(connectionString, None))
+
+  def mkAMongo: IO[Disposable[IO, Mongo[IO]]] =
+    Mongo[IO](MongoConfig(aConnectionString, None))
+
+  def mkInvalidAMongo: IO[Disposable[IO, Mongo[IO]]] =
+    Mongo[IO](MongoConfig(invalidAConnectionString, None))
+
+  def mkBMongo: IO[Disposable[IO, Mongo[IO]]] =
+    Mongo[IO](MongoConfig(bConnectionString, None))
+  def mkBBMongo: IO[Disposable[IO, Mongo[IO]]] =
+    Mongo[IO](MongoConfig(bbConnectionString, None))
+
 
   def incorrectCollections: List[Collection] = {
     val incorrectDbStream =
@@ -162,6 +194,18 @@ object MongoSpec {
         mongoCollection <- IO.delay(client.getDatabase(col.database.name).getCollection(col.name))
         _ <- singleObservableAsF[IO, Completed](mongoCollection.drop).attempt
         _ <- singleObservableAsF[IO, Completed](mongoCollection.insertOne(Document(col.name -> col.database.name)))
+        // aUser:aPassword --> read only access to only one db, this means that aUser can't run listDatabases
+        aDatabase <- IO.delay(client.getDatabase("A"))
+        _ <- singleObservableAsF[IO, Document](aDatabase.runCommand[Document](Document(
+          "createUser" -> "aUser",
+          "pwd" -> "aPassword",
+          "roles" -> List(Document("role" -> "read", "db" -> "A"))))).attempt
+        // bUser:bPassword --> can do anything with "B" roles, but can't do anything with data level listCollections
+        bDatabase <- IO.delay(client.getDatabase("B"))
+        _ <- singleObservableAsF[IO, Document](bDatabase.runCommand[Document](Document(
+          "createUser" -> "bUser",
+          "pwd" -> "bPassword",
+          "roles" -> List(Document("role" -> "userAdmin", "db" -> "B"))))).attempt
         } yield ()
       }
       _ <- IO.delay(client.close())
