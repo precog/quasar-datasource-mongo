@@ -56,8 +56,11 @@ class MongoSpec extends EffectfulQSpec[IO] {
     }
   })
 
-  "getting databases for constrained role works correctly" >>* mkAMongo.flatMap(_ { mongo =>
+  "getting databases for constrained role works correctly A" >>* mkAMongo.flatMap(_ { mongo =>
     mongo.databases.compile.toList.map { _ === List(Database("A")) }})
+
+  "getting databases for constrained role works correctly B" >>* mkBMongo.flatMap(_ { mongo =>
+    mongo.databases.compile.toList.map { _ === List(Database("B")) }})
 
   "getting databases for constrained role raises an error if incorrect auth db specified" >> {
     mkInvalidAMongo.unsafeRunSync() must throwA[Throwable]

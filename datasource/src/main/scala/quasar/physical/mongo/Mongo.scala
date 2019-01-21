@@ -85,39 +85,45 @@ class Mongo[F[_]: MonadResourceErr : ConcurrentEffect] private[Mongo](
   }
 
   def databases: Stream[F, Database] = {
-    def handle(ex: Throwable) = accessedResource match {
-      case None => Stream.raiseError(ex)
+    def handle(oldStream: Stream[F, Database]) = accessedResource match {
+      case None => oldStream
       case Some(Collection(db, _)) => Stream.emit(db)
       case Some(db @ Database(_)) => Stream.emit(db)
     }
-    observableAsStream(client.listDatabaseNames, DefaultQueueSize)
+    val dbs = observableAsStream(client.listDatabaseNames, DefaultQueueSize)
       .map(Database(_))
       .handleErrorWith { _ match {
-        case ex: MongoCommandException => handle(ex)
-        case ex: MongoSecurityException => handle(ex)
+        case ex: MongoCommandException => handle(Stream.raiseError(ex))
+        case ex: MongoSecurityException => handle(Stream.raiseError(ex))
         case thr: Throwable => Stream.raiseError(thr)
       }}
+    Stream.force(dbs.compile.toList.map { (list: List[Database]) =>
+      if (list.isEmpty) handle(Stream.empty) else Stream.emits(list)
+    })
   }
 
   def databaseExists(database: Database): Stream[F, Boolean] =
     databases.exists(_ === database)
 
   def collections(database: Database): Stream[F, Collection] = {
-    def handle(ex: Throwable) = accessedResource match {
+    def handle(oldStream: Stream[F, Collection]) = accessedResource match {
       case Some(coll @ Collection(_, _)) if database === coll.database => Stream.emit(coll)
-      case _ => Stream.raiseError(ex)
+      case _ => oldStream
     }
-    for {
+    val cols = for {
       dbExists <- databaseExists(database)
       res <- if (!dbExists) { Stream.empty } else {
         observableAsStream(client.getDatabase(database.name).listCollectionNames(), DefaultQueueSize).map(Collection(database, _))
           .handleErrorWith{ _ match {
-            case ex: MongoSecurityException => handle(ex)
-            case ex: MongoCommandException => handle(ex)
+            case ex: MongoSecurityException => handle(Stream.raiseError(ex))
+            case ex: MongoCommandException => handle(Stream.raiseError(ex))
             case thr: Throwable => Stream.raiseError(thr)
           }}
       }
     } yield res
+    Stream.force(cols.compile.toList.map { (list: List[Collection]) =>
+      if (list.isEmpty) handle(Stream.empty) else Stream.emits(list)
+    })
   }
 
 
