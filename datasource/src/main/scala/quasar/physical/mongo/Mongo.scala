@@ -37,7 +37,10 @@ import org.bson.{Document => _, _}
 import org.mongodb.scala._
 import org.mongodb.scala.connection.NettyStreamFactoryFactory
 
-class Mongo[F[_]: MonadResourceErr : ConcurrentEffect] private[Mongo](client: MongoClient, maxMemory: Int) {
+class Mongo[F[_]: MonadResourceErr : ConcurrentEffect] private[Mongo](
+    client: MongoClient,
+    maxMemory: Int,
+    accessedResource: Option[MongoResource]) {
   import Mongo._
 
   val F: ConcurrentEffect[F] = ConcurrentEffect[F]
@@ -81,10 +84,14 @@ class Mongo[F[_]: MonadResourceErr : ConcurrentEffect] private[Mongo](client: Mo
     } yield res)
   }
 
-
-
   def databases: Stream[F, Database] =
-    observableAsStream(client.listDatabaseNames, DefaultQueueSize).map(Database(_))
+    observableAsStream(client.listDatabaseNames, DefaultQueueSize)
+      .map(Database(_))
+      .handleErrorWith { thr: Throwable => accessedResource match {
+        case None => Stream.raiseError(thr)
+        case Some(Collection(db, _)) => Stream.emit(db)
+        case Some(db @ Database(_)) => Stream.emit(db)
+      }}
 
   def databaseExists(database: Database): Stream[F, Boolean] =
     databases.exists(_ === database)
@@ -93,8 +100,13 @@ class Mongo[F[_]: MonadResourceErr : ConcurrentEffect] private[Mongo](client: Mo
     dbExists <- databaseExists(database)
     res <- if (!dbExists) { Stream.empty } else {
       observableAsStream(client.getDatabase(database.name).listCollectionNames(), DefaultQueueSize).map(Collection(database, _))
+        .handleErrorWith{ thr: Throwable => accessedResource match {
+          case Some(coll @ Collection(_, _)) if database === coll.database => Stream.emit(coll)
+          case _ => Stream.raiseError(thr)
+        }}
     }
   } yield res
+
 
   def collectionExists(collection: Collection): Stream[F, Boolean] =
     collections(collection.database).exists(_ === collection)
@@ -114,19 +126,22 @@ class Mongo[F[_]: MonadResourceErr : ConcurrentEffect] private[Mongo](client: Mo
   private val maximumBatchBytes: Long = if (maxMemory > MaxBsonBatch) MaxBsonBatch else maxMemory.toLong
 
   def getQueueSize(collection: Collection): F[Long] = {
-    val getStats: F[Document] = F.suspend(singleObservableAsF[F, Document](
+    val getStats: F[Option[Document]] = F.attempt(F.suspend(singleObservableAsF[F, Document](
       client.getDatabase(collection.database.name).runCommand[Document](Document(
         "collStats" -> collection.name,
         "scale" -> 1
       ))
-    ))
+    ))).map(_ match {
+      case Left(_) => None
+      case Right(a) => Some(a)
+    })
 
     getStats map { doc =>
-      val optSize: Option[Long] = doc.get("avgObjSize").flatMap(_ match {
+      val optSize: Option[Long] = doc flatMap (_.get("avgObjSize") flatMap (_ match {
         case x: BsonInt32 => Some(x.getValue().toLong)
         case x: BsonInt64 => Some(x.getValue())
         case _ => None
-      })
+      }))
       optSize.fold(DefaultQueueSize)(x => maximumBatchBytes / x)
     }
   }
@@ -150,17 +165,25 @@ object Mongo {
       })
     }
 
+  private def resourceFromStrings(dbStr: Option[String], collStr: Option[String]): Option[MongoResource] =
+    dbStr.map(Database(_)).flatMap((db: Database) => collStr match {
+      case None => Some(db)
+      case Some(cn) => Some(Collection(db, cn))
+    })
+
   def apply[F[_]: ConcurrentEffect: MonadResourceErr](config: MongoConfig): F[Disposable[F, Mongo[F]]] = {
     val F = ConcurrentEffect[F]
 
-    val mkClient: F[MongoClient] = for {
+    val mkClient: F[(MongoClient, Option[MongoResource])] = for {
       connString <- F.delay(new ConnectionString(config.connectionString))
+      databaseString = Option(connString.getDatabase())
+      collectionString = Option(connString.getCollection())
       connStringSettings <- F.delay(MongoClientSettings.builder().applyConnectionString(connString).build())
       settings <- F.delay(if (connStringSettings.getSslSettings.isEnabled) {
         MongoClientSettings.builder(connStringSettings).streamFactoryFactory(NettyStreamFactoryFactory()).build()
       } else connStringSettings)
       client <- F.delay(MongoClient(settings))
-    } yield client
+    } yield (client, resourceFromStrings(databaseString, collectionString))
 
     def runCommand(client: MongoClient): F[Unit] =
       F.suspend(singleObservableAsF[F, Unit](
@@ -171,8 +194,8 @@ object Mongo {
       F.delay(client.close())
 
     for {
-      client <- mkClient
+      (client, optRes) <- mkClient
       _ <- runCommand(client)
-    } yield Disposable(new Mongo[F](client, config.resultBatchSizeBytes.getOrElse(DefaultBsonBatch)), close(client))
+    } yield Disposable(new Mongo[F](client, config.resultBatchSizeBytes.getOrElse(DefaultBsonBatch), optRes), close(client))
   }
 }
