@@ -159,7 +159,7 @@ class Mongo[F[_]: MonadResourceErr : ConcurrentEffect] private[Mongo](
         case x: BsonInt64 => Some(x.getValue())
         case _ => None
       })
-      optSize.fold(DefaultQueueSize)(x => maximumBatchBytes / x)
+      optSize.fold(DefaultQueueSize)(x => scala.math.max(1L, maximumBatchBytes / x))
     }
   }
 
