@@ -18,17 +18,17 @@ package quasar.physical.mongo
 
 import slamdata.Predef._
 
-import cats.effect.{ConcurrentEffect, Async, IO}
+import cats.effect.{Async, ConcurrentEffect, IO, Sync}
 import cats.effect.concurrent.MVar
 import cats.syntax.eq._
 import cats.syntax.flatMap._
 import cats.syntax.functor._
 
-import fs2.concurrent.{Queue, NoneTerminatedQueue}
+import fs2.concurrent.{NoneTerminatedQueue, Queue}
 import fs2.Stream
 
 import quasar.connector.{MonadResourceErr, ResourceError}
-import quasar.physical.mongo.MongoResource.{Database, Collection}
+import quasar.physical.mongo.MongoResource.{Collection, Database}
 import quasar.Disposable
 
 import com.mongodb.ConnectionString
@@ -37,7 +37,7 @@ import org.bson.{Document => _, _}
 import org.mongodb.scala._
 import org.mongodb.scala.connection.NettyStreamFactoryFactory
 
-class Mongo[F[_]: MonadResourceErr : ConcurrentEffect] private[Mongo](
+class Mongo[F[_]: MonadResourceErr : ConcurrentEffect] private[mongo](
     client: MongoClient,
     maxMemory: Int,
     val accessedResource: Option[MongoResource]) {
@@ -182,10 +182,8 @@ object Mongo {
       })
     }
 
-  def apply[F[_]: ConcurrentEffect: MonadResourceErr](config: MongoConfig): F[Disposable[F, Mongo[F]]] = {
-    val F = ConcurrentEffect[F]
-
-    val mkClient: F[MongoClient] = for {
+  def mkClient[F[_]](config: MongoConfig)(implicit F: Sync[F]): F[MongoClient] =
+    for {
       connString <- F.delay(new ConnectionString(config.connectionString))
       connStringSettings <- F.delay(MongoClientSettings.builder().applyConnectionString(connString).build())
       settings <- F.delay(if (connStringSettings.getSslSettings.isEnabled) {
@@ -194,16 +192,19 @@ object Mongo {
       client <- F.delay(MongoClient(settings))
     } yield client
 
+  def close[F[_]](client: MongoClient)(implicit F: Sync[F]): F[Unit] =
+    F.delay(client.close())
+
+  def apply[F[_]: ConcurrentEffect: MonadResourceErr](config: MongoConfig): F[Disposable[F, Mongo[F]]] = {
+    val F = ConcurrentEffect[F]
+
     def runCommand(client: MongoClient): F[Unit] =
       F.suspend(singleObservableAsF[F, Unit](
         client.getDatabase("admin").runCommand[Document](Document("ping" -> 1)).map(_ => ())
       ))
 
-    def close(client: MongoClient): F[Unit] =
-      F.delay(client.close())
-
     for {
-      client <- mkClient
+      client <- mkClient(config)
       _ <- runCommand(client)
     } yield Disposable(
       new Mongo[F](

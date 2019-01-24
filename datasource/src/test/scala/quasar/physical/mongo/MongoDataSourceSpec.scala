@@ -20,15 +20,19 @@ import slamdata.Predef._
 
 import cats.effect.IO
 
+import com.mongodb.MongoTimeoutException
+
 import fs2.Stream
 
 import org.bson._
+import org.specs2.matcher.MatchResult
 import org.specs2.specification.core._
 
 import quasar.api.resource.{ResourceName, ResourcePath, ResourcePathType}
+import quasar.connector.{QueryResult, ResourceError}
 import quasar.physical.mongo.MongoResource.Collection
 import quasar.qscript.InterpretedRead
-import quasar.{EffectfulQSpec, Disposable}
+import quasar.{Disposable, EffectfulQSpec}
 
 import shims._
 import testImplicits._
@@ -37,21 +41,49 @@ class MongoDataSourceSpec extends EffectfulQSpec[IO] {
   def mkDataSource: IO[Disposable[IO, MongoDataSource[IO]]] =
     MongoSpec.mkMongo.map(_.map(new MongoDataSource[IO](_)))
 
+  val mkInaccessibleDataSource: IO[Disposable[IO, MongoDataSource[IO]]] =
+    MongoSpec.mkMongoInvalidPort.map(_.map(new MongoDataSource[IO](_)))
+
   step(MongoSpec.setupDB)
 
   private def iRead[A](path: A): InterpretedRead[A] = InterpretedRead(path, List())
 
-  "evaluation" >> {
-    "of root should raises an error" >> {
-      mkDataSource.flatMap(_ { _.evaluate(iRead(ResourcePath.root()))}).unsafeRunSync() must throwA[Throwable]
+
+  "evaluation of" >> {
+    def assertPathNotFound(ds: IO[Disposable[IO, MongoDataSource[IO]]], path: ResourcePath): MatchResult[Either[Throwable, QueryResult[IO]]] = {
+      val res: Either[Throwable, QueryResult[IO]] =
+        ds.flatMap(_ {_.evaluate(iRead(path)) }).attempt.unsafeRunSync()
+      res must beLike {
+        case Left(t) => ResourceError.throwableP.getOption(t) must_=== Some(ResourceError.pathNotFound(path))
+      }
     }
-    "of a database raises an error" >>
-      Fragment.foreach(MongoSpec.correctDbs ++ MongoSpec.incorrectDbs)(db =>
-        s"checking ${db.name}" >> {
-          mkDataSource.flatMap(_ { _.evaluate(iRead(db.resourcePath)) }).unsafeRunSync() must throwA[Throwable]
-        }
+
+    def assertTimeout(ds: IO[Disposable[IO, MongoDataSource[IO]]], path: ResourcePath): MatchResult[QueryResult[IO]] = {
+      ds.flatMap(_ {_.evaluate(iRead(path)) }).unsafeRunSync() must throwA[MongoTimeoutException]
+    }
+
+    "root raises path not found" >>
+      assertPathNotFound(mkDataSource, ResourcePath.root())
+
+    "root of inaccessible datasource raises path not found" >>
+      assertPathNotFound(mkInaccessibleDataSource, ResourcePath.root())
+
+    "existing database raises path not found" >>
+      Fragment.foreach(MongoSpec.correctDbs)(db =>
+        s"checking ${db.name}" >> assertPathNotFound(mkDataSource, db.resourcePath)
       )
-    "of existing collections is collection content" >>
+
+    "non-existing database raises path not found" >>
+      Fragment.foreach(MongoSpec.incorrectDbs)(db =>
+        s"checking ${db.name}" >> assertPathNotFound(mkDataSource, db.resourcePath)
+      )
+
+    "inaccessible database raises path not found" >>
+      Fragment.foreach(MongoSpec.incorrectDbs)(db =>
+        s"checking ${db.name}" >> assertPathNotFound(mkInaccessibleDataSource, db.resourcePath)
+      )
+
+    "existing collections is collection content" >>
       Fragment.foreach(MongoSpec.correctCollections)(coll =>
         s"checking ${coll.database.name} :: ${coll.name}" >>* {
           def checkBson(col: Collection, bsons: List[Any]): Boolean = bsons match {
@@ -65,64 +97,114 @@ class MongoDataSourceSpec extends EffectfulQSpec[IO] {
             fList.map(checkBson(coll, _))
           })
         })
-    "of non-existent collections raises error" >>
+
+    "non-existing collection raises path not found" >>
       Fragment.foreach(MongoSpec.incorrectCollections)(col =>
-        s"checking ${col.database.name} :: ${col.name}" >> {
-          mkDataSource.flatMap(_ { _.evaluate(iRead(col.resourcePath)) }).unsafeRunSync() must throwA[Throwable]
-        }
+        s"checking ${col.database.name} :: ${col.name}" >> assertPathNotFound(mkDataSource, col.resourcePath)
+      )
+
+    "inaccessible collection throws timeout exception" >>
+      Fragment.foreach(MongoSpec.incorrectCollections)(col =>
+        s"checking ${col.database.name} :: ${col.name}" >> assertTimeout(mkInaccessibleDataSource, col.resourcePath)
       )
   }
 
   "prefixedChildPaths" >> {
-    def assertPrefixed(path: ResourcePath, expected: List[(ResourceName, ResourcePathType)]): IO[Boolean] = {
-      mkDataSource.flatMap(_ { ds => {
+    def assertPrefixed(datasource: IO[Disposable[IO, MongoDataSource[IO]]], path: ResourcePath, expected: List[(ResourceName, ResourcePathType)]): IO[MatchResult[Set[(ResourceName, ResourcePathType)]]] = {
+      datasource.flatMap(_ { ds => {
         val fStream = ds.prefixedChildPaths(path).map(_ getOrElse Stream.empty)
-        Stream.force(fStream).compile.toList.map(x => expected.toSet.subsetOf(x.toSet))
+        Stream.force(fStream).compile.toList.map(_.toSet must contain(expected.toSet))
       }})
     }
 
-    "root prefixed children are databases" >>*
-      assertPrefixed(
-        ResourcePath.root(),
-        MongoSpec.correctDbs.map(db => (ResourceName(db.name), ResourcePathType.prefix))
-      )
+    def assertTimeout(datasource: IO[Disposable[IO, MongoDataSource[IO]]], path: ResourcePath)= {
+      datasource.flatMap(_ { ds => {
+        val fStream = ds.prefixedChildPaths(path).map(_ getOrElse Stream.empty)
+        Stream.force(fStream).compile.toList
+      }}).unsafeRunSync() must throwA[MongoTimeoutException]
+    }
 
-    "existent database children are collections" >> {
+    def assertEmpty(datasource: IO[Disposable[IO, MongoDataSource[IO]]], path: ResourcePath) =
+      datasource.flatMap(_ { ds => {
+        ds.prefixedChildPaths(path).map(_ must_=== None)
+      }})
+
+    "children of root are databases" >>*
+      assertPrefixed(
+        mkDataSource,
+        ResourcePath.root(),
+        MongoSpec.correctDbs.map(db => (ResourceName(db.name), ResourcePathType.prefix)))
+
+    "children of inaccessible root throws timeout exception" >>
+      assertTimeout(
+        mkInaccessibleDataSource,
+        ResourcePath.root())
+
+    "children of existing database are collections" >> {
       val expected =
         MongoSpec.cols.map(colName => (ResourceName(colName), ResourcePathType.leafResource))
       Fragment.foreach(MongoSpec.dbs){ db =>
-        s"checking $db" >>* assertPrefixed(ResourcePath.root() / ResourceName(db), expected)
+        s"checking $db" >>* assertPrefixed(mkDataSource, ResourcePath.root() / ResourceName(db), expected)
       }
     }
-    "nonexistent database children are empty" >> Fragment.foreach(MongoSpec.incorrectDbs)(db =>
-      s"checking ${db.name}" >>*
-        mkDataSource.flatMap(_ { ds => {
-          ds.prefixedChildPaths(db.resourcePath).map(_.isEmpty)
-        }})
-    )
-    "there is no children of collections" >>
-      Fragment.foreach (MongoSpec.correctCollections ++ MongoSpec.incorrectCollections)(col =>
-        s"checking ${col.database.name} :: ${col.name}" >>*
-        mkDataSource.flatMap(_ { ds => {
-          ds.prefixedChildPaths(col.resourcePath).map(_.isEmpty)
-        }})
-      )
+
+    "children of non-existing database are empty" >>
+      Fragment.foreach(MongoSpec.incorrectDbs)(db =>
+        s"checking ${db.name}" >>* assertEmpty(mkDataSource, db.resourcePath))
+
+    "children of inaccessible database throws timeout exception" >>
+      Fragment.foreach(MongoSpec.incorrectDbs)(db =>
+        s"checking ${db.name}" >> assertTimeout(mkInaccessibleDataSource, db.resourcePath))
+
+    "children of existing collection are empty" >>
+      Fragment.foreach (MongoSpec.correctCollections)(col =>
+        s"checking ${col.database.name} :: ${col.name}" >>* assertEmpty(mkDataSource, col.resourcePath))
+
+    "children of non-existing collection are empty" >>
+      Fragment.foreach (MongoSpec.incorrectCollections)(col =>
+        s"checking ${col.database.name} :: ${col.name}" >>* assertEmpty(mkDataSource, col.resourcePath))
+
+    "children of inaccessible collection are empty" >>
+      Fragment.foreach (MongoSpec.incorrectCollections)(col =>
+        s"checking ${col.database.name} :: ${col.name}" >>* assertEmpty(mkInaccessibleDataSource, col.resourcePath))
   }
+
   "pathIsResource" >> {
-    "returns false for root" >>* {
-      mkDataSource.flatMap(_ { ds => ds.pathIsResource(ResourcePath.root()).map(!_) })
+    def assertNoResource(datasource: IO[Disposable[IO, MongoDataSource[IO]]], path: ResourcePath) =
+      datasource.flatMap(_ { ds => ds.pathIsResource(path).map(!_) })
+
+    def assertResource(datasource: IO[Disposable[IO, MongoDataSource[IO]]], path: ResourcePath) =
+      datasource.flatMap(_ { ds => ds.pathIsResource(path) })
+
+    def assertTimeout(datasource: IO[Disposable[IO, MongoDataSource[IO]]], path: ResourcePath) =
+      datasource.flatMap(_ { ds => ds.pathIsResource(path) }).unsafeRunSync() must throwA[MongoTimeoutException]
+
+    "returns false for root" >>* assertNoResource(mkDataSource, ResourcePath.root())
+
+    "returns false for inaccessible root" >>* assertNoResource(mkInaccessibleDataSource, ResourcePath.root())
+
+    "returns false for existing database" >> Fragment.foreach(MongoSpec.correctDbs) { db =>
+      s"checking ${db.name}" >>* assertNoResource(mkDataSource, db.resourcePath)
     }
-    "returns false for prefix without contents" >> Fragment.foreach(MongoSpec.correctDbs) (db =>
-      s"checking ${db.name}" >>*
-        mkDataSource.flatMap(_ { ds => ds.pathIsResource(db.resourcePath).map(!_) })
-    )
-    "returns false for non-existent collections" >> Fragment.foreach(MongoSpec.incorrectCollections)(col =>
-      s"checking ${col.database.name} :: ${col.name}" >>*
-        mkDataSource.flatMap(_ { ds => ds.pathIsResource(col.resourcePath).map(!_) })
-    )
-    "returns true for existent collections" >> Fragment.foreach(MongoSpec.correctCollections)(col =>
-      s"checking ${col.database.name} :: ${col.name}" >>*
-        mkDataSource.flatMap(_ { ds => ds.pathIsResource(col.resourcePath) })
-    )
+
+    "returns false for non-existing database" >> Fragment.foreach(MongoSpec.incorrectDbs) { db =>
+      s"checking ${db.name}" >>* assertNoResource(mkDataSource, db.resourcePath)
+    }
+
+    "returns false for inaccessible database" >> Fragment.foreach(MongoSpec.correctDbs) { db =>
+      s"checking ${db.name}" >>* assertNoResource(mkInaccessibleDataSource, db.resourcePath)
+    }
+
+    "returns true for existing collections" >> Fragment.foreach(MongoSpec.correctCollections) { col =>
+      s"checking ${col.database.name} :: ${col.name}" >>* assertResource(mkDataSource, col.resourcePath)
+    }
+
+    "returns false for non-existing collections" >> Fragment.foreach(MongoSpec.incorrectCollections) { col =>
+      s"checking ${col.database.name} :: ${col.name}" >>* assertNoResource(mkDataSource, col.resourcePath)
+    }
+
+    "throws timeout exception for inaccessible collections" >> Fragment.foreach(MongoSpec.incorrectCollections) { col =>
+      s"checking ${col.database.name} :: ${col.name}" >> assertTimeout(mkInaccessibleDataSource, col.resourcePath)
+    }
   }
 }
