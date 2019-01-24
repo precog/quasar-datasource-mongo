@@ -23,13 +23,15 @@ import cats.instances.list._
 import cats.syntax.apply._
 import cats.syntax.traverse._
 
+import quasar.connector.ResourceError
 import quasar.physical.mongo.MongoResource.{Collection, Database}
-import quasar.{EffectfulQSpec, Disposable}
+import quasar.{Disposable, EffectfulQSpec}
 
 import org.bson.{Document => _, _}
-import org.mongodb.scala.{MongoClient, Completed, Document}
+import org.mongodb.scala.{Completed, Document, MongoClient, MongoSecurityException, MongoTimeoutException}
 import org.specs2.specification.core._
 import org.specs2.execute.AsResult
+import scala.io.Source
 
 import shims._
 import testImplicits._
@@ -38,15 +40,17 @@ class MongoSpec extends EffectfulQSpec[IO] {
   import MongoSpec._
 
   step(MongoSpec.setupDB)
+
   "can create client from valid connection string" >>*
     mkMongo.map(_ must not(throwA[Throwable]))
 
   "can't create client from incorrect connection string" >> {
     "for incorrect protocol" >> {
-      Mongo[IO](MongoConfig("http://localhost", Some(128))).unsafeRunSync() must throwA[Throwable]
+      Mongo[IO](MongoConfig("http://localhost", Some(128))).unsafeRunSync() must throwA[java.lang.IllegalArgumentException]
     }
+
     "for unreachable config" >> {
-      Mongo[IO](MongoConfig("mongodb://unreachable", Some(128))).unsafeRunSync() must throwA[Throwable]
+      Mongo[IO](MongoConfig("mongodb://unreachable", Some(128))).unsafeRunSync() must throwA[MongoTimeoutException]
     }
   }
 
@@ -63,7 +67,7 @@ class MongoSpec extends EffectfulQSpec[IO] {
     mongo.databases.compile.toList.map { _ === List(Database("B")) }})
 
   "it's impossible to make mongo with incorrect auth" >> {
-    mkInvalidAMongo.unsafeRunSync() must throwA[Throwable]
+    mkInvalidAMongo.unsafeRunSync() must throwA[MongoSecurityException]
   }
 
   "databaseExists returns true for existing dbs" >> Fragment.foreach(MongoSpec.correctDbs)(db =>
@@ -79,7 +83,7 @@ class MongoSpec extends EffectfulQSpec[IO] {
   )
 
   "collections returns correct collection lists" >> Fragment.foreach(MongoSpec.correctDbs)(db =>
-    s"checkgin ${db.name}" >>* mkMongo.flatMap(_ { mongo =>
+    s"checking ${db.name}" >>* mkMongo.flatMap(_ { mongo =>
       mongo.collections(db)
         .fold(List[Collection]())((lst, coll) => coll :: lst)
         .map(collectionList => collectionList.toSet === MongoSpec.cols.map(c => Collection(db, c)).toSet)
@@ -127,9 +131,12 @@ class MongoSpec extends EffectfulQSpec[IO] {
       }
     })
   )
-  "findAll raises error for nonexistent collections" >> Fragment.foreach(MongoSpec.incorrectCollections)(col =>
+
+  "findAll raises path not found for nonexistent collections" >> Fragment.foreach(MongoSpec.incorrectCollections)(col =>
     s"checking ${col.database.name} :: ${col.name}" >>* mkMongo.flatMap(_ { mongo =>
-      IO.delay(mongo.findAll(col).unsafeRunSync() must throwA[Throwable])
+      IO.delay(mongo.findAll(col).attempt.unsafeRunSync() must beLike {
+        case Left(t) => ResourceError.throwableP.getOption(t) must_=== Some(ResourceError.pathNotFound(col.resourcePath))
+      })
     })
   )
 }
@@ -142,13 +149,16 @@ object MongoSpec {
   val nonexistentDbs = List("Z", "Y")
   val nonexistentCols = List("z", "y")
 
-  val connectionString: String = "mongodb://root:secret@127.0.0.1:27018"
-  val aConnectionString: String = "mongodb://aUser:aPassword@127.0.0.1:27018/A.a"
-  val invalidAConnectionString: String = "mongodb://aUser:aPassword@127.0.0.1:27018"
+  val host = Source.fromResource("mongo-host").mkString.trim
+
+  val connectionString: String = s"mongodb://root:secret@${host}:27018"
+  val connectionStringInvalidPort: String = s"mongodb://root:secret@${host}:27000/?serverSelectionTimeoutMS=1000"
+  val aConnectionString: String = s"mongodb://aUser:aPassword@${host}:27018/A.a"
+  val invalidAConnectionString: String = s"mongodb://aUser:aPassword@${host}:27018"
   // Note, there is no collection, only db
-  val bConnectionString: String = "mongodb://bUser:bPassword@127.0.0.1:27018/B"
+  val bConnectionString: String = s"mongodb://bUser:bPassword@${host}:27018/B"
   // And, there we have collection .b
-  val bbConnectionString: String = "mongodb://bUser:bPassword@127.0.0.1:27018/B.b"
+  val bbConnectionString: String = s"mongodb://bUser:bPassword@${host}:27018/B.b"
 
   def mkMongo: IO[Disposable[IO, Mongo[IO]]] =
     Mongo[IO](MongoConfig(connectionString, None))
@@ -158,6 +168,12 @@ object MongoSpec {
 
   def mkInvalidAMongo: IO[Disposable[IO, Mongo[IO]]] =
     Mongo[IO](MongoConfig(invalidAConnectionString, None))
+
+  // create an invalid Mongo to test error scenarios, bypassing the ping check that's done in Mongo.apply
+  def mkMongoInvalidPort: IO[Disposable[IO, Mongo[IO]]] =
+    for {
+      client <- Mongo.mkClient[IO](MongoConfig(connectionStringInvalidPort, None))
+    } yield Disposable(new Mongo[IO](client, Mongo.DefaultBsonBatch, None), Mongo.close[IO](client))
 
   def mkBMongo: IO[Disposable[IO, Mongo[IO]]] =
     Mongo[IO](MongoConfig(bConnectionString, None))
