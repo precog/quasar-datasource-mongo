@@ -34,7 +34,7 @@ class MongoDataSourceModuleSpec extends EffectfulQSpec[IO] {
   "Using incorrect config leads to Left invalid configuration" >>* {
     val config = Json.obj("foo" -> Json.jString("bar"))
     MongoDataSourceModule.lightweightDatasource[IO](config).map (_.asCats must_===
-      Left(DatasourceError.InvalidConfiguration(MongoDataSource.kind, config, NonEmptyList("Attempt to decode value on failed cursor.")))) //beLike {
+      Left(DatasourceError.InvalidConfiguration(MongoDataSource.kind, config, NonEmptyList("Attempt to decode value on failed cursor."))))
   }
 
   "Using correct config produces Right Disposable" >>* {
