@@ -154,11 +154,10 @@ class Mongo[F[_]: MonadResourceErr : ConcurrentEffect] private[mongo](
 
     val cols = for {
       dbExists <- databaseExists(database)
-      res <- if (!dbExists) { Stream.empty } else {
+      res <- if (!dbExists) Stream.empty else
         observableAsStream(client.getDatabase(database.name).listCollectionNames(), DefaultQueueSize).map(Collection(database, _))
           .handleErrorWith(recoverAccessDenied)
           .handleErrorWith(errorHandler(database.resourcePath))
-      }
     } yield res
 
     Stream.force(cols.compile.toList.map { (list: List[Collection]) =>
@@ -225,9 +224,10 @@ object Mongo {
     for {
       connString <- F.delay(new ConnectionString(config.connectionString))
       connStringSettings <- F.delay(MongoClientSettings.builder().applyConnectionString(connString).build())
-      settings <- F.delay(if (connStringSettings.getSslSettings.isEnabled) {
-        MongoClientSettings.builder(connStringSettings).streamFactoryFactory(NettyStreamFactoryFactory()).build()
-      } else connStringSettings)
+      settings <- F.delay(
+        if (connStringSettings.getSslSettings.isEnabled)
+          MongoClientSettings.builder(connStringSettings).streamFactoryFactory(NettyStreamFactoryFactory()).build()
+        else connStringSettings)
       client <- F.delay(MongoClient(settings))
     } yield client
 
