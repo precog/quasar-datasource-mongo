@@ -115,20 +115,24 @@ class Mongo[F[_]: MonadResourceErr : ConcurrentEffect] private[mongo](
   }
 
   def databases: Stream[F, Database] = {
-    def handle(oldStream: Stream[F, Database]) = accessedResource match {
-      case None => oldStream
-      case Some(Collection(db, _)) => Stream.emit(db)
-      case Some(db @ Database(_)) => Stream.emit(db)
+
+    val fallbackDb = accessedResource.map(MongoResource.getDatabase)
+
+    def emitFallbackOr(ifEmpty: => Stream[F, Database]) =
+      fallbackDb.fold[Stream[F, Database]](ifEmpty)(Stream.emit)
+
+    val recoverAccessDenied: Throwable => Stream[F, Database] = {
+      case MongoAccessDenied((ex, _)) => emitFallbackOr(Stream.raiseError(ex))
+      case t: Throwable => Stream.raiseError(t)
     }
+
     val dbs = observableAsStream(client.listDatabaseNames, DefaultQueueSize)
       .map(Database(_))
-      .handleErrorWith {
-        case MongoAccessDenied((ex, _)) => handle(Stream.raiseError(ex))
-        case t: Throwable => Stream.raiseError(t)
-      }
+      .handleErrorWith(recoverAccessDenied)
       .handleErrorWith(errorHandler(ResourcePath.root()))
+
     Stream.force(dbs.compile.toList.map { (list: List[Database]) =>
-      if (list.isEmpty) handle(Stream.empty) else Stream.emits(list)
+      if (list.isEmpty) emitFallbackOr(Stream.empty) else Stream.emits(list)
     })
   }
 
@@ -136,24 +140,29 @@ class Mongo[F[_]: MonadResourceErr : ConcurrentEffect] private[mongo](
     databases.exists(_ === database)
 
   def collections(database: Database): Stream[F, Collection] = {
-    def handle(oldStream: Stream[F, Collection]) = accessedResource match {
+
+    def emitFallbackOr(s: => Stream[F, Collection]) = accessedResource match {
       case Some(coll @ Collection(_, _)) if database === coll.database => Stream.emit(coll)
       case Some(db @ Database(_)) if db === database => Stream.empty
-      case _ => oldStream
+      case _ => s
     }
+
+    val recoverAccessDenied: Throwable => Stream[F, Collection] = {
+      case MongoAccessDenied((ex, _)) => emitFallbackOr(Stream.raiseError(ex))
+      case t: Throwable => Stream.raiseError(t)
+    }
+
     val cols = for {
       dbExists <- databaseExists(database)
       res <- if (!dbExists) { Stream.empty } else {
         observableAsStream(client.getDatabase(database.name).listCollectionNames(), DefaultQueueSize).map(Collection(database, _))
-          .handleErrorWith {
-            case MongoAccessDenied((ex, _)) => handle(Stream.raiseError(ex))
-            case t: Throwable => Stream.raiseError(t)
-          }
+          .handleErrorWith(recoverAccessDenied)
           .handleErrorWith(errorHandler(database.resourcePath))
       }
     } yield res
+
     Stream.force(cols.compile.toList.map { (list: List[Collection]) =>
-      if (list.isEmpty) handle(Stream.empty) else Stream.emits(list)
+      if (list.isEmpty) emitFallbackOr(Stream.empty) else Stream.emits(list)
     })
   }
 
