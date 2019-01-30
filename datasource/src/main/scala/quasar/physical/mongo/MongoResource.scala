@@ -46,6 +46,11 @@ object MongoResource {
   implicit val eqCollection: Eq[Collection] = Eq.fromUniversalEquals
   implicit val eqDatabase: Eq[Database] = Eq.fromUniversalEquals
 
+  def getDatabase(r: MongoResource): Database = r match {
+    case d @ Database(_) => d
+    case Collection(d, _) => d
+  }
+
   def ofFile(file: AFile): Option[MongoResource] = {
     Path.peel(file) match {
       case Some((firstLayer, eitherName)) => Path.peel(firstLayer) match {

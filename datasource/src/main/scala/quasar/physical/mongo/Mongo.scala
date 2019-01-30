@@ -30,10 +30,10 @@ import fs2.Stream
 import quasar.connector.{MonadResourceErr, ResourceError}
 import quasar.physical.mongo.MongoResource.{Collection, Database}
 import quasar.Disposable
-
-import com.mongodb.ConnectionString
+import quasar.api.resource.ResourcePath
 
 import org.bson.{Document => _, _}
+import com.mongodb.ConnectionString
 import org.mongodb.scala._
 import org.mongodb.scala.connection.NettyStreamFactoryFactory
 
@@ -84,21 +84,55 @@ class Mongo[F[_]: MonadResourceErr : ConcurrentEffect] private[mongo](
     } yield res)
   }
 
-  def databases: Stream[F, Database] = {
-    def handle(oldStream: Stream[F, Database]) = accessedResource match {
-      case None => oldStream
-      case Some(Collection(db, _)) => Stream.emit(db)
-      case Some(db @ Database(_)) => Stream.emit(db)
+  private def mkMsg(ex: MongoCommandException) = s"Mongo command error: ${ex.getErrorCodeName}"
+
+  object MongoConnectionFailed {
+    def unapply(t: Throwable): Option[(Throwable, String)] = t match {
+      case ex: MongoTimeoutException => Some((ex, "Timed out connecting to server"))
+      // see for a list of codes: https://github.com/mongodb/mongo/blob/master/src/mongo/base/error_codes.err
+      case ex: MongoCommandException if List(6, 7, 24, 89, 230, 231, 240).contains(ex.getErrorCode) =>
+        Some((ex, mkMsg(ex)))
+      case _ => None
     }
+  }
+
+  object MongoAccessDenied {
+    def unapply(t: Throwable): Option[(Throwable, String)] = t match {
+      case ex: MongoSecurityException => Some((ex, "Client authentication error"))
+      // see for a list of codes: https://github.com/mongodb/mongo/blob/master/src/mongo/base/error_codes.err
+      case ex: MongoCommandException if List(11, 13, 18, 31, 33).contains(ex.getErrorCode) =>
+        Some((ex, mkMsg(ex)))
+      case _ => None
+    }
+  }
+
+  def errorHandler[A](path: ResourcePath): Throwable => Stream[F, A] = {
+    case MongoConnectionFailed((ex, detail)) =>
+      Stream.eval(MonadResourceErr.raiseError(ResourceError.connectionFailed(path, Some(detail), Some(ex))))
+    case MongoAccessDenied((ex, detail)) =>
+      Stream.eval(MonadResourceErr.raiseError(ResourceError.accessDenied(path, Some(detail), Some(ex))))
+    case t => Stream.raiseError(t)
+  }
+
+  def databases: Stream[F, Database] = {
+
+    val fallbackDb = accessedResource.map(MongoResource.getDatabase)
+
+    def emitFallbackOr(ifEmpty: => Stream[F, Database]) =
+      fallbackDb.fold[Stream[F, Database]](ifEmpty)(Stream.emit)
+
+    val recoverAccessDenied: Throwable => Stream[F, Database] = {
+      case MongoAccessDenied((ex, _)) => emitFallbackOr(Stream.raiseError(ex))
+      case t: Throwable => Stream.raiseError(t)
+    }
+
     val dbs = observableAsStream(client.listDatabaseNames, DefaultQueueSize)
       .map(Database(_))
-      .handleErrorWith { _ match {
-        case ex: MongoCommandException => handle(Stream.raiseError(ex))
-        case ex: MongoSecurityException => handle(Stream.raiseError(ex))
-        case thr: Throwable => Stream.raiseError(thr)
-      }}
+      .handleErrorWith(recoverAccessDenied)
+      .handleErrorWith(errorHandler(ResourcePath.root()))
+
     Stream.force(dbs.compile.toList.map { (list: List[Database]) =>
-      if (list.isEmpty) handle(Stream.empty) else Stream.emits(list)
+      if (list.isEmpty) emitFallbackOr(Stream.empty) else Stream.emits(list)
     })
   }
 
@@ -106,24 +140,28 @@ class Mongo[F[_]: MonadResourceErr : ConcurrentEffect] private[mongo](
     databases.exists(_ === database)
 
   def collections(database: Database): Stream[F, Collection] = {
-    def handle(oldStream: Stream[F, Collection]) = accessedResource match {
+
+    def emitFallbackOr(s: => Stream[F, Collection]) = accessedResource match {
       case Some(coll @ Collection(_, _)) if database === coll.database => Stream.emit(coll)
       case Some(db @ Database(_)) if db === database => Stream.empty
-      case _ => oldStream
+      case _ => s
     }
+
+    val recoverAccessDenied: Throwable => Stream[F, Collection] = {
+      case MongoAccessDenied((ex, _)) => emitFallbackOr(Stream.raiseError(ex))
+      case t: Throwable => Stream.raiseError(t)
+    }
+
     val cols = for {
       dbExists <- databaseExists(database)
-      res <- if (!dbExists) { Stream.empty } else {
+      res <- if (!dbExists) Stream.empty else
         observableAsStream(client.getDatabase(database.name).listCollectionNames(), DefaultQueueSize).map(Collection(database, _))
-          .handleErrorWith{ _ match {
-            case ex: MongoSecurityException => handle(Stream.raiseError(ex))
-            case ex: MongoCommandException => handle(Stream.raiseError(ex))
-            case thr: Throwable => Stream.raiseError(thr)
-          }}
-      }
+          .handleErrorWith(recoverAccessDenied)
+          .handleErrorWith(errorHandler(database.resourcePath))
     } yield res
+
     Stream.force(cols.compile.toList.map { (list: List[Collection]) =>
-      if (list.isEmpty) handle(Stream.empty) else Stream.emits(list)
+      if (list.isEmpty) emitFallbackOr(Stream.empty) else Stream.emits(list)
     })
   }
 
@@ -186,9 +224,10 @@ object Mongo {
     for {
       connString <- F.delay(new ConnectionString(config.connectionString))
       connStringSettings <- F.delay(MongoClientSettings.builder().applyConnectionString(connString).build())
-      settings <- F.delay(if (connStringSettings.getSslSettings.isEnabled) {
-        MongoClientSettings.builder(connStringSettings).streamFactoryFactory(NettyStreamFactoryFactory()).build()
-      } else connStringSettings)
+      settings <- F.delay(
+        if (connStringSettings.getSslSettings.isEnabled)
+          MongoClientSettings.builder(connStringSettings).streamFactoryFactory(NettyStreamFactoryFactory()).build()
+        else connStringSettings)
       client <- F.delay(MongoClient(settings))
     } yield client
 

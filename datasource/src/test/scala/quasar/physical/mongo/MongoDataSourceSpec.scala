@@ -20,8 +20,6 @@ import slamdata.Predef._
 
 import cats.effect.IO
 
-import com.mongodb.MongoTimeoutException
-
 import fs2.Stream
 
 import org.bson._
@@ -48,19 +46,26 @@ class MongoDataSourceSpec extends EffectfulQSpec[IO] {
 
   private def iRead[A](path: A): InterpretedRead[A] = InterpretedRead(path, List())
 
+  def connFailed[A]: PartialFunction[Either[Throwable, A], MatchResult[Any]] = {
+    case Left(t) => ResourceError.throwableP.getOption(t) must beLike {
+      case Some(ResourceError.connectionFailed(p, Some("Timed out connecting to server"), Some(_))) => p === ResourcePath.root()
+    }
+  }
+
+  def pathNotFound[A](path: ResourcePath): PartialFunction[Either[Throwable, A], MatchResult[Any]] = {
+    case Left(t) => ResourceError.throwableP.getOption(t) must_=== Some(ResourceError.pathNotFound(path))
+  }
+
+  def assertResourceError[A](res: Either[Throwable, A], expected: PartialFunction[Either[Throwable, A], MatchResult[Any]]) =
+    res must beLike(expected)
 
   "evaluation of" >> {
     def assertPathNotFound(ds: IO[Disposable[IO, MongoDataSource[IO]]], path: ResourcePath): MatchResult[Either[Throwable, QueryResult[IO]]] = {
-      val res: Either[Throwable, QueryResult[IO]] =
-        ds.flatMap(_ {_.evaluate(iRead(path)) }).attempt.unsafeRunSync()
-      res must beLike {
-        case Left(t) => ResourceError.throwableP.getOption(t) must_=== Some(ResourceError.pathNotFound(path))
-      }
+      ds.flatMap(_ {_.evaluate(iRead(path)) }).attempt.unsafeRunSync() must beLike(pathNotFound(path))
     }
 
-    def assertTimeout(ds: IO[Disposable[IO, MongoDataSource[IO]]], path: ResourcePath): MatchResult[QueryResult[IO]] = {
-      ds.flatMap(_ {_.evaluate(iRead(path)) }).unsafeRunSync() must throwA[MongoTimeoutException]
-    }
+    def assertConnectionFailed(ds: IO[Disposable[IO, MongoDataSource[IO]]], path: ResourcePath): MatchResult[Either[Throwable, QueryResult[IO]]] =
+      ds.flatMap(_ {_.evaluate(iRead(path)) }).attempt.unsafeRunSync() must beLike(connFailed)
 
     "root raises path not found" >>
       assertPathNotFound(mkDataSource, ResourcePath.root())
@@ -103,9 +108,9 @@ class MongoDataSourceSpec extends EffectfulQSpec[IO] {
         s"checking ${col.database.name} :: ${col.name}" >> assertPathNotFound(mkDataSource, col.resourcePath)
       )
 
-    "inaccessible collection throws timeout exception" >>
-      Fragment.foreach(MongoSpec.incorrectCollections)(col =>
-        s"checking ${col.database.name} :: ${col.name}" >> assertTimeout(mkInaccessibleDataSource, col.resourcePath)
+    "inaccessible collection raises connection failed" >>
+      Fragment.foreach(MongoSpec.incorrectCollections.headOption.toList)(col =>
+        s"checking ${col.database.name} :: ${col.name}" >> assertConnectionFailed(mkInaccessibleDataSource, col.resourcePath)
       )
   }
 
@@ -117,12 +122,11 @@ class MongoDataSourceSpec extends EffectfulQSpec[IO] {
       }})
     }
 
-    def assertTimeout(datasource: IO[Disposable[IO, MongoDataSource[IO]]], path: ResourcePath)= {
+    def assertConnectionFailed(datasource: IO[Disposable[IO, MongoDataSource[IO]]], path: ResourcePath) =
       datasource.flatMap(_ { ds => {
         val fStream = ds.prefixedChildPaths(path).map(_ getOrElse Stream.empty)
         Stream.force(fStream).compile.toList
-      }}).unsafeRunSync() must throwA[MongoTimeoutException]
-    }
+      }}).attempt.unsafeRunSync() must beLike(connFailed)
 
     def assertEmpty(datasource: IO[Disposable[IO, MongoDataSource[IO]]], path: ResourcePath) =
       datasource.flatMap(_ { ds => {
@@ -135,8 +139,8 @@ class MongoDataSourceSpec extends EffectfulQSpec[IO] {
         ResourcePath.root(),
         MongoSpec.correctDbs.map(db => (ResourceName(db.name), ResourcePathType.prefix)))
 
-    "children of inaccessible root throws timeout exception" >>
-      assertTimeout(
+    "children of inaccessible root raises connection failed" >>
+      assertConnectionFailed(
         mkInaccessibleDataSource,
         ResourcePath.root())
 
@@ -152,9 +156,9 @@ class MongoDataSourceSpec extends EffectfulQSpec[IO] {
       Fragment.foreach(MongoSpec.incorrectDbs)(db =>
         s"checking ${db.name}" >>* assertEmpty(mkDataSource, db.resourcePath))
 
-    "children of inaccessible database throws timeout exception" >>
+    "children of inaccessible database raises connection failed" >>
       Fragment.foreach(MongoSpec.incorrectDbs)(db =>
-        s"checking ${db.name}" >> assertTimeout(mkInaccessibleDataSource, db.resourcePath))
+        s"checking ${db.name}" >> assertConnectionFailed(mkInaccessibleDataSource, db.resourcePath))
 
     "children of existing collection are empty" >>
       Fragment.foreach (MongoSpec.correctCollections)(col =>
@@ -176,8 +180,8 @@ class MongoDataSourceSpec extends EffectfulQSpec[IO] {
     def assertResource(datasource: IO[Disposable[IO, MongoDataSource[IO]]], path: ResourcePath) =
       datasource.flatMap(_ { ds => ds.pathIsResource(path) })
 
-    def assertTimeout(datasource: IO[Disposable[IO, MongoDataSource[IO]]], path: ResourcePath) =
-      datasource.flatMap(_ { ds => ds.pathIsResource(path) }).unsafeRunSync() must throwA[MongoTimeoutException]
+    def assertConnectionFailed(datasource: IO[Disposable[IO, MongoDataSource[IO]]], path: ResourcePath) =
+      datasource.flatMap(_ (_.pathIsResource(path))).attempt.unsafeRunSync() must beLike(connFailed)
 
     "returns false for root" >>* assertNoResource(mkDataSource, ResourcePath.root())
 
@@ -203,8 +207,8 @@ class MongoDataSourceSpec extends EffectfulQSpec[IO] {
       s"checking ${col.database.name} :: ${col.name}" >>* assertNoResource(mkDataSource, col.resourcePath)
     }
 
-    "throws timeout exception for inaccessible collections" >> Fragment.foreach(MongoSpec.incorrectCollections) { col =>
-      s"checking ${col.database.name} :: ${col.name}" >> assertTimeout(mkInaccessibleDataSource, col.resourcePath)
+    "raises connection failed for inaccessible collections" >> Fragment.foreach(MongoSpec.incorrectCollections) { col =>
+      s"checking ${col.database.name} :: ${col.name}" >> assertConnectionFailed(mkInaccessibleDataSource, col.resourcePath)
     }
   }
 }
