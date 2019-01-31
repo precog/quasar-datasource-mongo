@@ -89,6 +89,7 @@ class Mongo[F[_]: MonadResourceErr : ConcurrentEffect] private[mongo](
   object MongoConnectionFailed {
     def unapply(t: Throwable): Option[(Throwable, String)] = t match {
       case ex: MongoTimeoutException => Some((ex, "Timed out connecting to server"))
+      case ex: MongoSocketException => Some((ex, "Error connecting to server"))
       // see for a list of codes: https://github.com/mongodb/mongo/blob/master/src/mongo/base/error_codes.err
       case ex: MongoCommandException if List(6, 7, 24, 89, 230, 231, 240).contains(ex.getErrorCode) =>
         Some((ex, mkMsg(ex)))
