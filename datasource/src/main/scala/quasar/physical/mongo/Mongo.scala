@@ -192,7 +192,7 @@ object Mongo {
   private def mkMsg(ex: MongoCommandException) = s"Mongo command error: ${ex.getErrorCodeName}"
 
   object MongoConnectionFailed {
-    def unapply(t: Throwable): Option[(Throwable, String)] = t match {
+    def unapply(t: Throwable): Option[(Exception, String)] = t match {
       case ex: MongoTimeoutException => Some((ex, "Timed out connecting to server"))
       case ex: MongoSocketException => Some((ex, "Error connecting to server"))
       // see for a list of codes: https://github.com/mongodb/mongo/blob/master/src/mongo/base/error_codes.err
@@ -203,7 +203,7 @@ object Mongo {
   }
 
   object MongoAccessDenied {
-    def unapply(t: Throwable): Option[(Throwable, String)] = t match {
+    def unapply(t: Throwable): Option[(Exception, String)] = t match {
       case ex: MongoSecurityException => Some((ex, "Client authentication error"))
       // see for a list of codes: https://github.com/mongodb/mongo/blob/master/src/mongo/base/error_codes.err
       case ex: MongoCommandException if List(11, 13, 18, 31, 33).contains(ex.getErrorCode) =>
