@@ -23,6 +23,7 @@ import cats.effect.concurrent.MVar
 import cats.syntax.eq._
 import cats.syntax.flatMap._
 import cats.syntax.functor._
+import cats.syntax.either._
 
 import fs2.concurrent.{NoneTerminatedQueue, Queue}
 import fs2.Stream
@@ -40,6 +41,7 @@ import org.mongodb.scala.connection.NettyStreamFactoryFactory
 class Mongo[F[_]: MonadResourceErr : ConcurrentEffect] private[mongo](
     client: MongoClient,
     maxMemory: Int,
+    val interpreter: Interpreter,
     val accessedResource: Option[MongoResource]) {
   import Mongo._
 
@@ -165,21 +167,20 @@ class Mongo[F[_]: MonadResourceErr : ConcurrentEffect] private[mongo](
     })
   }
 
-
   def collectionExists(collection: Collection): Stream[F, Boolean] =
     collections(collection.database).exists(_ === collection)
 
-  def findAll(collection: Collection): F[Stream[F, BsonValue]] = {
-    collectionExists(collection).compile.last.map(_ getOrElse false)
-      .flatMap(exists =>
-        if (exists) {
-          getQueueSize(collection).map { (qs: Long) =>
-            observableAsStream(getCollection(collection).find[BsonValue](), qs)
-          }
-        } else {
-          MonadResourceErr.raiseError(ResourceError.pathNotFound(collection.resourcePath))
-        })
-  }
+  private def withCollectionExists[A](collection: Collection, obs: Observable[A]): F[Stream[F, A]] =
+    collectionExists(collection).compile.last map(_ getOrElse false) flatMap { exists =>
+      if (exists) getQueueSize(collection) map { (qs: Long) => observableAsStream(obs, qs) }
+      else MonadResourceErr.raiseError(ResourceError.pathNotFound(collection.resourcePath))
+    }
+
+  def findAll(collection: Collection): F[Stream[F, BsonValue]] =
+    withCollectionExists(collection, getCollection(collection).find[BsonValue]())
+
+  def aggregate(collection: Collection, aggs: List[Aggregator]): F[Stream[F, BsonValue]] =
+    withCollectionExists(collection, getCollection(collection).aggregate[BsonValue](aggs map (_.toDocument)))
 
   private val maximumBatchBytes: Long = if (maxMemory > MaxBsonBatch) MaxBsonBatch else maxMemory.toLong
 
@@ -237,18 +238,44 @@ object Mongo {
   def apply[F[_]: ConcurrentEffect: MonadResourceErr](config: MongoConfig): F[Disposable[F, Mongo[F]]] = {
     val F = ConcurrentEffect[F]
 
-    def runCommand(client: MongoClient): F[Unit] =
-      F.suspend(singleObservableAsF[F, Unit](
-        client.getDatabase("admin").runCommand[Document](Document("ping" -> 1)).map(_ => ())
-      ))
+    def buildInfo(client: MongoClient): F[Document] =
+      F.suspend(singleObservableAsF[F, Document](client.getDatabase("admin")
+        .runCommand[Document](Document("buildInfo" -> 1))))
+
+    def getVersionString(doc: Document): Option[String] =
+      doc.get("version") flatMap {
+        case x: BsonString => Some(x.getValue())
+        case _ => None
+      }
+
+    def mkVersion(parts: Array[String]): Option[Version] = for {
+      o <- Some(scala.Predef.println(parts.toList))
+      majorString <- parts.lift(0)
+      minorString <- parts.lift(1)
+      patchString <- parts.lift(2)
+      major <- scala.Either.catchNonFatal(majorString.toInt).toOption
+      minor <- scala.Either.catchNonFatal(minorString.toInt).toOption
+      patch <- scala.Either.catchNonFatal(patchString.toInt).toOption
+    } yield Version(major, minor, patch)
+
+
+    // I don't think that there would be a lot of usability in having Option[Version] instead of Version
+    // because we're going to use minimal values, it should be valid to simply return Version(0, 0, 0) in
+    // case of error of decoding or something, although this checks that db is reachable
+    def getVersion(client: MongoClient): F[Version] =
+      buildInfo(client) map { x =>
+        getVersionString(x) map (_.split("\\.")) flatMap mkVersion getOrElse Version(0, 0, 0)
+      }
 
     for {
       client <- mkClient(config)
-      _ <- runCommand(client)
+      version <- getVersion(client)
+      interpreter <- ParseInstructionInterpreter(version)
     } yield Disposable(
       new Mongo[F](
         client,
         config.resultBatchSizeBytes.getOrElse(DefaultBsonBatch),
+        interpreter,
         config.accessedResource),
       close(client))
   }

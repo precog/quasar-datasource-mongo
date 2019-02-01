@@ -151,14 +151,15 @@ object MongoSpec {
 
   val host = Source.fromResource("mongo-host").mkString.trim
 
-  val connectionString: String = s"mongodb://root:secret@${host}:27018"
+  val port: String = "27017"
+  val connectionString: String = s"mongodb://root:secret@${host}:${port}"
   val connectionStringInvalidPort: String = s"mongodb://root:secret@${host}:27000/?serverSelectionTimeoutMS=1000"
-  val aConnectionString: String = s"mongodb://aUser:aPassword@${host}:27018/A.a"
-  val invalidAConnectionString: String = s"mongodb://aUser:aPassword@${host}:27018"
+  val aConnectionString: String = s"mongodb://aUser:aPassword@${host}:${port}/A.a"
+  val invalidAConnectionString: String = s"mongodb://aUser:aPassword@${host}:${port}"
   // Note, there is no collection, only db
-  val bConnectionString: String = s"mongodb://bUser:bPassword@${host}:27018/B"
+  val bConnectionString: String = s"mongodb://bUser:bPassword@${host}:${port}/B"
   // And, there we have collection .b
-  val bbConnectionString: String = s"mongodb://bUser:bPassword@${host}:27018/B.b"
+  val bbConnectionString: String = s"mongodb://bUser:bPassword@${host}:${port}/B.b"
 
   def mkMongo: IO[Disposable[IO, Mongo[IO]]] =
     Mongo[IO](MongoConfig(connectionString, None))

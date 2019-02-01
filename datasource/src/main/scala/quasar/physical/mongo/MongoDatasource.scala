@@ -46,13 +46,16 @@ class MongoDataSource[F[_]: ConcurrentEffect: ContextShift: MonadResourceErr: Ti
     val path = iRead.path
     val errored =
       MonadResourceErr.raiseError(ResourceError.pathNotFound(path))
+    val interpretation: Interpretation = mongo.interpreter.interpret(iRead.instructions)
 
     val fStream = path match {
       case ResourcePath.Root => errored
       case ResourcePath.Leaf(file) => MongoResource.ofFile(file) match {
         case None => errored
         case Some(Database(_)) => errored
-        case Some(collection@Collection(_, _)) => mongo.findAll(collection)
+        case Some(collection@Collection(_, _)) =>
+          if (interpretation.aggregators.isEmpty) mongo.findAll(collection)
+          else mongo.aggregate(collection, interpretation.aggregators)
       }
     }
     fStream.map(stream => QueryResult.parsed(qdataDecoder, stream, iRead.instructions))
