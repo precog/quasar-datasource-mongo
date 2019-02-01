@@ -33,12 +33,30 @@ trait Aggregator {
 }
 
 object Aggregator {
-  final case class ReplaceRootWithList(rootField: String, prjs: List[MongoProjection]) extends Aggregator {
-    def toDocument: Document = Document("$replaceRoot" -> prjs.map (_.toVarString))
+  final case class ReplaceRootWithList(rootField: String, prjs: MongoConstruct) extends Aggregator {
+    def toDocument: Document = Document("$$replaceRoot" -> prjs.toBsonValue)
   }
 
-  def replaceRootWithList: Prism[Aggregator, (String, List[MongoProjection])] =
-    Prism.partial[Aggregator, (String, List[MongoProjection])] {
+  final case class Project(obj: MongoExpression.MongoObject) extends Aggregator {
+    def toDocument: Document = Document("$$project" -> obj.toBsonValue)
+  }
+
+  final case class AddFields(obj: MongoExpression.MongoObject) extends Aggregator {
+    def toDocument: Document = Document("$$addFields" -> obj.toBsonValue)
+  }
+
+  def replaceRootWithList: Prism[Aggregator, (String, MongoConstruct)] =
+    Prism.partial[Aggregator, (String, MongoConstruct)] {
       case ReplaceRootWithList(r, p) => (r, p)
     } { case (r, p) => ReplaceRootWithList(r, p) }
+
+  def project: Prism[Aggregator, MongoExpression.MongoObject] =
+    Prism.partial[Aggregator, MongoExpression.MongoObject] {
+      case Project(obj) => obj
+    } (x => Project(x))
+
+  def addFields: Prism[Aggregator, MongoExpression.MongoObject] =
+    Prism.partial[Aggregator, MongoExpression.MongoObject] {
+      case AddFields(obj) => obj
+    } (x => AddFields(x))
 }

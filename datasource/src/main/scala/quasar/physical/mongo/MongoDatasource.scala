@@ -55,7 +55,7 @@ class MongoDataSource[F[_]: ConcurrentEffect: ContextShift: MonadResourceErr: Ti
         case Some(Database(_)) => errored
         case Some(collection@Collection(_, _)) =>
           if (interpretation.aggregators.isEmpty) mongo.findAll(collection)
-          else mongo.aggregate(collection, interpretation.aggregators)
+          else mongo.aggregate(collection, interpretation.aggregators) map (_ map interpretation.resultMapper)
       }
     }
     fStream.map(stream => QueryResult.parsed(qdataDecoder, stream, iRead.instructions))

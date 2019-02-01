@@ -18,13 +18,14 @@ package quasar.physical.mongo.interpreter
 
 import slamdata.Predef._
 
-import cats.syntax.eq._
+import cats.syntax.order._
+import cats.instances.option._
 
 import quasar.ParseInstruction
 
 import org.bson.BsonValue
 
-import quasar.physical.mongo.{Aggregator, Version, MongoProjection}
+import quasar.physical.mongo.{Aggregator, Version, MongoProjection, MongoExpression}
 
 import shims._
 
@@ -35,10 +36,20 @@ object Ids {
       processed: List[ParseInstruction])
       : Option[(List[Aggregator], BsonValue => BsonValue)] = {
     if (!processed.find(x => (ParseInstruction.Ids: ParseInstruction) === x).isEmpty) None
-    else
-      Some(
-        (List(Aggregator.replaceRootWithList(uniqueKey, List(MongoProjection.Id, MongoProjection.Root))),
-          ((x: BsonValue) => x.asDocument().get(uniqueKey))))
-
+    else {
+      val mapper = (x: BsonValue) => x.asDocument().get(uniqueKey)
+      val aggregator: Option[Aggregator] =
+        if (version > Version(3, 4, 0))
+          Some(Aggregator.replaceRootWithList(
+            uniqueKey,
+            MongoExpression.MongoArray(List(MongoProjection.Id.toVar, MongoProjection.Root.toVar))))
+        else if (version > Version(3, 2, 0))
+          Some(Aggregator.project(MongoExpression.MongoObject(Map(
+            uniqueKey -> MongoExpression.MongoArray(List(MongoProjection.Id.toVar, MongoProjection.Root.toVar))
+          ))))
+        else
+          None
+      aggregator map (x => (List(x), mapper))
+    }
   }
 }

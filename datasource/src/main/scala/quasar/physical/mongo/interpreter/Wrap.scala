@@ -14,26 +14,32 @@
  * limitations under the License.
  */
 
-package quasar.physical.mongo
+package quasar.physical.mongo.interpreter
 
 import slamdata.Predef._
 
-trait MongoProjection {
-  def toVarString: String
-}
+import cats.syntax.order._
+import cats.instances.option._
 
-object MongoProjection {
-  trait SimpleProjection extends MongoProjection
+import quasar.ParseInstruction
 
-  final case class Field(field: String) extends SimpleProjection {
-    def toVarString = "$" ++ field
+import org.bson.BsonValue
+
+import quasar.physical.mongo.{Aggregator, Version, MongoProjection, MongoExpression}
+
+import shims._
+
+object Wrap {
+  def apply(
+      uniqueKey: String,
+      version: Version,
+      processed: List[ParseInstruction])
+      : Option[(List[Aggregator], BsonValue => BsonValue)] = {
+
+    if (version < Version(3, 4, 0)) None
+    else {
+      None
+    }
   }
-  final case class Index(index: Int) extends SimpleProjection {
-    def toVarString = "$" ++ index.toString
-  }
 
-//  final case class Path(steps: List[SimpleProjection]) extends MongoProjection
-
-  val Id: MongoProjection = Field("_id")
-  val Root: MongoProjection = Field("$ROOT")
 }
