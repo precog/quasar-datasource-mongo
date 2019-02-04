@@ -23,6 +23,9 @@ import org.bson._
 import scala.collection.JavaConverters._
 import quasar.common.{CPath, CPathNode, CPathField, CPathMeta, CPathIndex, CPathArray}
 
+import monocle.{Iso, PTraversal, Prism}
+
+
 trait MongoExpression {
   def toBsonValue: BsonValue
 }
@@ -41,17 +44,29 @@ object MongoProjection {
   val Root: MongoProjection = Field("$ROOT")
 
   final case class Field(field: String) extends MongoProjection {
-    def toString = field
+    override def toString = field
     def toBsonValue: BsonValue = new BsonString(field)
     def toVar: Field = Field("$" ++ field)
     def +/(prj: MongoProjection) = this
   }
+
+  def field: Prism[MongoProjection, String] =
+    Prism.partial[MongoProjection, String] {
+      case Field(str) => str
+    } ( x => Field(x) )
+
+
   final case class Index(index: Int) extends MongoProjection {
-    def toString = i.toString
+    override def toString = index.toString
     def toBsonValue: BsonValue = new BsonInt32(index)
     def toVar: Field = Field("$" ++ index.toString)
     def +/(prj: MongoProjection) = this
   }
+
+  def index: Prism[MongoProjection, Int] =
+    Prism.partial[MongoProjection, Int] {
+      case Index(i) => i
+    } ( i => Index(i) )
 }
 
 object MongoExpression {

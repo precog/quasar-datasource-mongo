@@ -60,7 +60,7 @@ class ParseInstructionInterpreter(version: Version, uniqueKey: String) extends I
     case ParseInstruction.Wrap(path, name) => Wrap(uniqueKey, version, processed, path, name)
     case ParseInstruction.Mask(masks) => None
     case ParseInstruction.Pivot(path, status, structure) => None
-    case ParseInstruction.Project(path) => None
+    case ParseInstruction.Project(path) => Project(uniqueKey, version, processed, path)
     case ParseInstruction.Cartesian(cartouches) => None
   }
 

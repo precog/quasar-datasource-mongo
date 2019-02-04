@@ -76,10 +76,10 @@ object Wrap {
           val group = Aggregator.group(groupId, groupObj)
 
           val moveAcc = Aggregator.addFields(MongoExpression.MongoObject(Map(
-            (Field(uniqueKey) +/ p).toString -> Field("acc").toVar)))
+            (MongoProjection.Field(uniqueKey) +/ p).toString -> MongoProjection.Field("acc").toVar)))
 
           val projectRoot = Aggregator.project(MongoExpression.MongoObject(Map(
-            uniqueKey -> true)))
+            uniqueKey -> MongoExpression.MongoBoolean(true))))
 
           List(group, moveAcc, projectRoot)
         }}

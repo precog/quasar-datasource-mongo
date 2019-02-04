@@ -52,10 +52,21 @@ object Aggregator {
       "preserveNullAndEmptyArrays" -> true))
   }
 
+  final case class Match(obj: MongoExpression.MongoObject) extends Aggregator {
+    def toDocument: Document =
+      Document("$$match" -> obj.toBsonValue)
+  }
+
+
   final case class Group(id: MongoExpression, obj: MongoExpression.MongoObject) extends Aggregator {
     def toDocument: Document =
       Document("$$group" -> obj.toBsonValue).updated("_id", id.toBsonValue)
   }
+
+  def mmatch: Prism[Aggregator, MongoExpression.MongoObject] =
+    Prism.partial[Aggregator, MongoExpression.MongoObject] {
+      case Match(obj) => obj
+    } ( x => Match(x) )
 
   def group: Prism[Aggregator, (MongoExpression, MongoExpression.MongoObject)] =
     Prism.partial[Aggregator, (MongoExpression, MongoExpression.MongoObject)] {
