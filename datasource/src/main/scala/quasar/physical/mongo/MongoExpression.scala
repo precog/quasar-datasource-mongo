@@ -21,28 +21,36 @@ import slamdata.Predef._
 import org.bson._
 
 import scala.collection.JavaConverters._
+import quasar.common.{CPath, CPathNode, CPathField, CPathMeta, CPathIndex, CPathArray}
 
 trait MongoExpression {
   def toBsonValue: BsonValue
 }
 
 trait MongoProjection extends MongoExpression {
+  def toString: String
   def toVar: MongoProjection.Field
+  def +/(prj: MongoProjection): MongoProjection
 }
 
 trait MongoConstruct extends MongoExpression
 
+// TODO: nice projection syntax
 object MongoProjection {
   val Id: MongoProjection = Field("_id")
   val Root: MongoProjection = Field("$ROOT")
 
   final case class Field(field: String) extends MongoProjection {
+    def toString = field
     def toBsonValue: BsonValue = new BsonString(field)
     def toVar: Field = Field("$" ++ field)
+    def +/(prj: MongoProjection) = this
   }
   final case class Index(index: Int) extends MongoProjection {
+    def toString = i.toString
     def toBsonValue: BsonValue = new BsonInt32(index)
     def toVar: Field = Field("$" ++ index.toString)
+    def +/(prj: MongoProjection) = this
   }
 }
 
@@ -57,5 +65,17 @@ object MongoExpression {
       }
       new BsonDocument(elements.toSeq.asJava)
     }
+  }
+
+  final case object MongoNull extends MongoExpression {
+    def toBsonValue: BsonValue = new BsonNull
+  }
+
+  final case class MongoBoolean(b: Boolean) extends MongoExpression {
+    def toBsonValue: BsonValue = new BsonBoolean(b)
+  }
+
+  final case class MongoInt(i: Int) extends MongoExpression {
+    def toBsonValue: BsonValue = new BsonInt32(i)
   }
 }

@@ -34,22 +34,17 @@ object Ids {
       uniqueKey: String,
       version: Version,
       processed: List[ParseInstruction])
-      : Option[(List[Aggregator], BsonValue => BsonValue)] = {
+      : Option[List[Aggregator]] = {
     if (!processed.find(x => (ParseInstruction.Ids: ParseInstruction) === x).isEmpty) None
     else {
-      val mapper = (x: BsonValue) => x.asDocument().get(uniqueKey)
       val aggregator: Option[Aggregator] =
-        if (version > Version(3, 4, 0))
-          Some(Aggregator.replaceRootWithList(
-            uniqueKey,
-            MongoExpression.MongoArray(List(MongoProjection.Id.toVar, MongoProjection.Root.toVar))))
-        else if (version > Version(3, 2, 0))
+        if (version > Version(3, 2, 0))
           Some(Aggregator.project(MongoExpression.MongoObject(Map(
             uniqueKey -> MongoExpression.MongoArray(List(MongoProjection.Id.toVar, MongoProjection.Root.toVar))
           ))))
         else
           None
-      aggregator map (x => (List(x), mapper))
+      aggregator map (x => List(x))
     }
   }
 }

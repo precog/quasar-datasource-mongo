@@ -46,7 +46,8 @@ class MongoDataSource[F[_]: ConcurrentEffect: ContextShift: MonadResourceErr: Ti
     val path = iRead.path
     val errored =
       MonadResourceErr.raiseError(ResourceError.pathNotFound(path))
-    val interpretation: Interpretation = mongo.interpreter.interpret(iRead.instructions)
+    val interpretation: Interpretation =
+      mongo.interpreter.interpret(iRead.instructions)
 
     val fStream = path match {
       case ResourcePath.Root => errored
@@ -55,10 +56,10 @@ class MongoDataSource[F[_]: ConcurrentEffect: ContextShift: MonadResourceErr: Ti
         case Some(Database(_)) => errored
         case Some(collection@Collection(_, _)) =>
           if (interpretation.aggregators.isEmpty) mongo.findAll(collection)
-          else mongo.aggregate(collection, interpretation.aggregators) map (_ map interpretation.resultMapper)
+          else mongo.aggregate(collection, interpretation.aggregators) map (_ map mongo.interpreter.mapper)
       }
     }
-    fStream.map(stream => QueryResult.parsed(qdataDecoder, stream, iRead.instructions))
+    fStream.map(stream => QueryResult.parsed(qdataDecoder, stream, interpretation.remainingInstructions))
   }
 
   override def pathIsResource(path: ResourcePath): F[Boolean] = path match {

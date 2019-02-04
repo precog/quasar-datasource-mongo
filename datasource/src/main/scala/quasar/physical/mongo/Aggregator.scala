@@ -45,6 +45,29 @@ object Aggregator {
     def toDocument: Document = Document("$$addFields" -> obj.toBsonValue)
   }
 
+  final case class Unwind(path: MongoProjection, includeArrayIndex: String) extends Aggregator {
+    def toDocument: Document = Document("$$unwind" -> Document(
+      "path" -> path.toBsonValue,
+      "includeArrayIndex" -> includeArrayIndex,
+      "preserveNullAndEmptyArrays" -> true))
+  }
+
+  final case class Group(id: MongoExpression, obj: MongoExpression.MongoObject) extends Aggregator {
+    def toDocument: Document =
+      Document("$$group" -> obj.toBsonValue).updated("_id", id.toBsonValue)
+  }
+
+  def group: Prism[Aggregator, (MongoExpression, MongoExpression.MongoObject)] =
+    Prism.partial[Aggregator, (MongoExpression, MongoExpression.MongoObject)] {
+      case Group(a, b) => (a, b)
+    } { case (a, b) => Group(a, b) }
+
+
+  def unwind: Prism[Aggregator, (MongoProjection, String)] =
+    Prism.partial[Aggregator, (MongoProjection, String)] {
+      case Unwind(p, i) => (p, i)
+    } { case (p, i) => Unwind(p, i) }
+
   def replaceRootWithList: Prism[Aggregator, (String, MongoConstruct)] =
     Prism.partial[Aggregator, (String, MongoConstruct)] {
       case ReplaceRootWithList(r, p) => (r, p)
