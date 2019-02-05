@@ -93,4 +93,8 @@ object MongoExpression {
   final case class MongoInt(i: Int) extends MongoExpression {
     def toBsonValue: BsonValue = new BsonInt32(i)
   }
+
+  final case class MongoString(str: String) extends MongoExpression {
+    def toBsonValue: BsonValue = new BsonString(str)
+  }
 }
