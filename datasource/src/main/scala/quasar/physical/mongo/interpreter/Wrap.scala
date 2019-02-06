@@ -30,7 +30,8 @@ import quasar.ParseInstruction
 
 import org.bson.BsonValue
 
-import quasar.physical.mongo.{Aggregator, Version, MongoExpression, MongoProjection}, Aggregator._
+import quasar.physical.mongo.MongoExpression
+import quasar.physical.mongo.{Aggregator, Version, MongoExpression => E}, Aggregator._
 
 import shims._
 
@@ -45,53 +46,54 @@ object Wrap {
 
     if (version < Version(3, 4, 0)) None
     else {
-      final case class AggPrepare(currentPath: MongoProjection, pathsToUnwind: List[MongoProjection], condition: MongoExpression)
+      final case class AggPrepare(currentPath: E.Projection, pathsToUnwind: List[E.Projection], condition: MongoExpression)
 
-      val initialPreparation: AggPrepare = AggPrepare(MongoProjection.Root, List(), MongoExpression.MongoBoolean(true))
+      val initialPreparation: AggPrepare = AggPrepare(E.Projection(), List(), E.Bool(true))
 
-      val preparations: Option[AggPrepare] = path.nodes.foldM(initialPreparation) { (prep: AggPrepare, node: CPathNode) => node match {
-        case CPathField(str) => Some(prep.copy(currentPath = prep.currentPath +/ MongoProjection.Field(str)))
-        case CPathIndex(i) =>
-          val idX: MongoProjection.Field = MongoProjection.Field("id" ++ prep.pathsToUnwind.length.toString).toVar
-          Some(prep.copy(pathsToUnwind = prep.currentPath +: prep.pathsToUnwind, condition =
-          MongoExpression.MongoObject(Map("$and" -> MongoExpression.MongoArray(List(
-            prep.condition, MongoExpression.MongoObject(Map("$eq" -> MongoExpression.MongoArray(List(idX, MongoExpression.MongoInt(i)))))))))))
-        case _ => None
-      }}
+      val preparations: Option[AggPrepare] =
+        path.nodes.foldM(initialPreparation) { (prep: AggPrepare, node: CPathNode) => node match {
+          case CPathField(str) => Some(prep.copy(currentPath = prep.currentPath +/ E.key(str)))
+          case CPathIndex(i) =>
+            val idX: E.Projection = E.key("id" ++ prep.pathsToUnwind.length.toString)
+            Some(prep.copy(pathsToUnwind = prep.currentPath +: prep.pathsToUnwind, condition =
+              E.Object("$and" -> E.Array(prep.condition, E.Object("$eq" -> E.Array(idX, E.Int(i)))))))
+          case _ => None
+        }}
 
 
       preparations map { ps =>
-        val indexed: List[(MongoProjection, Int)] = ps.pathsToUnwind.zipWithIndex
+        val indexed: List[(E.Projection, Int)] = ps.pathsToUnwind.zipWithIndex
 
-        val unwinds = indexed map { case (p: MongoProjection, i: Int) => Unwind(p, "id" ++ i.toString) }
+        val unwinds = indexed map { case (p: E.Projection, i: Int) => Unwind(p, "id" ++ i.toString) }
 
-        val groupsAndFlatten: List[Aggregator] = indexed.reverse foldMap { case (p: MongoProjection, i: Int) => {
-          val groupId = MongoExpression.MongoArray {
-            List.range(0, i) map (ix => MongoProjection.Field("id" ++ ix.toString).toVar) }
+        val groupsAndFlatten: List[Aggregator] = indexed.reverse foldMap { case (p: E.Projection, i: Int) => {
+          val groupId = E.Array({
+            List.range(0, i) map (ix => E.key("id" ++ ix.toString)) }: _*)
 
-          val groupObj = MongoExpression.MongoObject(Map(
-            uniqueKey -> MongoExpression.MongoObject(Map("$$first" -> MongoProjection.Field(uniqueKey).toVar)),
-            "acc" -> MongoExpression.MongoObject(Map("$$push" -> p.toVar))))
+          val groupObj =
+            E.Object(
+              uniqueKey -> E.Object("$$first" -> E.key(uniqueKey)),
+              "acc" -> E.Object("$$push" -> p))
 
           val group = Aggregator.group(groupId, groupObj)
 
-          val moveAcc = Aggregator.addFields(MongoExpression.MongoObject(Map(
-            (MongoProjection.Field(uniqueKey) +/ p).toString -> MongoProjection.Field("acc").toVar)))
+          val moveAcc = Aggregator.addFields(E.Object(
+            (E.key(uniqueKey) +/ p).toKey -> E.key("acc")))
 
-          val projectRoot = Aggregator.project(MongoExpression.MongoObject(Map(
-            uniqueKey -> MongoExpression.MongoBoolean(true))))
+          val projectRoot = Aggregator.project(E.Object(
+            uniqueKey -> E.Bool(true)))
 
           List(group, moveAcc, projectRoot)
         }}
 
-        def cond(test: MongoExpression, ok: MongoExpression, fail: MongoExpression) = MongoExpression.MongoObject(Map(
-          "$$cond" -> MongoExpression.MongoArray(List(test, ok, fail))))
+        def cond(test: MongoExpression, ok: MongoExpression, fail: MongoExpression) =
+          E.Object("$$cond" -> E.Array(test, ok, fail))
 
-        val wrap = Aggregator.addFields(MongoExpression.MongoObject(Map(
+        val wrap = Aggregator.addFields(E.Object(
           ps.currentPath.toString -> cond(
             ps.condition,
-            MongoExpression.MongoObject(Map(name -> ps.currentPath.toVar)),
-            ps.currentPath.toVar))))
+            E.Object(name -> ps.currentPath),
+            ps.currentPath)))
 
         unwinds ++ List(wrap) ++ groupsAndFlatten
       }

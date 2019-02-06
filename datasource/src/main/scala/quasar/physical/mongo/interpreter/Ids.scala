@@ -25,7 +25,7 @@ import quasar.ParseInstruction
 
 import org.bson.BsonValue
 
-import quasar.physical.mongo.{Aggregator, Version, MongoProjection, MongoExpression}
+import quasar.physical.mongo.{Aggregator, Version, MongoExpression => E}
 
 import shims._
 
@@ -35,16 +35,8 @@ object Ids {
       version: Version,
       processed: List[ParseInstruction])
       : Option[List[Aggregator]] = {
-    if (!processed.find(x => (ParseInstruction.Ids: ParseInstruction) === x).isEmpty) None
-    else {
-      val aggregator: Option[Aggregator] =
-        if (version > Version(3, 2, 0))
-          Some(Aggregator.project(MongoExpression.MongoObject(Map(
-            uniqueKey -> MongoExpression.MongoArray(List(MongoProjection.Id.toVar, MongoProjection.Root.toVar))
-          ))))
-        else
-          None
-      aggregator map (x => List(x))
-    }
+    if (!processed.isEmpty) None
+    else if (version < Version(3, 2, 0)) None
+    else Some(List(Aggregator.project(E.Object(uniqueKey -> E.Array(E.key("_id"), E.key(uniqueKey))))))
   }
 }

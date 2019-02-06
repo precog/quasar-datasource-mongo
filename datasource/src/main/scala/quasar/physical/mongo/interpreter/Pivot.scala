@@ -27,41 +27,47 @@ import cats.instances.map._
 import quasar.{ParseInstruction, CompositeParseType, IdStatus, ParseType}
 import quasar.common.{CPath, CPathField, CPathIndex, CPathNode}
 
-import quasar.physical.mongo.{Aggregator, Version, MongoExpression, MongoProjection}, Aggregator._
+import quasar.physical.mongo.MongoExpression
+import quasar.physical.mongo.{Aggregator, Version, MongoExpression => E}, Aggregator._
 
 import shims._
 
 object Pivot {
   // TODO: this is common stuff
-  final case class AggPrepare(currentPath: MongoProjection, pathsToUnwind: List[(MongoProjection, Int)])
+  final case class AggPrepare(currentPath: E.Projection, pathsToUnwind: List[(E.Projection, Int)])
 
-  val initialPreparation: AggPrepare = AggPrepare(MongoProjection.Root, List())
+  val initialPreparation: AggPrepare = AggPrepare(E.Projection(), List())
 
 
   def prepareCPath(path: CPath): Option[AggPrepare] =
     path.nodes.foldM(initialPreparation) { (prep: AggPrepare, node: CPathNode) => node match {
-      case CPathField(str) => Some(prep.copy(currentPath = prep.currentPath +/ MongoProjection.Field(str)))
+      case CPathField(str) => Some(prep.copy(currentPath = prep.currentPath +/ E.key(str)))
       case CPathIndex(i) => Some(prep.copy(pathsToUnwind = (prep.currentPath, i) +: prep.pathsToUnwind))
       case _ => None
     }}
 
-  def mkUnwindAndMatch(projection: MongoProjection, ix: Int, key: String): List[Aggregator] = {
+  def mkUnwindAndMatch(projection: E.Projection, ix: Int, key: String): List[Aggregator] = {
     val unwind = Aggregator.unwind(projection, key)
-    val mmatch = Aggregator.mmatch(MongoExpression.MongoObject(Map(key -> MongoExpression.MongoInt(ix))))
+    val mmatch = Aggregator.mmatch(E.Object(key -> E.Int(ix)))
     List(unwind, mmatch)
   }
 
-  def mkGroupBys(root: String, groupping: MongoProjection, keys: List[String]): List[Aggregator] = {
-    val groupId = MongoExpression.MongoArray { keys map (MongoProjection.Field(_)) }
-    val groupObj = MongoExpression.MongoObject(Map(
-      root -> MongoExpression.MongoObject(Map("$$first" -> MongoProjection.Field(root).toVar)),
-      "acc" -> MongoExpression.MongoObject(Map("$$push" -> groupping))))
+  def mkGroupBys(root: String, groupping: E.Projection, keys: List[String]): List[Aggregator] = {
+    val groupId = E.Array({ keys map (E.key(_)) }: _*)
+
+    val groupObj = E.Object(
+      root -> E.Object("$$first" -> E.key(root)),
+      "acc" -> E.Object("$$push" -> groupping))
+
     val group = Aggregator.group(groupId, groupObj)
-    val moveAcc = Aggregator.addFields(MongoExpression.MongoObject(Map(
-      groupping.toString -> MongoProjection.Field("acc").toVar
-    )))
-    val projectRoot = Aggregator.project(MongoExpression.MongoObject(Map(
-     root -> MongoExpression.MongoBoolean(true))))
+
+    val moveAcc = Aggregator.addFields(E.Object(
+      groupping.toString -> E.key("acc")
+    ))
+
+    val projectRoot = Aggregator.project(E.Object(
+     root -> E.Bool(true)))
+
     List(group, moveAcc, projectRoot)
   }
 
@@ -71,52 +77,54 @@ object Pivot {
     val pathIdPairs = preparation.pathsToUnwind.zipWithIndex
 
     val before = pathIdPairs flatMap {
-      case ((p: MongoProjection, ix: Int), unwindIx: Int) => mkUnwindAndMatch(p, ix, mkKey(unwindIx))
+      case ((p: E.Projection, ix: Int), unwindIx: Int) => mkUnwindAndMatch(p, ix, mkKey(unwindIx))
     }
     val after = pathIdPairs flatMap {
-      case ((p: MongoProjection, ix: Int), unwindIx: Int) =>
+      case ((p: E.Projection, ix: Int), unwindIx: Int) =>
         val keys = "_id" +: (List.range(0, unwindIx) map mkKey)
         mkGroupBys(root, p, keys)
     }
     (before, after)
   }
 
-  def matchStructure(path: MongoProjection, structure: CompositeParseType): Aggregator =
-    Aggregator.mmatch(MongoExpression.MongoObject(Map(
-      path.toString -> MongoExpression.MongoObject(Map(
-        "$$type" -> MongoExpression.MongoString(structure match {
+  def matchStructure(path: E.Projection, structure: CompositeParseType): Aggregator =
+    Aggregator.mmatch(E.Object(
+      path.toString -> E.Object(
+        "$$type" -> E.String(structure match {
           case ParseType.Array => "array"
           case ParseType.Object => "object"
           case ParseType.Meta => "omit"
-        })))
-    )))
+        }))
+    ))
 
-  def pivotArray(key: String, path: MongoProjection, status: IdStatus): List[Aggregator] = {
+  def pivotArray(key: String, path: E.Projection, status: IdStatus): List[Aggregator] = {
     val unwind = Aggregator.unwind(path, key)
-    val project = Aggregator.project(MongoExpression.MongoObject(Map(
+    val project = Aggregator.project(E.Object(
       path.toString -> (status match {
-        case IdStatus.IdOnly => MongoExpression.MongoString("$$" ++ key)
-        case IdStatus.ExcludeId => MongoExpression.MongoString("$$" ++ path.toString)
-        case IdStatus.IncludeId => MongoExpression.MongoArray(List(
-          MongoExpression.MongoString("$$" ++ key),
-          MongoExpression.MongoString("$$" ++ path.toString)))
-      }))))
+        case IdStatus.IdOnly => E.String("$$" ++ key)
+        case IdStatus.ExcludeId => E.String("$$" ++ path.toString)
+        case IdStatus.IncludeId => E.Array(
+          E.String("$$" ++ key),
+          E.String("$$" ++ path.toString))
+      })))
     List(unwind, project)
   }
 
-  def pivotObject(key: String, path: MongoProjection, status: IdStatus): List[Aggregator] = {
-    val toArray = Aggregator.project(MongoExpression.MongoObject(Map(
-      path.toString -> MongoExpression.MongoObject(Map(
-        "objectToArray" -> MongoExpression.MongoString("$$".concat(path.toString)))))))
+  def pivotObject(key: String, path: E.Projection, status: IdStatus): List[Aggregator] = {
+    val toArray = Aggregator.project(E.Object(
+      path.toString -> E.Object(
+        "objectToArray" -> E.String("$$".concat(path.toString)))))
+
     val unwind = Aggregator.unwind(path, key)
-    val project = Aggregator.project(MongoExpression.MongoObject(Map(
+
+    val project = Aggregator.project(E.Object(
       path.toString -> (status match {
-        case IdStatus.IdOnly => MongoExpression.MongoString("$$" ++ path.toString ++ ".k")
-        case IdStatus.ExcludeId => MongoExpression.MongoString("$$" ++ path.toString ++ ".v")
-        case IdStatus.IncludeId => MongoExpression.MongoArray(List(
-          MongoExpression.MongoString("$$" ++ path.toString ++ ".k"),
-          MongoExpression.MongoString("$$" ++ path.toString ++ ".v")))
-      }))))
+        case IdStatus.IdOnly => E.String("$$" ++ path.toString ++ ".k")
+        case IdStatus.ExcludeId => E.String("$$" ++ path.toString ++ ".v")
+        case IdStatus.IncludeId => E.Array(
+          E.String("$$" ++ path.toString ++ ".k"),
+          E.String("$$" ++ path.toString ++ ".v"))
+      })))
     List(toArray, unwind, project)
   }
 

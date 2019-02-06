@@ -33,64 +33,63 @@ trait Aggregator {
 }
 
 object Aggregator {
-  final case class ReplaceRootWithList(rootField: String, prjs: MongoConstruct) extends Aggregator {
+  final case class ReplaceRootWithList(rootField: String, prjs: MongoExpression) extends Aggregator {
     def toDocument: Document = Document("$$replaceRoot" -> prjs.toBsonValue)
   }
 
-  final case class Project(obj: MongoExpression.MongoObject) extends Aggregator {
+  final case class Project(obj: MongoExpression) extends Aggregator {
     def toDocument: Document = Document("$$project" -> obj.toBsonValue)
   }
 
-  final case class AddFields(obj: MongoExpression.MongoObject) extends Aggregator {
+  final case class AddFields(obj: MongoExpression) extends Aggregator {
     def toDocument: Document = Document("$$addFields" -> obj.toBsonValue)
   }
 
-  final case class Unwind(path: MongoProjection, includeArrayIndex: String) extends Aggregator {
+  final case class Unwind(path: MongoExpression.Projection, includeArrayIndex: String) extends Aggregator {
     def toDocument: Document = Document("$$unwind" -> Document(
       "path" -> path.toBsonValue,
       "includeArrayIndex" -> includeArrayIndex,
       "preserveNullAndEmptyArrays" -> true))
   }
 
-  final case class Match(obj: MongoExpression.MongoObject) extends Aggregator {
+  final case class Match(obj: MongoExpression) extends Aggregator {
     def toDocument: Document =
       Document("$$match" -> obj.toBsonValue)
   }
 
-
-  final case class Group(id: MongoExpression, obj: MongoExpression.MongoObject) extends Aggregator {
+  final case class Group(id: MongoExpression, obj: MongoExpression) extends Aggregator {
     def toDocument: Document =
       Document("$$group" -> obj.toBsonValue).updated("_id", id.toBsonValue)
   }
 
-  def mmatch: Prism[Aggregator, MongoExpression.MongoObject] =
-    Prism.partial[Aggregator, MongoExpression.MongoObject] {
+  def mmatch: Prism[Aggregator, MongoExpression] =
+    Prism.partial[Aggregator, MongoExpression] {
       case Match(obj) => obj
     } ( x => Match(x) )
 
-  def group: Prism[Aggregator, (MongoExpression, MongoExpression.MongoObject)] =
-    Prism.partial[Aggregator, (MongoExpression, MongoExpression.MongoObject)] {
+  def group: Prism[Aggregator, (MongoExpression, MongoExpression)] =
+    Prism.partial[Aggregator, (MongoExpression, MongoExpression)] {
       case Group(a, b) => (a, b)
     } { case (a, b) => Group(a, b) }
 
 
-  def unwind: Prism[Aggregator, (MongoProjection, String)] =
-    Prism.partial[Aggregator, (MongoProjection, String)] {
+  def unwind: Prism[Aggregator, (MongoExpression.Projection, String)] =
+    Prism.partial[Aggregator, (MongoExpression.Projection, String)] {
       case Unwind(p, i) => (p, i)
     } { case (p, i) => Unwind(p, i) }
 
-  def replaceRootWithList: Prism[Aggregator, (String, MongoConstruct)] =
-    Prism.partial[Aggregator, (String, MongoConstruct)] {
+  def replaceRootWithList: Prism[Aggregator, (String, MongoExpression)] =
+    Prism.partial[Aggregator, (String, MongoExpression)] {
       case ReplaceRootWithList(r, p) => (r, p)
     } { case (r, p) => ReplaceRootWithList(r, p) }
 
-  def project: Prism[Aggregator, MongoExpression.MongoObject] =
-    Prism.partial[Aggregator, MongoExpression.MongoObject] {
+  def project: Prism[Aggregator, MongoExpression] =
+    Prism.partial[Aggregator, MongoExpression] {
       case Project(obj) => obj
     } (x => Project(x))
 
-  def addFields: Prism[Aggregator, MongoExpression.MongoObject] =
-    Prism.partial[Aggregator, MongoExpression.MongoObject] {
+  def addFields: Prism[Aggregator, MongoExpression] =
+    Prism.partial[Aggregator, MongoExpression] {
       case AddFields(obj) => obj
     } (x => AddFields(x))
 }

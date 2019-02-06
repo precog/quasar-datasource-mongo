@@ -65,8 +65,8 @@ class ParseInstructionInterpreter(version: Version, uniqueKey: String) extends I
   }
 
   private val initialAggregators: List[Aggregator] =
-    List(Aggregator.project(MongoExpression.MongoObject(Map(
-      uniqueKey -> MongoProjection.Root))))
+    List(Aggregator.project(MongoExpression.Object(
+      uniqueKey -> MongoExpression.Projection())))
 
   def interpret(inp: List[ParseInstruction]): Interpretation =
     interpretImpl(List(), Interpretation(inp, initialAggregators))

@@ -21,80 +21,109 @@ import slamdata.Predef._
 import org.bson._
 
 import scala.collection.JavaConverters._
-import quasar.common.{CPath, CPathNode, CPathField, CPathMeta, CPathIndex, CPathArray}
-
-import monocle.{Iso, PTraversal, Prism}
-
 
 trait MongoExpression {
   def toBsonValue: BsonValue
 }
 
-trait MongoProjection extends MongoExpression {
-  def toString: String
-  def toVar: MongoProjection.Field
-  def +/(prj: MongoProjection): MongoProjection
-}
+trait ProjectionStep
 
-trait MongoConstruct extends MongoExpression
+object ProjectionStep {
+  final case class Field(str: String) extends ProjectionStep
+  final case class Index(int: Int) extends ProjectionStep
 
-// TODO: nice projection syntax
-object MongoProjection {
-  val Id: MongoProjection = Field("_id")
-  val Root: MongoProjection = Field("$ROOT")
-
-  final case class Field(field: String) extends MongoProjection {
-    override def toString = field
-    def toBsonValue: BsonValue = new BsonString(field)
-    def toVar: Field = Field("$" ++ field)
-    def +/(prj: MongoProjection) = this
+  def keyPart(projectionStep: ProjectionStep): String = projectionStep match {
+    case Field(str) => str
+    case Index(int) => int.toString
   }
-
-  def field: Prism[MongoProjection, String] =
-    Prism.partial[MongoProjection, String] {
-      case Field(str) => str
-    } ( x => Field(x) )
-
-
-  final case class Index(index: Int) extends MongoProjection {
-    override def toString = index.toString
-    def toBsonValue: BsonValue = new BsonInt32(index)
-    def toVar: Field = Field("$" ++ index.toString)
-    def +/(prj: MongoProjection) = this
-  }
-
-  def index: Prism[MongoProjection, Int] =
-    Prism.partial[MongoProjection, Int] {
-      case Index(i) => i
-    } ( i => Index(i) )
 }
 
 object MongoExpression {
-  final case class MongoArray(projections: List[MongoExpression]) extends MongoConstruct {
-    def toBsonValue: BsonValue = new BsonArray((projections map (_.toBsonValue)).toSeq.asJava)
-  }
-  final case class MongoObject(projectionMap: Map[String, MongoExpression]) extends MongoConstruct {
+  import ProjectionStep._
+  import slamdata.Predef.{String => SString, Int => SInt}
+
+  final case class Projection(steps: ProjectionStep*) extends MongoExpression {
+    def toKey: SString = steps.toList match {
+      case List() => "$$ROOT"
+      case hd :: tail => steps.foldLeft (keyPart(hd)) { (acc, x) => acc ++ "." ++ keyPart(x) }
+    }
+
+    private def levelString(ix: SInt): SString =
+      s"level::${ix.toString}"
+
+    @scala.annotation.tailrec
+    private def toObj(accum: Let, level: SInt): Let = steps match {
+      // all done
+      case List() => accum
+      case hd :: tail => hd match {
+        // having field step
+        case Field(str) => accum.in match {
+          // we have something like {$let: {vars: ..., in: "foo.bar.baz"}}
+          // the result is {$let: {vars: ..., in: "foo.bar.baz.newField"}}
+          case String(fld) => accum.copy(in = String(fld ++ "." ++ str))
+          // this case shouldn't happen but it's valid in case of let folding
+          // input: {$let: {vars: ..., in: <expression>}}
+          // output {$let: {vars: {"level::ix": {$let: {vars: ..., in: <expression>}}}, in: "$$level::ix.newField"}}
+          case inLevel =>
+            toObj(
+              Let(
+                Object(levelString(level) -> accum),
+                String("$$$$" ++ levelString(level) ++ "." ++ str)),
+              level + 1)
+        }
+        // input: {$let: {vars: ..., in: <expression>}}
+        // output: {$let: {vars: {level::ix: {$arrayElemAt: [{$let: {vars: ..., in: <expression>}}, ix]}}, in: "$$level::ix"}}
+        case Index(ix) =>
+          toObj(
+            Let(
+              Object(levelString(level) -> Object("$$arrayElemAt" -> Array(accum, Int(ix)))),
+              String("$$$$" ++ levelString(level))),
+            level + 1)
+      }
+    }
+
     def toBsonValue: BsonValue = {
-      val elements = projectionMap map {
+      // {$let: {vars: {level: "$$ROOT"}, in: "$$level}} is "$$ROOT"
+      val initialLet = Let(Object("level" -> String("$$$$ROOT")), String("$$$$level"))
+      toObj(initialLet, 0).toBsonValue
+    }
+
+    def +/(prj: Projection): Projection = Projection((steps ++ prj.steps):_*)
+  }
+
+  def key(s: SString): Projection = Projection(Field(s))
+
+  def index(i: SInt): Projection = Projection(Index(i))
+
+  final case class Let(vars: Object, in: MongoExpression) extends MongoExpression {
+    def toObj: Object =
+      Object("$$let" -> Object(
+        "vars" -> vars,
+        "in" -> in))
+    def toBsonValue: BsonValue = this.toObj.toBsonValue
+  }
+
+  final case class Array(projections: MongoExpression*) extends MongoExpression {
+    def toBsonValue: BsonValue = new BsonArray((projections map (_.toBsonValue)).asJava)
+  }
+  final case class Object(fields: (SString, MongoExpression)*) extends MongoExpression {
+    def toBsonValue: BsonValue = {
+      val elements = fields map {
         case (key, value) => new BsonElement(key, value.toBsonValue)
       }
-      new BsonDocument(elements.toSeq.asJava)
+      new BsonDocument(elements.asJava)
     }
   }
 
-  final case object MongoNull extends MongoExpression {
-    def toBsonValue: BsonValue = new BsonNull
-  }
-
-  final case class MongoBoolean(b: Boolean) extends MongoExpression {
+  final case class Bool(b: Boolean) extends MongoExpression {
     def toBsonValue: BsonValue = new BsonBoolean(b)
   }
 
-  final case class MongoInt(i: Int) extends MongoExpression {
+  final case class Int(i: SInt) extends MongoExpression {
     def toBsonValue: BsonValue = new BsonInt32(i)
   }
 
-  final case class MongoString(str: String) extends MongoExpression {
+  final case class String(str: SString) extends MongoExpression {
     def toBsonValue: BsonValue = new BsonString(str)
   }
 }

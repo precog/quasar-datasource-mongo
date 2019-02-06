@@ -27,7 +27,8 @@ import cats.instances.map._
 import quasar.{ParseInstruction, ParseType}
 import quasar.common.{CPath, CPathField, CPathIndex, CPathNode}
 
-import quasar.physical.mongo.{Aggregator, Version, MongoExpression, MongoProjection}, Aggregator._
+import quasar.physical.mongo.MongoExpression
+import quasar.physical.mongo.{Aggregator, Version, MongoExpression => E}, Aggregator._
 
 import shims._
 
@@ -55,19 +56,14 @@ object Mask {
   }
 
 
-  private def typeTreeToProjectObject(nonExistentKey: String, rootField: String, tree: TypeTree): MongoExpression.MongoObject = {
-    def cond(test: MongoExpression, ok: MongoExpression, fail: MongoExpression) =
-      MongoExpression.MongoObject(Map(
-        "$$cond" -> MongoExpression.MongoArray(List(test, ok, fail))
-      ))
+  private def typeTreeToProjectObject(nonExistentKey: String, rootField: String, tree: TypeTree): E.Object = {
+    def cond(test: MongoExpression, ok: MongoExpression, fail: MongoExpression): E.Object =
+      E.Object("$$cond" -> E.Array(test, ok, fail))
 
-    def or(lst: List[MongoExpression]): MongoExpression =
-      MongoExpression.MongoObject(Map(
-        "$$or" -> MongoExpression.MongoArray(lst)
-      ))
+    def or(lst: List[MongoExpression]): E.Object =
+      E.Object("$$or" -> E.Array(lst:_*))
 
-
-    def parseTypeMongoStrings(parseType: ParseType): List[String] = parseType match {
+    def parseTypeStrings(parseType: ParseType): List[String] = parseType match {
       case ParseType.Boolean => List("bool")
       case ParseType.Null => List("null")
       case ParseType.Number => List("double", "long", "int", "decimal")
@@ -77,39 +73,35 @@ object Mask {
       case ParseType.Meta => List()
     }
 
-    val typeExpr: MongoExpression = MongoExpression.MongoObject(Map(
-      "$$type" -> MongoExpression.MongoString(rootField)
-    ))
+    val typeExpr: MongoExpression = E.Object("$$type" -> E.String(rootField))
 
     def eq(a: MongoExpression, b: MongoExpression): MongoExpression =
-      MongoExpression.MongoObject(Map(
-        "$$eq" -> MongoExpression.MongoArray(List(a, b))
-      ))
+      E.Object("$$eq" -> E.Array(a, b))
 
     def typeFilter(types: Set[ParseType]): MongoExpression = {
-      val typeStrings: List[String] = "missing" :: (types.toList flatMap parseTypeMongoStrings)
-      val typeExprs: List[MongoExpression] = typeStrings map (x => MongoExpression.MongoString(x))
+      val typeStrings: List[String] = "missing" :: (types.toList flatMap parseTypeStrings)
+      val typeExprs: List[MongoExpression] = typeStrings map (x => E.String(x))
       val eqExprs = typeExprs map (x => eq(typeExpr, x))
       or(eqExprs)
     }
 
     val isObject: MongoExpression =
-      eq(typeExpr, MongoExpression.MongoString("object"))
+      eq(typeExpr, E.String("object"))
 
     lazy val children: MongoExpression = {
       val treeMap = tree.children.toList map {
         case (key, child) => (key, typeTreeToProjectObject(nonExistentKey, rootField ++ ".key", child))
       }
-      MongoExpression.MongoObject(Map(treeMap:_*))
+      E.Object(treeMap:_*)
     }
 
     lazy val projectionStep: MongoExpression =
       cond(
         typeFilter(tree.types),
-        MongoExpression.MongoString(rootField),
-        cond(isObject, children, MongoExpression.MongoString(nonExistentKey)))
+        E.String(rootField),
+        cond(isObject, children, E.String(nonExistentKey)))
 
-    MongoExpression.MongoObject(Map(rootField -> projectionStep))
+    E.Object(rootField -> projectionStep)
   }
 
   def apply(
@@ -120,12 +112,14 @@ object Mask {
       : Option[List[Aggregator]] = {
 
     if (version < Version(3, 4, 0)) None
-    else if (masks.isEmpty) Some(List(Aggregator.mmatch(MongoExpression.MongoObject(Map(
-      uniqueKey -> MongoExpression.MongoBoolean(false)
-      )))))
+    else if (masks.isEmpty) Some(List(Aggregator.mmatch(E.Object(
+      uniqueKey -> E.Bool(false)
+      ))))
     else
       masksToTypeTree(masks) map { tree =>
-        List(Aggregator.project(typeTreeToProjectObject(MongoProjection.Field(uniqueKey ++ uniqueKey).toVar.toString, MongoProjection.Field(uniqueKey).toVar.toString, tree)))
+        // TODO: what a bad non-existent
+        List(Aggregator.project(typeTreeToProjectObject(
+          uniqueKey ++ uniqueKey, uniqueKey, tree)))
       }
 
   }

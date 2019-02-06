@@ -28,7 +28,7 @@ import cats.instances.list._
 import quasar.ParseInstruction
 import quasar.common.{CPath, CPathField, CPathIndex, CPathNode}
 
-import quasar.physical.mongo.{Aggregator, Version, MongoExpression, MongoProjection}, Aggregator._
+import quasar.physical.mongo.{Aggregator, Version, MongoExpression => E}, Aggregator._
 
 import shims._
 
@@ -40,18 +40,19 @@ object Project {
       path: CPath)
       : Option[List[Aggregator]] = {
 
-    val projectField: Option[MongoProjection] =
-      path.nodes.foldM(MongoProjection.field(uniqueKey)) { (pt: MongoProjection, node: CPathNode) => node match {
-        case CPathField(str) => Some(pt +/ MongoProjection.field(str))
-        case CPathIndex(ix) => Some(pt +/ MongoProjection.index(ix))
+    val projectField: Option[E.Projection] =
+      path.nodes.foldM(E.key(uniqueKey)) { (pt: E.Projection, node: CPathNode) => node match {
+        case CPathField(str) => Some(pt +/ E.key(str))
+        case CPathIndex(ix) => Some(pt +/ E.index(ix))
         case _ => None
       }}
 
-    projectField map { (fld: MongoProjection) =>
-      val match_ = Aggregator.mmatch(MongoExpression.MongoObject(Map(fld.toString -> MongoExpression.MongoObject(Map(
-        "$$exists" -> MongoExpression.MongoBoolean(true))))))
+    projectField map { (fld: E.Projection) =>
+      val match_ =
+        Aggregator.mmatch(E.Object(fld.toString -> E.Object("$$exists" -> E.Bool(true))))
 
-      val project = Aggregator.project(MongoExpression.MongoObject(Map(fld.toString -> MongoExpression.MongoBoolean(true))))
+      val project =
+        Aggregator.project(E.Object(uniqueKey -> fld))
 
       List(match_, project)
     }
