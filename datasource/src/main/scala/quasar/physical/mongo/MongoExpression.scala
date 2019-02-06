@@ -18,29 +18,31 @@ package quasar.physical.mongo
 
 import slamdata.Predef._
 
+import cats.syntax.foldable._
+import cats.instances.option._
+import cats.instances.list._
+
 import org.bson._
 
 import scala.collection.JavaConverters._
+
+import quasar.common.{CPath, CPathField, CPathIndex}
 
 trait MongoExpression {
   def toBsonValue: BsonValue
 }
 
-trait ProjectionStep
+object MongoExpression {
+  import slamdata.Predef.{String => SString, Int => SInt}
 
-object ProjectionStep {
-  final case class Field(str: String) extends ProjectionStep
-  final case class Index(int: Int) extends ProjectionStep
+  trait ProjectionStep
+  final case class Field(str: SString) extends ProjectionStep
+  final case class Index(int: SInt) extends ProjectionStep
 
-  def keyPart(projectionStep: ProjectionStep): String = projectionStep match {
+  def keyPart(projectionStep: ProjectionStep): SString = projectionStep match {
     case Field(str) => str
     case Index(int) => int.toString
   }
-}
-
-object MongoExpression {
-  import ProjectionStep._
-  import slamdata.Predef.{String => SString, Int => SInt}
 
   final case class Projection(steps: ProjectionStep*) extends MongoExpression {
     def toKey: SString = steps.toList match {
@@ -89,6 +91,8 @@ object MongoExpression {
     }
 
     def +/(prj: Projection): Projection = Projection((steps ++ prj.steps):_*)
+
+    def depth: SInt = steps.length
   }
 
   def key(s: SString): Projection = Projection(Field(s))
@@ -125,5 +129,51 @@ object MongoExpression {
 
   final case class String(str: SString) extends MongoExpression {
     def toBsonValue: BsonValue = new BsonString(str)
+  }
+
+  def cpathToProjection(cpath: CPath): Option[Projection] = {
+    cpath.nodes.foldM(Projection()) { (acc, node) => node match {
+      case CPathField(str) => Some(acc +/ key(str))
+      case CPathIndex(ix) => Some(acc +/ index(ix))
+      case _ => None
+    }}
+  }
+
+  object helpers {
+    def cond(test: MongoExpression, ok: MongoExpression, fail: MongoExpression): Object =
+      Object("$$cond" -> Array(test, ok, fail))
+
+    def or(lst: List[MongoExpression]): Object =
+      Object("$$or" -> Array(lst:_*))
+
+    def equal(a: MongoExpression, b: MongoExpression): MongoExpression =
+      Object("$$eq" -> Array(a, b))
+
+    def isObject(proj: Projection): MongoExpression =
+      equal(typeExpr(proj), String("object"))
+
+    def isArray(proj: Projection): MongoExpression =
+      equal(typeExpr(proj), String("array"))
+
+    def typeExpr(proj: Projection): MongoExpression =
+      Object("$$type" -> proj)
+
+    def onIndex(proj: Projection, ix: SInt, fn: (MongoExpression => MongoExpression)): MongoExpression = {
+      val indexProj = key("$$value") +/ key("index")
+      val resultProj = key("$$value") +/ key("result")
+      val thisProj = key("$$this")
+      val applied = cond(equal(indexProj, Int(ix)), fn(thisProj), thisProj)
+      val in = Object(
+        "index" -> Object("$sum" -> Array(indexProj, Int(1))),
+        "result" -> Object("arrayConcat" -> Array(resultProj, Array(Array(applied))))
+      )
+      val reduce = Object("$$reduce" -> Object(
+        "input" -> proj,
+        "initialValue" -> Object("result" -> Array(), "index" -> Int(0)),
+        "in" -> in
+      ))
+      val result = Let(Object("reduce" -> reduce), key("$$reduce") +/ key("result"))
+      cond(isArray(proj), result, proj)
+    }
   }
 }

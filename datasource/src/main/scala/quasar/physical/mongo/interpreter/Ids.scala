@@ -19,12 +19,8 @@ package quasar.physical.mongo.interpreter
 import slamdata.Predef._
 
 import cats.syntax.order._
-import cats.instances.option._
 
 import quasar.ParseInstruction
-
-import org.bson.BsonValue
-
 import quasar.physical.mongo.{Aggregator, Version, MongoExpression => E}
 
 import shims._

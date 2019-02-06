@@ -19,113 +19,57 @@ package quasar.physical.mongo.interpreter
 import slamdata.Predef._
 
 import cats.syntax.order._
-import cats.syntax.foldable._
-import cats.instances.option._
-import cats.instances.list._
-import cats.instances.map._
 
-import quasar.{ParseInstruction, CompositeParseType, IdStatus, ParseType}
-import quasar.common.{CPath, CPathField, CPathIndex, CPathNode}
+import quasar.{CompositeParseType, IdStatus, ParseType}
+import quasar.common.CPath
 
 import quasar.physical.mongo.MongoExpression
-import quasar.physical.mongo.{Aggregator, Version, MongoExpression => E}, Aggregator._
+import quasar.physical.mongo.{Aggregator, Version, MongoExpression => E}
 
 import shims._
 
 object Pivot {
-  // TODO: this is common stuff
-  final case class AggPrepare(currentPath: E.Projection, pathsToUnwind: List[(E.Projection, Int)])
+  import Focus._
 
-  val initialPreparation: AggPrepare = AggPrepare(E.Projection(), List())
+  trait Pivotable
+  final case object AsObject extends Pivotable
+  final case object AsArray extends Pivotable
 
-
-  def prepareCPath(path: CPath): Option[AggPrepare] =
-    path.nodes.foldM(initialPreparation) { (prep: AggPrepare, node: CPathNode) => node match {
-      case CPathField(str) => Some(prep.copy(currentPath = prep.currentPath +/ E.key(str)))
-      case CPathIndex(i) => Some(prep.copy(pathsToUnwind = (prep.currentPath, i) +: prep.pathsToUnwind))
-      case _ => None
-    }}
-
-  def mkUnwindAndMatch(projection: E.Projection, ix: Int, key: String): List[Aggregator] = {
-    val unwind = Aggregator.unwind(projection, key)
-    val mmatch = Aggregator.mmatch(E.Object(key -> E.Int(ix)))
-    List(unwind, mmatch)
+  def pivotable(structure: CompositeParseType): Option[Pivotable] = structure match {
+    case ParseType.Array => Some(AsArray)
+    case ParseType.Object => Some(AsObject)
+    case _ => None
   }
 
-  def mkGroupBys(root: String, groupping: E.Projection, keys: List[String]): List[Aggregator] = {
-    val groupId = E.Array({ keys map (E.key(_)) }: _*)
-
-    val groupObj = E.Object(
-      root -> E.Object("$$first" -> E.key(root)),
-      "acc" -> E.Object("$$push" -> groupping))
-
-    val group = Aggregator.group(groupId, groupObj)
-
-    val moveAcc = Aggregator.addFields(E.Object(
-      groupping.toString -> E.key("acc")
-    ))
-
-    val projectRoot = Aggregator.project(E.Object(
-     root -> E.Bool(true)))
-
-    List(group, moveAcc, projectRoot)
+  def pivotableTypeString(p: Pivotable): String = p match {
+    case AsObject => "object"
+    case AsArray => "array"
   }
 
-  def preparationBrackets(root: String, preparation: AggPrepare): (List[Aggregator], List[Aggregator]) = {
-    def mkKey(i: Int): String = root ++ i.toString
+  val ToUnwind: String = "to_unwind"
+  val IndexKey: String = "index"
 
-    val pathIdPairs = preparation.pathsToUnwind.zipWithIndex
+  def matchStructure(path: E.Projection, p: Pivotable): Aggregator =
+    Aggregator.filter(E.Object(path.toKey -> E.Object("$$type" -> E.String(pivotableTypeString(p)))))
 
-    val before = pathIdPairs flatMap {
-      case ((p: E.Projection, ix: Int), unwindIx: Int) => mkUnwindAndMatch(p, ix, mkKey(unwindIx))
+  def moveStructure(projection: E.Projection, p: Pivotable): Aggregator = p match {
+    case AsArray =>
+      Aggregator.addFields(E.Object(ToUnwind -> projection))
+    case AsObject =>
+      Aggregator.addFields(E.Object(ToUnwind -> E.Object("$$objectToArray" -> projection)))
+  }
+
+  def mkValue(status: IdStatus, p: Pivotable): MongoExpression = p match {
+    case AsArray => status match {
+      case IdStatus.IdOnly => E.key(IndexKey)
+      case IdStatus.ExcludeId => E.key(ToUnwind)
+      case IdStatus.IncludeId => E.Array(E.key(IndexKey), E.key(ToUnwind))
     }
-    val after = pathIdPairs flatMap {
-      case ((p: E.Projection, ix: Int), unwindIx: Int) =>
-        val keys = "_id" +: (List.range(0, unwindIx) map mkKey)
-        mkGroupBys(root, p, keys)
+    case AsObject => status match {
+      case IdStatus.IdOnly => E.key(ToUnwind) +/ E.key("k")
+      case IdStatus.ExcludeId => E.key(ToUnwind) +/ E.key("v")
+      case IdStatus.IncludeId => E.Array(E.key(ToUnwind) +/ E.key("k"), E.key(ToUnwind) +/ E.key("v"))
     }
-    (before, after)
-  }
-
-  def matchStructure(path: E.Projection, structure: CompositeParseType): Aggregator =
-    Aggregator.mmatch(E.Object(
-      path.toString -> E.Object(
-        "$$type" -> E.String(structure match {
-          case ParseType.Array => "array"
-          case ParseType.Object => "object"
-          case ParseType.Meta => "omit"
-        }))
-    ))
-
-  def pivotArray(key: String, path: E.Projection, status: IdStatus): List[Aggregator] = {
-    val unwind = Aggregator.unwind(path, key)
-    val project = Aggregator.project(E.Object(
-      path.toString -> (status match {
-        case IdStatus.IdOnly => E.String("$$" ++ key)
-        case IdStatus.ExcludeId => E.String("$$" ++ path.toString)
-        case IdStatus.IncludeId => E.Array(
-          E.String("$$" ++ key),
-          E.String("$$" ++ path.toString))
-      })))
-    List(unwind, project)
-  }
-
-  def pivotObject(key: String, path: E.Projection, status: IdStatus): List[Aggregator] = {
-    val toArray = Aggregator.project(E.Object(
-      path.toString -> E.Object(
-        "objectToArray" -> E.String("$$".concat(path.toString)))))
-
-    val unwind = Aggregator.unwind(path, key)
-
-    val project = Aggregator.project(E.Object(
-      path.toString -> (status match {
-        case IdStatus.IdOnly => E.String("$$" ++ path.toString ++ ".k")
-        case IdStatus.ExcludeId => E.String("$$" ++ path.toString ++ ".v")
-        case IdStatus.IncludeId => E.Array(
-          E.String("$$" ++ path.toString ++ ".k"),
-          E.String("$$" ++ path.toString ++ ".v"))
-      })))
-    List(toArray, unwind, project)
   }
 
   def apply(
@@ -138,14 +82,16 @@ object Pivot {
 
     if (version < Version(3, 4, 0)) None
     else for {
-      prepared <- prepareCPath(path)
-      idKey = uniqueKey ++ "_pivotId"
-      pivot <- structure match {
-        case ParseType.Array => Some(pivotArray(idKey, prepared.currentPath, status))
-        case ParseType.Object => Some(pivotArray(idKey, prepared.currentPath, status))
-        case _ => None
-      }
-      brackets = preparationBrackets(uniqueKey, prepared)
-    } yield brackets._1 ++ pivot ++ brackets._2
+      fld <- E.cpathToProjection(path)
+      p <- pivotable(structure)
+    } yield {
+      val projection = E.key(uniqueKey) +/ fld
+      val filter = matchStructure(projection, p)
+      val move = moveStructure(projection, p)
+      val unwind = Aggregator.unwind(E.key(ToUnwind), IndexKey)
+      val toSet = mkValue(status, p)
+      val fs = focuses(projection)
+      List(filter, move, unwind) ++ setByFocuses(toSet, fs._1, fs._2)
+    }
   }
 }

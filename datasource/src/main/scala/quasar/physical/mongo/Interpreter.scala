@@ -24,7 +24,6 @@ import cats.syntax.functor._
 import org.bson.BsonValue
 
 import quasar.ParseInstruction
-import quasar.qscript.InterpretedRead
 import quasar.physical.mongo.interpreter._
 
 final case class Interpretation(

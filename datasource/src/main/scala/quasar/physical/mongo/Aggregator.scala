@@ -18,25 +18,15 @@ package quasar.physical.mongo
 
 import slamdata.Predef._
 
-import cats.syntax.foldable._
-import cats.instances.list._
+import monocle.Prism
 
-import org.bson.BsonValue
 import org.mongodb.scala._
-
-import monocle.{Iso, PTraversal, Prism}
-
-import quasar.common.{CPath, CPathField, CPathNode}
 
 trait Aggregator {
   def toDocument: Document
 }
 
 object Aggregator {
-  final case class ReplaceRootWithList(rootField: String, prjs: MongoExpression) extends Aggregator {
-    def toDocument: Document = Document("$$replaceRoot" -> prjs.toBsonValue)
-  }
-
   final case class Project(obj: MongoExpression) extends Aggregator {
     def toDocument: Document = Document("$$project" -> obj.toBsonValue)
   }
@@ -46,42 +36,27 @@ object Aggregator {
   }
 
   final case class Unwind(path: MongoExpression.Projection, includeArrayIndex: String) extends Aggregator {
-    def toDocument: Document = Document("$$unwind" -> Document(
-      "path" -> path.toBsonValue,
-      "includeArrayIndex" -> includeArrayIndex,
-      "preserveNullAndEmptyArrays" -> true))
+    def toDocument: Document =
+      Document("$$unwind" -> Document(
+        "path" -> path.toBsonValue,
+        "includeArrayIndex" -> includeArrayIndex,
+        "preserveNullAndEmptyArrays" -> true))
   }
 
-  final case class Match(obj: MongoExpression) extends Aggregator {
+  final case class Filter(obj: MongoExpression) extends Aggregator {
     def toDocument: Document =
       Document("$$match" -> obj.toBsonValue)
   }
 
-  final case class Group(id: MongoExpression, obj: MongoExpression) extends Aggregator {
-    def toDocument: Document =
-      Document("$$group" -> obj.toBsonValue).updated("_id", id.toBsonValue)
-  }
-
-  def mmatch: Prism[Aggregator, MongoExpression] =
+  def filter: Prism[Aggregator, MongoExpression] =
     Prism.partial[Aggregator, MongoExpression] {
-      case Match(obj) => obj
-    } ( x => Match(x) )
-
-  def group: Prism[Aggregator, (MongoExpression, MongoExpression)] =
-    Prism.partial[Aggregator, (MongoExpression, MongoExpression)] {
-      case Group(a, b) => (a, b)
-    } { case (a, b) => Group(a, b) }
-
+      case Filter(obj) => obj
+    } ( x => Filter(x) )
 
   def unwind: Prism[Aggregator, (MongoExpression.Projection, String)] =
     Prism.partial[Aggregator, (MongoExpression.Projection, String)] {
       case Unwind(p, i) => (p, i)
     } { case (p, i) => Unwind(p, i) }
-
-  def replaceRootWithList: Prism[Aggregator, (String, MongoExpression)] =
-    Prism.partial[Aggregator, (String, MongoExpression)] {
-      case ReplaceRootWithList(r, p) => (r, p)
-    } { case (r, p) => ReplaceRootWithList(r, p) }
 
   def project: Prism[Aggregator, MongoExpression] =
     Prism.partial[Aggregator, MongoExpression] {

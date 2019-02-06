@@ -18,17 +18,14 @@ package quasar.physical.mongo.interpreter
 
 import slamdata.Predef._
 
-import cats.syntax.order._
-import cats.syntax.traverse._
 import cats.syntax.foldable._
-import cats.syntax.flatMap._
-import cats.instances.option._
 import cats.instances.list._
+import cats.instances.option._
 
 import quasar.ParseInstruction
 import quasar.common.{CPath, CPathField, CPathIndex, CPathNode}
 
-import quasar.physical.mongo.{Aggregator, Version, MongoExpression => E}, Aggregator._
+import quasar.physical.mongo.{Aggregator, Version, MongoExpression => E}
 
 import shims._
 
@@ -48,11 +45,12 @@ object Project {
       }}
 
     projectField map { (fld: E.Projection) =>
+      val projection =
+        E.key(uniqueKey) +/ fld
       val match_ =
-        Aggregator.mmatch(E.Object(fld.toString -> E.Object("$$exists" -> E.Bool(true))))
-
+        Aggregator.filter(E.Object(projection.toKey -> E.Object("$$exists" -> E.Bool(true))))
       val project =
-        Aggregator.project(E.Object(uniqueKey -> fld))
+        Aggregator.project(E.Object(uniqueKey -> projection))
 
       List(match_, project)
     }
