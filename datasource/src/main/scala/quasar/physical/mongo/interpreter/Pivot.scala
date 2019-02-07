@@ -46,11 +46,11 @@ object Pivot {
   val IndexKey: String = "index"
 
   def matchStructure(path: E.Projection, p: Pivotable): Aggregator =
-    Aggregator.filter(E.Object(path.toKey -> E.Object("$$type" -> E.String(pivotableTypeString(p)))))
+    Aggregator.filter(E.Object("typeTag" -> E.String(pivotableTypeString(p))))
 
   def toArray(projection: E.Projection, p: Pivotable): List[Aggregator] = p match {
     case AsArray => List()
-    case AsObject => List(Aggregator.project(E.Object(projection.toKey -> E.Object("$$objectToArray" -> projection))))
+    case AsObject => List(Aggregator.project(E.Object(projection.toKey -> E.Object("$objectToArray" -> projection))))
   }
 
   def mkValue(status: IdStatus, p: Pivotable, unwindedKey: E.Projection): MongoExpression = p match {
@@ -76,12 +76,15 @@ object Pivot {
     if (version < Version(3, 4, 0)) None
     else pivotable(structure) map { p =>
       val projection = E.key(uniqueKey)
+      val addTypeTag = Aggregator.project(E.Object(
+        uniqueKey -> E.key(uniqueKey),
+        "typeTag" -> E.Object("$type" -> projection)))
       val filter = matchStructure(projection, p)
       val mkArray = toArray(projection, p)
       val unwind = Aggregator.unwind(projection, IndexKey)
       val toSet = mkValue(status, p, projection)
       val setProjection = Aggregator.project(E.Object(projection.toKey -> toSet))
-      List(filter) ++ mkArray ++ List(unwind, setProjection)
+      List(addTypeTag, filter) ++ mkArray ++ List(unwind, setProjection)
     }
   }
 }

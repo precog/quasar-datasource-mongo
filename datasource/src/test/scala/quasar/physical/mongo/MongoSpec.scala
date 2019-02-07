@@ -174,7 +174,8 @@ object MongoSpec {
   def mkMongoInvalidPort: IO[Disposable[IO, Mongo[IO]]] =
     for {
       client <- Mongo.mkClient[IO](MongoConfig(connectionStringInvalidPort, None))
-    } yield Disposable(new Mongo[IO](client, Mongo.DefaultBsonBatch, None), Mongo.close[IO](client))
+      interpreter = new ParseInstructionInterpreter(Version(0, 0, 0), "redundant")
+    } yield Disposable(new Mongo[IO](client, Mongo.DefaultBsonBatch, interpreter, None), Mongo.close[IO](client))
 
   def mkBMongo: IO[Disposable[IO, Mongo[IO]]] =
     Mongo[IO](MongoConfig(bConnectionString, None))

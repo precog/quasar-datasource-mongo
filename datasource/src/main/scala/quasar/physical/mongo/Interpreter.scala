@@ -69,8 +69,8 @@ class ParseInstructionInterpreter(version: Version, uniqueKey: String) extends I
 
   private def initialAggregators(idStatus: IdStatus): Aggregator = idStatus match {
     case IdStatus.IdOnly => Aggregator.project(E.Object(uniqueKey -> E.key("_id")))
-    case IdStatus.ExcludeId => Aggregator.project(E.Object(uniqueKey -> E.key("$$ROOT")))
-    case IdStatus.IncludeId => Aggregator.project(E.Object(uniqueKey -> E.Array(E.key("_id"), E.key("$$ROOT"))))
+    case IdStatus.ExcludeId => Aggregator.project(E.Object(uniqueKey -> E.Projection()))
+    case IdStatus.IncludeId => Aggregator.project(E.Object(uniqueKey -> E.Array(E.key("_id"), E.Projection())))
   }
 
   def interpret(idStatus: IdStatus, inp: List[ParseInstruction]): Interpretation =

@@ -30,20 +30,20 @@ object Aggregator {
   val E = MongoExpression
 
   final case class Project(obj: E.Object) extends Aggregator {
-    def toDocument: Document = Document("$$project" -> obj.toBsonValue)
+    def toDocument: Document = Document(s"$$project" -> obj.toBsonValue)
   }
 
   final case class Unwind(path: E.Projection, includeArrayIndex: String) extends Aggregator {
     def toDocument: Document =
-      Document("$$unwind" -> Document(
-        "path" -> path.toBsonValue,
+      Document(s"$$unwind" -> Document(
+        "path" -> E.String("$" ++ path.toKey).toBsonValue,
         "includeArrayIndex" -> includeArrayIndex,
         "preserveNullAndEmptyArrays" -> true))
   }
 
   final case class Filter(obj: E.Object) extends Aggregator {
     def toDocument: Document =
-      Document("$$match" -> obj.toBsonValue)
+      Document("$match" -> obj.toBsonValue)
   }
 
   def filter: Prism[Aggregator, E.Object] =

@@ -32,7 +32,11 @@ object Wrap {
       : Option[List[Aggregator]] = {
 
     if (version < Version(3, 4, 0)) None
-    else Some(List(Aggregator.project(E.Object(uniqueKey -> E.Object(name -> E.key(uniqueKey))))))
+    // Double project is needed here, because if we project "foo.bar" into "foo::Array"
+    // mongo for some reason multiplies result
+    else Some(List(
+      Aggregator.project(E.Object("tmp" -> E.Object(name -> E.key(uniqueKey)))),
+      Aggregator.project(E.Object(uniqueKey -> E.key("tmp")))))
   }
 
 }

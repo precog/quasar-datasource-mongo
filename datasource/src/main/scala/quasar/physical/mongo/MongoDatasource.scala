@@ -27,6 +27,8 @@ import eu.timepit.refined.auto._
 
 import fs2.Stream
 
+import org.bson.BsonValue
+
 import quasar.api.datasource.DatasourceType
 import quasar.api.resource.{ResourcePath, ResourceName, ResourcePathType}
 import quasar.connector.{MonadResourceErr, QueryResult, ResourceError}
@@ -34,6 +36,7 @@ import quasar.connector.datasource.LightweightDatasource
 import quasar.physical.mongo.decoder.qdataDecoder
 import quasar.physical.mongo.MongoResource.{Database, Collection}
 import quasar.qscript.InterpretedRead
+import quasar.ParseInstruction
 
 import shims._
 
@@ -46,20 +49,19 @@ class MongoDataSource[F[_]: ConcurrentEffect: ContextShift: MonadResourceErr: Ti
     val path = iRead.path
     val errored =
       MonadResourceErr.raiseError(ResourceError.pathNotFound(path))
-    val interpretation: Interpretation =
-      mongo.interpreter.interpret(iRead.idStatus, iRead.instructions)
 
-    val fStream = path match {
+    val fStreamPair = path match {
       case ResourcePath.Root => errored
       case ResourcePath.Leaf(file) => MongoResource.ofFile(file) match {
         case None => errored
         case Some(Database(_)) => errored
         case Some(collection@Collection(_, _)) =>
-          if (interpretation.aggregators.isEmpty) mongo.findAll(collection)
-          else mongo.aggregate(collection, interpretation.aggregators) map (_ map mongo.interpreter.mapper)
+          mongo.evaluate(collection, iRead.idStatus, iRead.instructions)
       }
     }
-    fStream.map(stream => QueryResult.parsed(qdataDecoder, stream, interpretation.remainingInstructions))
+    fStreamPair map {
+      case (insts, stream) => QueryResult.parsed(qdataDecoder, stream, insts)
+    }
   }
 
   override def pathIsResource(path: ResourcePath): F[Boolean] = path match {

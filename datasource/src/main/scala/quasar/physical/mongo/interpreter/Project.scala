@@ -18,6 +18,7 @@ package quasar.physical.mongo.interpreter
 
 import slamdata.Predef._
 
+import cats.syntax.order._
 import cats.syntax.foldable._
 import cats.instances.list._
 import cats.instances.option._
@@ -35,22 +36,23 @@ object Project {
       path: CPath)
       : Option[List[Aggregator]] = {
 
-    val projectField: Option[E.Projection] =
-      path.nodes.foldM(E.key(uniqueKey)) { (pt: E.Projection, node: CPathNode) => node match {
-        case CPathField(str) => Some(pt +/ E.key(str))
-        case CPathIndex(ix) => Some(pt +/ E.index(ix))
-        case _ => None
-      }}
+    def filterGuard(prj: E.Projection): Boolean = {
+      val hasNotIx: Boolean = prj.steps.toList.forall {
+        case E.Index(_) => true
+        case E.Field(_) => false
+      }
+      version > (if (hasNotIx) Version(0, 0, 0) else Version(3, 2, 0)) // Not sure if $let works for < 2.0
+    }
 
-    projectField map { (fld: E.Projection) =>
-      val projection =
-        E.key(uniqueKey) +/ fld
-      val match_ =
-        Aggregator.filter(E.Object(projection.toKey -> E.Object("$$exists" -> E.Bool(true))))
-      val project =
-        Aggregator.project(E.Object(uniqueKey -> projection))
-
-      List(match_, project)
+    E.cpathToProjection(path) flatMap { (fld: E.Projection) =>
+      if (!filterGuard(fld)) None else Some {
+        val projection = E.key(uniqueKey) +/ fld
+        val match_ =
+          Aggregator.filter(E.Object(projection.toKey -> E.Object("$exists" -> E.Bool(true))))
+        val project =
+          Aggregator.project(E.Object(uniqueKey -> projection))
+        List(match_, project)
+      }
     }
 
   }

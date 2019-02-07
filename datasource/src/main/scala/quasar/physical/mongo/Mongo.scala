@@ -28,15 +28,18 @@ import cats.syntax.either._
 import fs2.concurrent.{NoneTerminatedQueue, Queue}
 import fs2.Stream
 
+import quasar.api.resource.ResourcePath
 import quasar.connector.{MonadResourceErr, ResourceError}
 import quasar.physical.mongo.MongoResource.{Collection, Database}
-import quasar.Disposable
-import quasar.api.resource.ResourcePath
+import quasar.{Disposable, ParseInstruction, IdStatus}
+
 
 import org.bson.{Document => _, _}
 import com.mongodb.ConnectionString
 import org.mongodb.scala._
 import org.mongodb.scala.connection.NettyStreamFactoryFactory
+
+import shims._
 
 class Mongo[F[_]: MonadResourceErr : ConcurrentEffect] private[mongo](
     client: MongoClient,
@@ -179,8 +182,31 @@ class Mongo[F[_]: MonadResourceErr : ConcurrentEffect] private[mongo](
   def findAll(collection: Collection): F[Stream[F, BsonValue]] =
     withCollectionExists(collection, getCollection(collection).find[BsonValue]())
 
-  def aggregate(collection: Collection, aggs: List[Aggregator]): F[Stream[F, BsonValue]] =
+  def aggregate(collection: Collection, aggs: List[Aggregator]): F[Stream[F, BsonValue]] = {
+    scala.Predef.println(aggs map (_.toDocument))
     withCollectionExists(collection, getCollection(collection).aggregate[BsonValue](aggs map (_.toDocument)))
+  }
+
+  def evaluate(
+      collection: Collection,
+      idStatus: IdStatus,
+      instructions: List[ParseInstruction])
+      : F[(List[ParseInstruction], Stream[F, BsonValue])] = {
+
+    val fallback: F[(List[ParseInstruction], Stream[F, BsonValue])] = findAll(collection) map (x => (instructions, x))
+
+    if (idStatus === IdStatus.ExcludeId && instructions.isEmpty) fallback
+    else {
+      val result = interpreter.interpret(idStatus, instructions)
+      if (result.aggregators.isEmpty) fallback
+      else {
+        val aggregated = aggregate(collection, result.aggregators)
+        val parsed = aggregated map  (x => (result.remainingInstructions, x map interpreter.mapper))
+        // versioning last stand
+        ConcurrentEffect[F].handleErrorWith(parsed)(e => fallback)
+      }
+    }
+  }
 
   private val maximumBatchBytes: Long = if (maxMemory > MaxBsonBatch) MaxBsonBatch else maxMemory.toLong
 
@@ -202,7 +228,7 @@ class Mongo[F[_]: MonadResourceErr : ConcurrentEffect] private[mongo](
     }
   }
 
-  private def getCollection(collection: Collection): MongoCollection[Document] =
+  private [mongo] def getCollection(collection: Collection): MongoCollection[Document] =
     client.getDatabase(collection.database.name).getCollection(collection.name)
 
 }
@@ -249,7 +275,6 @@ object Mongo {
       }
 
     def mkVersion(parts: Array[String]): Option[Version] = for {
-      o <- Some(scala.Predef.println(parts.toList))
       majorString <- parts.lift(0)
       minorString <- parts.lift(1)
       patchString <- parts.lift(2)

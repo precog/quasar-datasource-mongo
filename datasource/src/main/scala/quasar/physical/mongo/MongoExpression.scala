@@ -18,9 +18,11 @@ package quasar.physical.mongo
 
 import slamdata.Predef._
 
+import cats.syntax.eq._
 import cats.syntax.foldable._
 import cats.instances.option._
 import cats.instances.list._
+import cats.instances.string._
 
 import org.bson._
 
@@ -46,15 +48,15 @@ object MongoExpression {
 
   final case class Projection(steps: ProjectionStep*) extends MongoExpression {
     def toKey: SString = steps.toList match {
-      case List() => "$$ROOT"
-      case hd :: tail => steps.foldLeft (keyPart(hd)) { (acc, x) => acc ++ "." ++ keyPart(x) }
+      case List() => "$ROOT"
+      case hd :: tail => tail.foldLeft (keyPart(hd)) { (acc, x) => acc ++ "." ++ keyPart(x) }
     }
 
     private def levelString(ix: SInt): SString =
       s"level::${ix.toString}"
 
     @scala.annotation.tailrec
-    private def toObj(accum: Let, level: SInt): Let = steps match {
+    private def toObj(accum: Let, level: SInt, inp: List[ProjectionStep]): Let = inp match {
       // all done
       case List() => accum
       case hd :: tail => hd match {
@@ -62,32 +64,37 @@ object MongoExpression {
         case Field(str) => accum.in match {
           // we have something like {$let: {vars: ..., in: "foo.bar.baz"}}
           // the result is {$let: {vars: ..., in: "foo.bar.baz.newField"}}
-          case String(fld) => accum.copy(in = String(fld ++ "." ++ str))
+          case String(fld) =>
+            scala.Predef.println(accum)
+            toObj(accum.copy(in = String(fld ++ "." ++ str)), level, tail)
           // this case shouldn't happen but it's valid in case of let folding
           // input: {$let: {vars: ..., in: <expression>}}
-          // output {$let: {vars: {"level::ix": {$let: {vars: ..., in: <expression>}}}, in: "$$level::ix.newField"}}
+          // output {$let: {vars: {"level::ix": {$let: {vars: ..., in: <expression>}}}, in: "$level::ix.newField"}}
           case inLevel =>
             toObj(
               Let(
                 Object(levelString(level) -> accum),
-                String("$$$$" ++ levelString(level) ++ "." ++ str)),
-              level + 1)
+                String("$$" ++ levelString(level) ++ "." ++ str)),
+              level + 1,
+              tail)
         }
         // input: {$let: {vars: ..., in: <expression>}}
-        // output: {$let: {vars: {level::ix: {$arrayElemAt: [{$let: {vars: ..., in: <expression>}}, ix]}}, in: "$$level::ix"}}
+        // output: {$let: {vars: {level::ix: {$arrayElemAt: [{$let: {vars: ..., in: <expression>}}, ix]}}, in: "$level::ix"}}
         case Index(ix) =>
           toObj(
             Let(
-              Object(levelString(level) -> Object("$$arrayElemAt" -> Array(accum, Int(ix)))),
-              String("$$$$" ++ levelString(level))),
-            level + 1)
+              Object(levelString(level) -> Object("$arrayElemAt" -> Array(accum, Int(ix)))),
+              String("$$" ++ levelString(level))),
+            level + 1,
+            tail)
       }
     }
 
     def toBsonValue: BsonValue = {
-      // {$let: {vars: {level: "$$ROOT"}, in: "$$level}} is "$$ROOT"
-      val initialLet = Let(Object("level" -> String("$$$$ROOT")), String("$$$$level"))
-      toObj(initialLet, 0).toBsonValue
+      // {$let: {vars: {level: "$ROOT"}, in: "$level}} is "$ROOT"
+      val initialLet = Let(Object("level" -> String("$$ROOT")), String("$$level"))
+      scala.Predef.println(this.steps.toList)
+      toObj(initialLet, 0, steps.toList).toBsonValue
     }
 
     def +/(prj: Projection): Projection = Projection((steps ++ prj.steps):_*)
@@ -101,7 +108,7 @@ object MongoExpression {
 
   final case class Let(vars: Object, in: MongoExpression) extends MongoExpression {
     def toObj: Object =
-      Object("$$let" -> Object(
+      Object("$let" -> Object(
         "vars" -> vars,
         "in" -> in))
     def toBsonValue: BsonValue = this.toObj.toBsonValue
@@ -111,7 +118,7 @@ object MongoExpression {
     def toBsonValue: BsonValue = new BsonArray((projections map (_.toBsonValue)).asJava)
   }
   final case class Object(fields: (SString, MongoExpression)*) extends MongoExpression {
-    def toBsonValue: BsonValue = {
+    def toBsonValue: BsonDocument = {
       val elements = fields map {
         case (key, value) => new BsonElement(key, value.toBsonValue)
       }
@@ -142,13 +149,13 @@ object MongoExpression {
 
   object helpers {
     def cond(test: MongoExpression, ok: MongoExpression, fail: MongoExpression): Object =
-      Object("$$cond" -> Array(test, ok, fail))
+      Object("$cond" -> Array(test, ok, fail))
 
     def or(lst: List[MongoExpression]): Object =
-      Object("$$or" -> Array(lst:_*))
+      Object("$or" -> Array(lst:_*))
 
     def equal(a: MongoExpression, b: MongoExpression): MongoExpression =
-      Object("$$eq" -> Array(a, b))
+      Object("$eq" -> Array(a, b))
 
     def isObject(proj: Projection): MongoExpression =
       equal(typeExpr(proj), String("object"))
@@ -157,23 +164,23 @@ object MongoExpression {
       equal(typeExpr(proj), String("array"))
 
     def typeExpr(proj: Projection): MongoExpression =
-      Object("$$type" -> proj)
+      Object("$type" -> proj)
 
     def onIndex(proj: Projection, ix: SInt, fn: (MongoExpression => MongoExpression)): MongoExpression = {
-      val indexProj = key("$$value") +/ key("index")
-      val resultProj = key("$$value") +/ key("result")
-      val thisProj = key("$$this")
+      val indexProj = key("$value") +/ key("index")
+      val resultProj = key("$value") +/ key("result")
+      val thisProj = key("$this")
       val applied = cond(equal(indexProj, Int(ix)), fn(thisProj), thisProj)
       val in = Object(
         "index" -> Object("$sum" -> Array(indexProj, Int(1))),
         "result" -> Object("arrayConcat" -> Array(resultProj, Array(Array(applied))))
       )
-      val reduce = Object("$$reduce" -> Object(
+      val reduceObj = Object("$reduce" -> Object(
         "input" -> proj,
         "initialValue" -> Object("result" -> Array(), "index" -> Int(0)),
         "in" -> in
       ))
-      val result = Let(Object("reduce" -> reduce), key("$$reduce") +/ key("result"))
+      val result = Let(Object("reduce" -> reduceObj), key("$reduce") +/ key("result"))
       cond(isArray(proj), result, proj)
     }
   }
