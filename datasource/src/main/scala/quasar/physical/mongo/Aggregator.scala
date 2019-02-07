@@ -27,15 +27,13 @@ trait Aggregator {
 }
 
 object Aggregator {
-  final case class Project(obj: MongoExpression) extends Aggregator {
+  val E = MongoExpression
+
+  final case class Project(obj: E.Object) extends Aggregator {
     def toDocument: Document = Document("$$project" -> obj.toBsonValue)
   }
 
-  final case class AddFields(obj: MongoExpression) extends Aggregator {
-    def toDocument: Document = Document("$$addFields" -> obj.toBsonValue)
-  }
-
-  final case class Unwind(path: MongoExpression.Projection, includeArrayIndex: String) extends Aggregator {
+  final case class Unwind(path: E.Projection, includeArrayIndex: String) extends Aggregator {
     def toDocument: Document =
       Document("$$unwind" -> Document(
         "path" -> path.toBsonValue,
@@ -43,28 +41,23 @@ object Aggregator {
         "preserveNullAndEmptyArrays" -> true))
   }
 
-  final case class Filter(obj: MongoExpression) extends Aggregator {
+  final case class Filter(obj: E.Object) extends Aggregator {
     def toDocument: Document =
       Document("$$match" -> obj.toBsonValue)
   }
 
-  def filter: Prism[Aggregator, MongoExpression] =
-    Prism.partial[Aggregator, MongoExpression] {
+  def filter: Prism[Aggregator, E.Object] =
+    Prism.partial[Aggregator, E.Object] {
       case Filter(obj) => obj
     } ( x => Filter(x) )
 
-  def unwind: Prism[Aggregator, (MongoExpression.Projection, String)] =
-    Prism.partial[Aggregator, (MongoExpression.Projection, String)] {
+  def unwind: Prism[Aggregator, (E.Projection, String)] =
+    Prism.partial[Aggregator, (E.Projection, String)] {
       case Unwind(p, i) => (p, i)
     } { case (p, i) => Unwind(p, i) }
 
-  def project: Prism[Aggregator, MongoExpression] =
-    Prism.partial[Aggregator, MongoExpression] {
+  def project: Prism[Aggregator, E.Object] =
+    Prism.partial[Aggregator, E.Object] {
       case Project(obj) => obj
     } (x => Project(x))
-
-  def addFields: Prism[Aggregator, MongoExpression] =
-    Prism.partial[Aggregator, MongoExpression] {
-      case AddFields(obj) => obj
-    } (x => AddFields(x))
 }

@@ -117,6 +117,7 @@ object MongoExpression {
       }
       new BsonDocument(elements.asJava)
     }
+    def +(obj: Object): Object = Object((this.fields ++ obj.fields):_*)
   }
 
   final case class Bool(b: Boolean) extends MongoExpression {

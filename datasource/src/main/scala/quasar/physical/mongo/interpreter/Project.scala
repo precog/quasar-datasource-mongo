@@ -22,7 +22,6 @@ import cats.syntax.foldable._
 import cats.instances.list._
 import cats.instances.option._
 
-import quasar.ParseInstruction
 import quasar.common.{CPath, CPathField, CPathIndex, CPathNode}
 
 import quasar.physical.mongo.{Aggregator, Version, MongoExpression => E}
@@ -33,7 +32,6 @@ object Project {
   def apply(
       uniqueKey: String,
       version: Version,
-      processed: List[ParseInstruction],
       path: CPath)
       : Option[List[Aggregator]] = {
 

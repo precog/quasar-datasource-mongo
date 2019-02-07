@@ -21,7 +21,6 @@ import slamdata.Predef._
 import cats.syntax.order._
 
 import quasar.{CompositeParseType, IdStatus, ParseType}
-import quasar.common.CPath
 
 import quasar.physical.mongo.MongoExpression
 import quasar.physical.mongo.{Aggregator, Version, MongoExpression => E}
@@ -29,8 +28,6 @@ import quasar.physical.mongo.{Aggregator, Version, MongoExpression => E}
 import shims._
 
 object Pivot {
-  import Focus._
-
   trait Pivotable
   final case object AsObject extends Pivotable
   final case object AsArray extends Pivotable
@@ -46,52 +43,45 @@ object Pivot {
     case AsArray => "array"
   }
 
-  val ToUnwind: String = "to_unwind"
   val IndexKey: String = "index"
 
   def matchStructure(path: E.Projection, p: Pivotable): Aggregator =
     Aggregator.filter(E.Object(path.toKey -> E.Object("$$type" -> E.String(pivotableTypeString(p)))))
 
-  def moveStructure(projection: E.Projection, p: Pivotable): Aggregator = p match {
-    case AsArray =>
-      Aggregator.addFields(E.Object(ToUnwind -> projection))
-    case AsObject =>
-      Aggregator.addFields(E.Object(ToUnwind -> E.Object("$$objectToArray" -> projection)))
+  def toArray(projection: E.Projection, p: Pivotable): List[Aggregator] = p match {
+    case AsArray => List()
+    case AsObject => List(Aggregator.project(E.Object(projection.toKey -> E.Object("$$objectToArray" -> projection))))
   }
 
-  def mkValue(status: IdStatus, p: Pivotable): MongoExpression = p match {
+  def mkValue(status: IdStatus, p: Pivotable, unwindedKey: E.Projection): MongoExpression = p match {
     case AsArray => status match {
       case IdStatus.IdOnly => E.key(IndexKey)
-      case IdStatus.ExcludeId => E.key(ToUnwind)
-      case IdStatus.IncludeId => E.Array(E.key(IndexKey), E.key(ToUnwind))
+      case IdStatus.ExcludeId => unwindedKey
+      case IdStatus.IncludeId => E.Array(E.key(IndexKey), unwindedKey)
     }
     case AsObject => status match {
-      case IdStatus.IdOnly => E.key(ToUnwind) +/ E.key("k")
-      case IdStatus.ExcludeId => E.key(ToUnwind) +/ E.key("v")
-      case IdStatus.IncludeId => E.Array(E.key(ToUnwind) +/ E.key("k"), E.key(ToUnwind) +/ E.key("v"))
+      case IdStatus.IdOnly => unwindedKey +/ E.key("k")
+      case IdStatus.ExcludeId => unwindedKey +/ E.key("v")
+      case IdStatus.IncludeId => E.Array(unwindedKey +/ E.key("k"), unwindedKey +/ E.key("v"))
     }
   }
 
   def apply(
       uniqueKey: String,
       version: Version,
-      path: CPath,
       status: IdStatus,
       structure: CompositeParseType)
       : Option[List[Aggregator]] = {
 
     if (version < Version(3, 4, 0)) None
-    else for {
-      fld <- E.cpathToProjection(path)
-      p <- pivotable(structure)
-    } yield {
-      val projection = E.key(uniqueKey) +/ fld
+    else pivotable(structure) map { p =>
+      val projection = E.key(uniqueKey)
       val filter = matchStructure(projection, p)
-      val move = moveStructure(projection, p)
-      val unwind = Aggregator.unwind(E.key(ToUnwind), IndexKey)
-      val toSet = mkValue(status, p)
-      val fs = focuses(projection)
-      List(filter, move, unwind) ++ setByFocuses(toSet, fs._1, fs._2)
+      val mkArray = toArray(projection, p)
+      val unwind = Aggregator.unwind(projection, IndexKey)
+      val toSet = mkValue(status, p, projection)
+      val setProjection = Aggregator.project(E.Object(projection.toKey -> toSet))
+      List(filter) ++ mkArray ++ List(unwind, setProjection)
     }
   }
 }

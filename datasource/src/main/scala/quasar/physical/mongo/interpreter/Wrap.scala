@@ -20,30 +20,19 @@ import slamdata.Predef._
 
 import cats.syntax.order._
 
-import quasar.ParseInstruction
-import quasar.common.CPath
-
 import quasar.physical.mongo.{Aggregator, Version, MongoExpression => E}
 
 import shims._
 
 object Wrap {
-  import Focus._
-
   def apply(
       uniqueKey: String,
       version: Version,
-      processed: List[ParseInstruction],
-      path: CPath,
       name: String)
       : Option[List[Aggregator]] = {
 
     if (version < Version(3, 4, 0)) None
-    else E.cpathToProjection(path) map { prj =>
-      val fs = focuses(E.key(uniqueKey) +/ prj)
-      val wrapped = E.Object(name -> prj)
-      setByFocuses(wrapped, fs._1, fs._2)
-    }
+    else Some(List(Aggregator.project(E.Object(uniqueKey -> E.Object(name -> E.key(uniqueKey))))))
   }
 
 }

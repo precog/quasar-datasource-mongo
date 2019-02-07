@@ -47,7 +47,7 @@ class MongoDataSource[F[_]: ConcurrentEffect: ContextShift: MonadResourceErr: Ti
     val errored =
       MonadResourceErr.raiseError(ResourceError.pathNotFound(path))
     val interpretation: Interpretation =
-      mongo.interpreter.interpret(iRead.instructions)
+      mongo.interpreter.interpret(iRead.idStatus, iRead.instructions)
 
     val fStream = path match {
       case ResourcePath.Root => errored

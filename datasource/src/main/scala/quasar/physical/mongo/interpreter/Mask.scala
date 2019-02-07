@@ -23,7 +23,7 @@ import cats.syntax.foldable._
 import cats.instances.option._
 import cats.instances.list._
 
-import quasar.{ParseInstruction, ParseType}
+import quasar.ParseType
 import quasar.common.CPath
 
 import quasar.physical.mongo.MongoExpression
@@ -129,7 +129,6 @@ object Mask {
   def apply(
       uniqueKey: String,
       version: Version,
-      processed: List[ParseInstruction],
       masks: Map[CPath, Set[ParseType]])
       : Option[List[Aggregator]] = {
 
