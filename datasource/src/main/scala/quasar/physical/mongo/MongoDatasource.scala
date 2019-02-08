@@ -36,7 +36,7 @@ import quasar.connector.datasource.LightweightDatasource
 import quasar.physical.mongo.decoder.qdataDecoder
 import quasar.physical.mongo.MongoResource.{Database, Collection}
 import quasar.qscript.InterpretedRead
-import quasar.ParseInstruction
+import quasar.ScalarStage
 
 import shims._
 
@@ -56,7 +56,7 @@ class MongoDataSource[F[_]: ConcurrentEffect: ContextShift: MonadResourceErr: Ti
         case None => errored
         case Some(Database(_)) => errored
         case Some(collection@Collection(_, _)) =>
-          mongo.evaluate(collection, iRead.idStatus, iRead.instructions)
+          mongo.evaluate(collection, iRead.stages)
       }
     }
     fStreamPair map {

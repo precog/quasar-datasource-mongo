@@ -23,8 +23,8 @@ import cats.syntax.foldable._
 import cats.instances.option._
 import cats.instances.list._
 
-import quasar.ParseType
 import quasar.common.CPath
+import quasar.api.table.ColumnType
 
 import quasar.physical.mongo.MongoExpression
 import quasar.physical.mongo.{Aggregator, Version, MongoExpression => E}
@@ -32,9 +32,12 @@ import quasar.physical.mongo.{Aggregator, Version, MongoExpression => E}
 import shims._
 
 object Mask {
-  final case class TypeTree(types: Set[ParseType], obj: Map[String, TypeTree], list: List[TypeTree])
+  final case class TypeTree(types: Set[ColumnType], obj: Map[String, TypeTree], list: List[TypeTree])
 
   val emptyTree: TypeTree = TypeTree(Set.empty, Map.empty, List())
+
+  def isEmpty(tree: TypeTree): Boolean =
+    tree.types.isEmpty && tree.obj.isEmpty && tree.list.isEmpty
 
   @SuppressWarnings(Array("org.wartremover.warts.Recursion"))
   private def insert(
@@ -44,12 +47,12 @@ object Mask {
       : TypeTree =
 
   path.steps.toList match {
-    case List() => insertee
+    case List() => TypeTree(insertee.types ++ tree.types, tree.obj ++ insertee.obj, tree.list ++ insertee.list)
     case child :: List() => child match {
       case E.Field(str) =>
         tree.copy(obj = tree.obj.updated(str, insertee))
       case E.Index(ix) =>
-        val emptyLength: Int = tree.list.length - ix + 1
+        val emptyLength: Int = ix - tree.list.length + 1
         val toInsert: List[TypeTree] =
           tree.list ++ (if (emptyLength > 0) List.fill[TypeTree](emptyLength)(emptyTree) else List())
         tree.copy(list = toInsert.updated(ix, insertee))
@@ -62,39 +65,42 @@ object Mask {
       case E.Index(ix) =>
         val insertTo = tree.list.lift(ix) getOrElse emptyTree
         val inserted = insert(E.Projection(tail:_*), insertee, insertTo)
-        tree.copy(list = tree.list.updated(ix, inserted))
+        val emptyLength: Int = ix - tree.list.length + 1
+        val toInsert: List[TypeTree] =
+          tree.list ++ (if (emptyLength > 0) List.fill[TypeTree](emptyLength)(emptyTree) else List())
+        tree.copy(list = toInsert.updated(ix, inserted))
     }
   }
-
 
   private def masksToTypeTree(
       uniqueKey: E.Projection,
-      masks: Map[CPath, Set[ParseType]])
-      : Option[TypeTree] =
+      masks: Map[CPath, Set[ColumnType]])
+      : Option[TypeTree] = {
 
-  masks.toList.foldM(emptyTree) {
-    case (acc, (cpath, types)) => E.cpathToProjection(cpath) map { p =>
-      insert(uniqueKey +/ p, TypeTree(types, Map.empty, List()), acc)
+    masks.toList.foldM(emptyTree) {
+      case (acc, (cpath, types)) => E.cpathToProjection(cpath) map { p =>
+        insert(uniqueKey +/ p, TypeTree(types, Map.empty, List()), acc)
+      }
     }
   }
 
 
-  private def parseTypeStrings(parseType: ParseType): List[String] = parseType match {
-    case ParseType.Boolean => List("bool")
-    case ParseType.Null => List("null")
-    case ParseType.Number => List("double", "long", "int", "decimal")
-    case ParseType.String => List("string")
-    case ParseType.Array => List("array")
-    case ParseType.Object => List("object")
-    case ParseType.Meta => List()
+  private def parseTypeStrings(parseType: ColumnType): List[String] = parseType match {
+    case ColumnType.Boolean => List("bool")
+    case ColumnType.Null => List("null")
+    case ColumnType.Number => List("double", "long", "int", "decimal")
+    case ColumnType.String => List("string")
+    case ColumnType.OffsetDateTime => List("date")
+    case ColumnType.Array => List("array")
+    case ColumnType.Object => List("object")
   }
 
   @SuppressWarnings(Array("org.wartremover.warts.Recursion"))
-  private def typeTreeToProjectObject(undefined: E.Projection, proj: E.Projection, tree: TypeTree): E.Object = {
+  private def typeTreeToProjectObject(undefined: E.Projection, proj: E.Projection, tree: TypeTree): MongoExpression = {
     import E.helpers._
 
-    def typeFilter(types: Set[ParseType]): MongoExpression = {
-      val typeStrings: List[String] = "missing" :: (types.toList flatMap parseTypeStrings)
+    def typeFilter(tree: TypeTree): MongoExpression = {
+      val typeStrings: List[String] = tree.types.toList flatMap parseTypeStrings
       val typeExprs: List[MongoExpression] = typeStrings map (x => E.String(x))
       val eqExprs = typeExprs map (x => equal(typeExpr(proj), x))
       or(eqExprs)
@@ -108,37 +114,58 @@ object Mask {
     }
 
     lazy val array: MongoExpression = {
-      val treeList = tree.list.zipWithIndex map {
-        case (child, i) => typeTreeToProjectObject(undefined, proj +/ E.index(i), child)
+      if (tree.list.isEmpty) E.key("non-existent-field")
+      else {
+        val treeList = tree.list.zipWithIndex map {
+          case (child, i) => typeTreeToProjectObject(undefined, proj +/ E.index(i), child)
+        }
+        E.Object("$reduce" -> E.Object(
+          "input" -> E.Array(treeList:_*),
+          "initialValue" -> E.Array(),
+          "in" -> cond(
+            equal(typeExpr(E.String("$$this")), E.String("null")),
+            E.String("$$value"),
+            E.Object("$concatArrays" -> E.Array(E.String("$$value"), E.Array(E.String("$$this")))))))
       }
-      E.Array(treeList:_*)
     }
 
-    lazy val projectionStep: MongoExpression =
-      cond(typeFilter(tree.types),
-        proj,
-        cond(isObject(proj),
-          obj,
-          cond(isArray(proj),
-            array,
-            undefined)))
+    def arrayOr(expr: MongoExpression): MongoExpression =
+      if (tree.types.contains(ColumnType.Array) || tree.list.isEmpty) expr
+      else cond(isArray(proj), array, expr)
 
-    E.Object(proj.toKey -> (if (tree.types.isEmpty) undefined else projectionStep))
+    def objectOr(expr: MongoExpression): MongoExpression =
+      if (tree.types.contains(ColumnType.Object) || tree.obj.isEmpty) expr
+      else cond(isObject(proj), obj, expr)
+
+    def scalarOr(expr: MongoExpression): MongoExpression =
+      if (tree.types.isEmpty) expr
+      else cond(typeFilter(tree), proj, expr)
+
+    if (proj === E.Projection()) obj
+    else if(isEmpty(tree)) undefined
+    else scalarOr(objectOr(arrayOr(undefined)))
   }
 
   def apply(
       uniqueKey: String,
       version: Version,
-      masks: Map[CPath, Set[ParseType]])
+      masks: Map[CPath, Set[ColumnType]])
       : Option[List[Aggregator]] = {
 
     if (version < Version(3, 4, 0)) None
     else if (masks.isEmpty) Some(List(Aggregator.filter(E.Object(uniqueKey -> E.Bool(false)))))
     else masksToTypeTree(E.key(uniqueKey), masks) map { tree =>
-      List(Aggregator.project(typeTreeToProjectObject(
-        E.key(uniqueKey ++ uniqueKey),
-        E.key(uniqueKey),
-        tree)))
+      val projectObject =
+        typeTreeToProjectObject(
+          E.key("non-existent-field"),
+          E.Projection(),
+          tree)
+      scala.Predef.println(s"masks: ${masks}\ntree: ${tree}\nprojectObject: ${projectObject.toBsonValue}\n")
+//      val projectTmp = Aggregator.project(E.Object("tmp" -> projectObject))
+//      val back = Aggregator.project(E.Object(uniqueKey -> E.key("tmp")))
+      val project = Aggregator.project(projectObject)
+      val filterNulls = Aggregator.filter(E.Object(uniqueKey -> E.Object("$ne" -> E.Null)))
+      List(project, filterNulls)
     }
   }
 }

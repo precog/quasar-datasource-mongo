@@ -22,10 +22,11 @@ import cats.syntax.traverse._
 import cats.instances.option._
 import cats.instances.list._
 
-import quasar.FocusedParseInstruction
+import quasar.api.table.ColumnType
 import quasar.common.CPathField
 import quasar.physical.mongo.MongoExpression
 import quasar.physical.mongo.{Interpretation, Interpreter, Aggregator, Version, MongoExpression => E}
+import quasar.ScalarStage
 
 import shims._
 
@@ -38,7 +39,7 @@ object Cartesian {
       : List[Aggregator] = {
 
     def spanProjectPrefix(inp: List[Aggregator]): (Option[E.Object], List[Aggregator]) = inp match {
-      case Aggregator.project(a) :: tail => (Some(a), tail)
+      case Aggregator.project(a @ E.Object(_)) :: tail => (Some(a), tail)
       case hd :: tail => (None, tail)
       case List() => (None, List())
     }
@@ -82,7 +83,7 @@ object Cartesian {
   def apply(
       uniqueKey: String,
       version: Version,
-      cartouches: Map[CPathField, (CPathField, List[FocusedParseInstruction])],
+      cartouches: Map[CPathField, (CPathField, List[ScalarStage.Focused])],
       interpreter: Interpreter)
       : Option[List[Aggregator]] = {
 
@@ -95,7 +96,7 @@ object Cartesian {
           case (alias, (_, instructions)) =>
             val interpreted: Interpretation =
               interpreter.refineInterpretation(alias.name, Interpretation.initial(instructions))
-            if (!interpreted.remainingInstructions.isEmpty) None
+            if (!interpreted.stages.isEmpty) None
             else Some(interpreted.aggregators)
         }
 

@@ -20,46 +20,37 @@ import slamdata.Predef._
 
 import cats.syntax.order._
 
-import quasar.{CompositeParseType, IdStatus, ParseType}
 
+import quasar.api.table.ColumnType
 import quasar.physical.mongo.MongoExpression
 import quasar.physical.mongo.{Aggregator, Version, MongoExpression => E}
+import quasar.IdStatus
 
 import shims._
 
 object Pivot {
-  trait Pivotable
-  final case object AsObject extends Pivotable
-  final case object AsArray extends Pivotable
-
-  def pivotable(structure: CompositeParseType): Option[Pivotable] = structure match {
-    case ParseType.Array => Some(AsArray)
-    case ParseType.Object => Some(AsObject)
-    case _ => None
-  }
-
-  def pivotableTypeString(p: Pivotable): String = p match {
-    case AsObject => "object"
-    case AsArray => "array"
-  }
-
   val IndexKey: String = "index"
 
-  def matchStructure(path: E.Projection, p: Pivotable): Aggregator =
-    Aggregator.filter(E.Object("typeTag" -> E.String(pivotableTypeString(p))))
-
-  def toArray(projection: E.Projection, p: Pivotable): List[Aggregator] = p match {
-    case AsArray => List()
-    case AsObject => List(Aggregator.project(E.Object(projection.toKey -> E.Object("$objectToArray" -> projection))))
+  def columnTypeVectorString(p: ColumnType.Vector): String = p match {
+    case ColumnType.Array => "array"
+    case ColumnType.Object => "object"
   }
 
-  def mkValue(status: IdStatus, p: Pivotable, unwindedKey: E.Projection): MongoExpression = p match {
-    case AsArray => status match {
+  def matchStructure(path: E.Projection, p: ColumnType.Vector): Aggregator =
+    Aggregator.filter(E.Object("typeTag" -> E.String(columnTypeVectorString(p))))
+
+  def toArray(projection: E.Projection, p: ColumnType.Vector): List[Aggregator] = p match {
+    case ColumnType.Array => List()
+    case ColumnType.Object => List(Aggregator.project(E.Object(projection.toKey -> E.Object("$objectToArray" -> projection))))
+  }
+
+  def mkValue(status: IdStatus, p: ColumnType.Vector, unwindedKey: E.Projection): MongoExpression = p match {
+    case ColumnType.Array => status match {
       case IdStatus.IdOnly => E.key(IndexKey)
       case IdStatus.ExcludeId => unwindedKey
       case IdStatus.IncludeId => E.Array(E.key(IndexKey), unwindedKey)
     }
-    case AsObject => status match {
+    case ColumnType.Object => status match {
       case IdStatus.IdOnly => unwindedKey +/ E.key("k")
       case IdStatus.ExcludeId => unwindedKey +/ E.key("v")
       case IdStatus.IncludeId => E.Array(unwindedKey +/ E.key("k"), unwindedKey +/ E.key("v"))
@@ -70,19 +61,19 @@ object Pivot {
       uniqueKey: String,
       version: Version,
       status: IdStatus,
-      structure: CompositeParseType)
+      vectorType: ColumnType.Vector)
       : Option[List[Aggregator]] = {
 
     if (version < Version(3, 4, 0)) None
-    else pivotable(structure) map { p =>
+    else Some {
       val projection = E.key(uniqueKey)
       val addTypeTag = Aggregator.project(E.Object(
         uniqueKey -> E.key(uniqueKey),
         "typeTag" -> E.Object("$type" -> projection)))
-      val filter = matchStructure(projection, p)
-      val mkArray = toArray(projection, p)
+      val filter = matchStructure(projection, vectorType)
+      val mkArray = toArray(projection, vectorType)
       val unwind = Aggregator.unwind(projection, IndexKey)
-      val toSet = mkValue(status, p, projection)
+      val toSet = mkValue(status, vectorType, projection)
       val setProjection = Aggregator.project(E.Object(projection.toKey -> toSet))
       List(addTypeTag, filter) ++ mkArray ++ List(unwind, setProjection)
     }

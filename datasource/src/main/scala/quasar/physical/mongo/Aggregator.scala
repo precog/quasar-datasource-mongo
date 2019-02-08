@@ -29,7 +29,7 @@ trait Aggregator {
 object Aggregator {
   val E = MongoExpression
 
-  final case class Project(obj: E.Object) extends Aggregator {
+  final case class Project(obj: MongoExpression) extends Aggregator {
     def toDocument: Document = Document(s"$$project" -> obj.toBsonValue)
   }
 
@@ -38,7 +38,7 @@ object Aggregator {
       Document(s"$$unwind" -> Document(
         "path" -> E.String("$" ++ path.toKey).toBsonValue,
         "includeArrayIndex" -> includeArrayIndex,
-        "preserveNullAndEmptyArrays" -> true))
+        "preserveNullAndEmptyArrays" -> false))
   }
 
   final case class Filter(obj: E.Object) extends Aggregator {
@@ -56,8 +56,8 @@ object Aggregator {
       case Unwind(p, i) => (p, i)
     } { case (p, i) => Unwind(p, i) }
 
-  def project: Prism[Aggregator, E.Object] =
-    Prism.partial[Aggregator, E.Object] {
+  def project: Prism[Aggregator, MongoExpression] =
+    Prism.partial[Aggregator, MongoExpression] {
       case Project(obj) => obj
     } (x => Project(x))
 }

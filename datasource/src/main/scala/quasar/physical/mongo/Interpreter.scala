@@ -23,32 +23,32 @@ import cats.syntax.functor._
 
 import org.bson.BsonValue
 
-import quasar.ParseInstruction
+import quasar.{ScalarStage, ScalarStages}
 import quasar.IdStatus
 import quasar.physical.mongo.interpreter._
 
 final case class Interpretation(
-  remainingInstructions: List[ParseInstruction],
+  stages: List[ScalarStage],
   aggregators: List[Aggregator])
 
 object Interpretation {
-  def initial(inst: List[ParseInstruction]): Interpretation = Interpretation(inst, List())
+  def initial(inst: List[ScalarStage]): Interpretation = Interpretation(inst, List())
 }
 
 trait Interpreter {
-  def interpret(idStatus: IdStatus, inp: List[ParseInstruction]): Interpretation
+  def interpret(stages: ScalarStages): Interpretation
   def refineInterpretation(key: String, interpretation: Interpretation): Interpretation
   def mapper(x: BsonValue): BsonValue
 }
 
-class ParseInstructionInterpreter(version: Version, uniqueKey: String) extends Interpreter {
+class MongoInterpreter(version: Version, uniqueKey: String) extends Interpreter {
   private val E = MongoExpression
   def mapper(x: BsonValue): BsonValue =
     x.asDocument().get(uniqueKey)
 
   @scala.annotation.tailrec
   private def refineInterpretationImpl(key: String, interpretation: Interpretation): Interpretation =
-    interpretation.remainingInstructions match {
+    interpretation.stages match {
       case List() => interpretation
       case hd :: tail => refineStep(key, hd) match {
         case None => interpretation
@@ -59,25 +59,31 @@ class ParseInstructionInterpreter(version: Version, uniqueKey: String) extends I
   def refineInterpretation(key: String, interpretation: Interpretation): Interpretation =
     refineInterpretationImpl(key, interpretation)
 
-  private def refineStep(key: String, instruction: ParseInstruction): Option[List[Aggregator]] = instruction match {
-    case ParseInstruction.Wrap(name) => Wrap(key, version, name)
-    case ParseInstruction.Mask(masks) => Mask(key, version, masks)
-    case ParseInstruction.Pivot(status, structure) => Pivot(key, version, status, structure)
-    case ParseInstruction.Project(path) => Project(key, version, path)
-    case ParseInstruction.Cartesian(cartouches) => Cartesian(key, version, cartouches, this)
+  private def refineStep(key: String, instruction: ScalarStage): Option[List[Aggregator]] = instruction match {
+    case ScalarStage.Wrap(name) => Wrap(key, version, name)
+    case ScalarStage.Mask(masks) => Mask(key, version, masks)
+    case ScalarStage.Pivot(status, structure) => Pivot(key, version, status, structure)
+    case ScalarStage.Project(path) => Project(key, version, path)
+    case ScalarStage.Cartesian(cartouches) => Cartesian(key, version, cartouches, this)
   }
 
   private def initialAggregators(idStatus: IdStatus): Aggregator = idStatus match {
-    case IdStatus.IdOnly => Aggregator.project(E.Object(uniqueKey -> E.key("_id")))
-    case IdStatus.ExcludeId => Aggregator.project(E.Object(uniqueKey -> E.Projection()))
-    case IdStatus.IncludeId => Aggregator.project(E.Object(uniqueKey -> E.Array(E.key("_id"), E.Projection())))
+    case IdStatus.IdOnly => Aggregator.project(E.Object(
+      uniqueKey -> E.key("_id"),
+      "_id" -> E.Int(0)))
+    case IdStatus.ExcludeId => Aggregator.project(E.Object(
+      uniqueKey -> E.Projection(),
+      "_id" -> E.Int(0)))
+    case IdStatus.IncludeId => Aggregator.project(E.Object(
+      uniqueKey -> E.Array(E.key("_id"), E.Projection()),
+      "_id" -> E.Int(0)))
   }
 
-  def interpret(idStatus: IdStatus, inp: List[ParseInstruction]): Interpretation =
-    refineInterpretation(uniqueKey, Interpretation(inp, List(initialAggregators(idStatus))))
+  def interpret(stages: ScalarStages): Interpretation =
+    refineInterpretation(uniqueKey, Interpretation(stages.stages, List(initialAggregators(stages.idStatus))))
 }
 
-object ParseInstructionInterpreter {
-  def apply[F[_]: Sync](version: Version): F[ParseInstructionInterpreter] =
-    Sync[F].delay(java.util.UUID.randomUUID().toString) map (new ParseInstructionInterpreter(version, _))
+object MongoInterpreter {
+  def apply[F[_]: Sync](version: Version): F[MongoInterpreter] =
+    Sync[F].delay(java.util.UUID.randomUUID().toString) map (new MongoInterpreter(version, _))
 }

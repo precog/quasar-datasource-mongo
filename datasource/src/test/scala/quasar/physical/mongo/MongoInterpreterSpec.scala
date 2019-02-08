@@ -19,15 +19,19 @@ package quasar.physical.mongo
 import slamdata.Predef._
 
 import cats.effect.IO
+import cats.syntax.foldable._
+import cats.instances.list._
 
-import org.bson.{Document => _, _}
+import org.bson.{Document => BDocument, _}
 import org.mongodb.scala._
 import org.specs2.matcher.MatchResult
 
-import qdata.{QData, QDataDecode}
+import quasar.api.table.ColumnType
 import quasar.common.data.RValue
 import quasar.common.CPath
-import quasar.{EffectfulQSpec, IdStatus, ParseInstruction, ParseType}
+import quasar.{EffectfulQSpec, IdStatus, ScalarStage, ScalarStages}, ScalarStage._
+
+import qdata.{QData, QDataDecode}
 
 import fs2.Stream
 
@@ -37,29 +41,29 @@ import testImplicits._
 import MongoResource._
 import RValue._
 
-class InterpreterSpec extends EffectfulQSpec[IO] {
+class MongoInterpreterSpec extends EffectfulQSpec[IO] {
   val E = MongoExpression
   import InterpreterSpec._
 
   import MongoSpec.mkMongo
 
-
+/*
   private def check(
       input: List[E.Object],
-      idStatus: IdStatus,
-      instructions: List[ParseInstruction],
-      expected: (List[ParseInstruction], List[RValue]))
-      : IO[MatchResult[(List[ParseInstruction], List[RValue])]] =
+      stages: ScalarStages,
+      expectedStages: ScalarStages,
+      expectedRValues: List[RValue])
+      : IO[MatchResult[(ScalarStages, List[RValue])]] =
 
   mkMongo.flatMap(_ { mongo => for {
     c <- uniqueCollection
     _ <- dropCollection(c, mongo)
     _ <- insertValues(c, mongo, input)
-    actual <- mongo.evaluate(c, idStatus, instructions) flatMap {
+    actual <- mongo.evaluate(c, stages) flatMap {
       case (insts, bsons) => toRValueList(bsons) map (x => (insts, x))
     }
     _ <- dropCollection(c, mongo)
-  } yield actual === expected })
+  } yield actual === ((expectedStages, expectedRValues)) })
 
   val basicInput: List[E.Object] =
     List(
@@ -70,47 +74,47 @@ class InterpreterSpec extends EffectfulQSpec[IO] {
   "Check reading without instructions" >> {
     "ExcludeId" >>* check(
       basicInput,
-      IdStatus.ExcludeId,
-      List(),
-      (List(), List(
+      ScalarStages.Id,
+      ScalarStages.Id,
+      List(
         rObject(Map("_id" -> rString("0"), "foo" -> rString("foo"))),
         rObject(Map("_id" -> rString("1"), "foo" -> rString("bar"))),
-        rObject(Map("_id" -> rString("2"), "foo" -> rString("baz"))))))
+        rObject(Map("_id" -> rString("2"), "foo" -> rString("baz")))))
 
     "IdOnly" >>* check(
       basicInput,
-      IdStatus.IdOnly,
-      List(),
-      (List(), List(rString("0"), rString("1"), rString("2"))))
+      ScalarStages(IdStatus.IdOnly, List()),
+      ScalarStages.Id,
+      List(rString("0"), rString("1"), rString("2")))
 
     "IncludeId" >>* check(
       basicInput,
-      IdStatus.IncludeId,
-      List(),
-      (List(), List(
+      ScalarStages(IdStatus.IncludeId, List()),
+      ScalarStages.Id,
+      List(
         rArray(List(rString("0"), rObject(Map("_id" -> rString("0"), "foo" -> rString("foo"))))),
         rArray(List(rString("1"), rObject(Map("_id" -> rString("1"), "foo" -> rString("bar"))))),
-        rArray(List(rString("2"), rObject(Map("_id" -> rString("2"), "foo" -> rString("baz"))))))))
+        rArray(List(rString("2"), rObject(Map("_id" -> rString("2"), "foo" -> rString("baz")))))))
   }
 
   "Wrap only" >> {
     "ExcludeId" >>* check(
       basicInput,
-      IdStatus.ExcludeId,
-      List(ParseInstruction.Wrap("wrapper")),
-      (List(), List(
+      ScalarStages(IdStatus.ExcludeId, List(Wrap("wrapper"))),
+      ScalarStages.Id,
+      List(
         rObject(Map("wrapper" -> rObject(Map("_id" -> rString("0"), "foo" -> rString("foo"))))),
         rObject(Map("wrapper" -> rObject(Map("_id" -> rString("1"), "foo" -> rString("bar"))))),
-        rObject(Map("wrapper" -> rObject(Map("_id" -> rString("2"), "foo" -> rString("baz"))))))))
+        rObject(Map("wrapper" -> rObject(Map("_id" -> rString("2"), "foo" -> rString("baz")))))))
 
     "IncludeId" >>* check(
       basicInput,
-      IdStatus.IncludeId,
-      List(ParseInstruction.Wrap("wrapper")),
-      (List(), List(
+      ScalarStages(IdStatus.IncludeId, List(Wrap("wrapper"))),
+      ScalarStages.Id,
+      List(
         rObject(Map("wrapper" -> rArray(List(rString("0"), rObject(Map("_id" -> rString("0"), "foo" -> rString("foo"))))))),
         rObject(Map("wrapper" -> rArray(List(rString("1"), rObject(Map("_id" -> rString("1"), "foo" -> rString("bar"))))))),
-        rObject(Map("wrapper" -> rArray(List(rString("2"), rObject(Map("_id" -> rString("2"), "foo" -> rString("baz"))))))))))
+        rObject(Map("wrapper" -> rArray(List(rString("2"), rObject(Map("_id" -> rString("2"), "foo" -> rString("baz")))))))))
   }
 
   val simpleArrays = List(
@@ -119,24 +123,25 @@ class InterpreterSpec extends EffectfulQSpec[IO] {
 
   "project" >>* check(
     simpleArrays,
-    IdStatus.ExcludeId,
-    List(ParseInstruction.Project(CPath.parse(".arr"))),
-    (List(), List(
+    ScalarStages(IdStatus.ExcludeId, List(Project(CPath.parse(".arr")))),
+    ScalarStages.Id,
+    List(
       rArray(List(rString("a"), rString("b"), rString("c"))),
-      rArray(List(rString("d"), rString("e"), rString("f"))))))
+      rArray(List(rString("d"), rString("e"), rString("f")))))
 
   "project and pivot" >>* check(
     simpleArrays,
-    IdStatus.ExcludeId,
-    List(ParseInstruction.Project(CPath.parse(".arr")), ParseInstruction.Pivot(IdStatus.IncludeId, ParseType.Array)),
-    (List(), List(
+    ScalarStages(IdStatus.ExcludeId, List(Project(CPath.parse(".arr")), Pivot(IdStatus.IncludeId, ColumnType.Array))),
+    ScalarStages.Id,
+    List(
       rArray(List(rLong(0L), rString("a"))),
       rArray(List(rLong(1L), rString("b"))),
       rArray(List(rLong(2L), rString("c"))),
       rArray(List(rLong(0L), rString("d"))),
       rArray(List(rLong(1L), rString("e"))),
-      rArray(List(rLong(2L), rString("f"))))))
+      rArray(List(rLong(2L), rString("f")))))
 
+ */
 }
 
 object InterpreterSpec {
@@ -150,9 +155,13 @@ object InterpreterSpec {
       .map(_ => ())
   }
 
-  def insertValues(collection: Collection, mongo: Mongo[IO], vals: List[E.Object]): IO[Unit] = {
+  def insertValues(collection: Collection, mongo: Mongo[IO], vals: List[BsonValue]): IO[Unit] = {
+    def docs: List[Document] = vals foldMap {
+      case x: BsonDocument => List(Document(x))
+      case _ => List()
+    }
     Mongo.singleObservableAsF[IO, Completed](
-      mongo.getCollection(collection) insertMany (vals map { x => Document(x.toBsonValue) })) map (_ => ())
+      mongo.getCollection(collection) insertMany docs) map (_ => ())
   }
 
   def toRValueList(stream: Stream[IO, BsonValue]): IO[List[RValue]] = {

@@ -30,7 +30,7 @@ import quasar.api.resource.{ResourceName, ResourcePath, ResourcePathType}
 import quasar.connector.{QueryResult, ResourceError}
 import quasar.physical.mongo.MongoResource.Collection
 import quasar.qscript.InterpretedRead
-import quasar.{Disposable, EffectfulQSpec, IdStatus}
+import quasar.{Disposable, EffectfulQSpec, IdStatus, ScalarStages}
 
 import shims._
 import testImplicits._
@@ -44,7 +44,7 @@ class MongoDataSourceSpec extends EffectfulQSpec[IO] {
 
   step(MongoSpec.setupDB)
 
-  private def iRead[A](path: A): InterpretedRead[A] = InterpretedRead(path, IdStatus.ExcludeId, List())
+  private def iRead[A](path: A): InterpretedRead[A] = InterpretedRead(path, ScalarStages.Id)
 
   def connFailed[A]: PartialFunction[Either[Throwable, A], MatchResult[Any]] = {
     case Left(t) => ResourceError.throwableP.getOption(t) must beLike {

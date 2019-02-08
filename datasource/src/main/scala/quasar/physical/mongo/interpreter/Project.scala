@@ -49,9 +49,11 @@ object Project {
         val projection = E.key(uniqueKey) +/ fld
         val match_ =
           Aggregator.filter(E.Object(projection.toKey -> E.Object("$exists" -> E.Bool(true))))
+        val move =
+          Aggregator.project(E.Object("tmp" -> projection))
         val project =
-          Aggregator.project(E.Object(uniqueKey -> projection))
-        List(match_, project)
+          Aggregator.project(E.Object(uniqueKey -> E.key("tmp")))
+        List(match_, move, project)
       }
     }
 

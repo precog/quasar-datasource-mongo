@@ -31,7 +31,7 @@ import fs2.Stream
 import quasar.api.resource.ResourcePath
 import quasar.connector.{MonadResourceErr, ResourceError}
 import quasar.physical.mongo.MongoResource.{Collection, Database}
-import quasar.{Disposable, ParseInstruction, IdStatus}
+import quasar.{Disposable, IdStatus, ScalarStages}
 
 
 import org.bson.{Document => _, _}
@@ -182,26 +182,24 @@ class Mongo[F[_]: MonadResourceErr : ConcurrentEffect] private[mongo](
   def findAll(collection: Collection): F[Stream[F, BsonValue]] =
     withCollectionExists(collection, getCollection(collection).find[BsonValue]())
 
-  def aggregate(collection: Collection, aggs: List[Aggregator]): F[Stream[F, BsonValue]] = {
-    scala.Predef.println(aggs map (_.toDocument))
+  def aggregate(collection: Collection, aggs: List[Aggregator]): F[Stream[F, BsonValue]] =
     withCollectionExists(collection, getCollection(collection).aggregate[BsonValue](aggs map (_.toDocument)))
-  }
 
   def evaluate(
       collection: Collection,
-      idStatus: IdStatus,
-      instructions: List[ParseInstruction])
-      : F[(List[ParseInstruction], Stream[F, BsonValue])] = {
+      stages: ScalarStages)
+      : F[(ScalarStages, Stream[F, BsonValue])] = {
 
-    val fallback: F[(List[ParseInstruction], Stream[F, BsonValue])] = findAll(collection) map (x => (instructions, x))
+    val fallback: F[(ScalarStages, Stream[F, BsonValue])] = findAll(collection) map (x => (stages, x))
 
-    if (idStatus === IdStatus.ExcludeId && instructions.isEmpty) fallback
+    if (ScalarStages.Id === stages) fallback
     else {
-      val result = interpreter.interpret(idStatus, instructions)
+      val result = interpreter.interpret(stages)
       if (result.aggregators.isEmpty) fallback
       else {
         val aggregated = aggregate(collection, result.aggregators)
-        val parsed = aggregated map  (x => (result.remainingInstructions, x map interpreter.mapper))
+        val newStages = ScalarStages(IdStatus.ExcludeId, result.stages)
+        val parsed = aggregated map  (x => (newStages, x map interpreter.mapper))
         // versioning last stand
         ConcurrentEffect[F].handleErrorWith(parsed)(e => fallback)
       }
@@ -295,7 +293,7 @@ object Mongo {
     for {
       client <- mkClient(config)
       version <- getVersion(client)
-      interpreter <- ParseInstructionInterpreter(version)
+      interpreter <- MongoInterpreter(version)
     } yield Disposable(
       new Mongo[F](
         client,

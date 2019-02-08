@@ -18,6 +18,7 @@ package quasar.physical.mongo
 
 import slamdata.Predef._
 
+import cats.kernel.Eq
 import cats.syntax.eq._
 import cats.syntax.foldable._
 import cats.instances.option._
@@ -41,6 +42,15 @@ object MongoExpression {
   final case class Field(str: SString) extends ProjectionStep
   final case class Index(int: SInt) extends ProjectionStep
 
+  object ProjectionStep {
+    implicit val eqProjectionStep: Eq[ProjectionStep] = Eq.fromUniversalEquals
+  }
+
+  def isField(step: ProjectionStep): Boolean = step match {
+    case Field(_) => true
+    case _ => false
+  }
+
   def keyPart(projectionStep: ProjectionStep): SString = projectionStep match {
     case Field(str) => str
     case Index(int) => int.toString
@@ -53,7 +63,7 @@ object MongoExpression {
     }
 
     private def levelString(ix: SInt): SString =
-      s"level::${ix.toString}"
+      s"level_${ix.toString}"
 
     @scala.annotation.tailrec
     private def toObj(accum: Let, level: SInt, inp: List[ProjectionStep]): Let = inp match {
@@ -65,7 +75,6 @@ object MongoExpression {
           // we have something like {$let: {vars: ..., in: "foo.bar.baz"}}
           // the result is {$let: {vars: ..., in: "foo.bar.baz.newField"}}
           case String(fld) =>
-            scala.Predef.println(accum)
             toObj(accum.copy(in = String(fld ++ "." ++ str)), level, tail)
           // this case shouldn't happen but it's valid in case of let folding
           // input: {$let: {vars: ..., in: <expression>}}
@@ -91,15 +100,24 @@ object MongoExpression {
     }
 
     def toBsonValue: BsonValue = {
-      // {$let: {vars: {level: "$ROOT"}, in: "$level}} is "$ROOT"
-      val initialLet = Let(Object("level" -> String("$$ROOT")), String("$$level"))
-      scala.Predef.println(this.steps.toList)
-      toObj(initialLet, 0, steps.toList).toBsonValue
+      val split = steps.toList.span(isField)
+      val initialKey = String("$" ++ Projection(split._1:_*).toKey)
+      if (split._2.isEmpty) initialKey.toBsonValue
+      else {
+        val initialLet = Let(Object("level" -> initialKey), String("$$level"))
+        toObj(initialLet, 0, split._2).toBsonValue
+      }
     }
 
     def +/(prj: Projection): Projection = Projection((steps ++ prj.steps):_*)
 
     def depth: SInt = steps.length
+  }
+
+  object Projection {
+    implicit val eqProjection: Eq[Projection] = new Eq[Projection] {
+      def eqv(a: Projection, b: Projection): Boolean = a.steps.toList === b.steps.toList
+    }
   }
 
   def key(s: SString): Projection = Projection(Field(s))
@@ -139,6 +157,10 @@ object MongoExpression {
     def toBsonValue: BsonValue = new BsonString(str)
   }
 
+  final case object Null extends MongoExpression {
+    def toBsonValue: BsonValue = new BsonNull()
+  }
+
   def cpathToProjection(cpath: CPath): Option[Projection] = {
     cpath.nodes.foldM(Projection()) { (acc, node) => node match {
       case CPathField(str) => Some(acc +/ key(str))
@@ -163,8 +185,8 @@ object MongoExpression {
     def isArray(proj: Projection): MongoExpression =
       equal(typeExpr(proj), String("array"))
 
-    def typeExpr(proj: Projection): MongoExpression =
-      Object("$type" -> proj)
+    def typeExpr(expr: MongoExpression): MongoExpression =
+      Object("$type" -> expr)
 
     def onIndex(proj: Projection, ix: SInt, fn: (MongoExpression => MongoExpression)): MongoExpression = {
       val indexProj = key("$value") +/ key("index")
