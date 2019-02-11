@@ -151,7 +151,7 @@ object MongoSpec {
 
   val host = Source.fromResource("mongo-host").mkString.trim
 
-  val port: String = "27017"
+  val port: String = "27018"
   val connectionString: String = s"mongodb://root:secret@${host}:${port}"
   val connectionStringInvalidPort: String = s"mongodb://root:secret@${host}:27000/?serverSelectionTimeoutMS=1000"
   val aConnectionString: String = s"mongodb://aUser:aPassword@${host}:${port}/A.a"
