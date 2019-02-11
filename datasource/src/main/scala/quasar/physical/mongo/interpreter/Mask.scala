@@ -73,7 +73,6 @@ object Mask {
     }
   }
 
-
   private def parseTypeStrings(parseType: ColumnType): List[String] = parseType match {
     case ColumnType.Boolean => List("bool")
     case ColumnType.Null => List("null")
@@ -84,6 +83,7 @@ object Mask {
     case ColumnType.Object => List("object")
   }
 
+  @SuppressWarnings(Array("org.wartremover.warts.Recursion"))
   private def typeTreeFilters(undefined: E.Projection, proj: E.Projection, tree: TypeTree): MongoExpression = {
     import E.helpers._
     val typeStrings: List[String] = tree.types.toList flatMap parseTypeStrings
@@ -110,15 +110,11 @@ object Mask {
     }
 
     lazy val array: MongoExpression = {
-      if (tree.list.isEmpty)
-        E.key("non-existent-field")
-      else {
-        val treeList =
-          tree.list.toList.sortBy(_._1) map {
-            case (i: Int, child: TypeTree) => typeTreeToProjectObject(undefined, proj +/ E.index(i), child)
-        }
-        E.Array(treeList:_*)
+      val treeList =
+        tree.list.toList.sortBy(_._1) map {
+          case (i: Int, child: TypeTree) => typeTreeToProjectObject(undefined, proj +/ E.index(i), child)
       }
+      E.Array(treeList:_*)
     }
 
     def arrayOr(expr: MongoExpression): MongoExpression =
@@ -129,14 +125,9 @@ object Mask {
       if (tree.types.contains(ColumnType.Object) || tree.obj.isEmpty) expr
       else obj
 
-    def scalarOr(expr: MongoExpression): MongoExpression =
-      if (tree.types.isEmpty) expr
-      else cond(typeTreeFilters(undefined, proj, tree), proj, expr)
-
     if (proj === E.Projection()) obj
     else if(isEmpty(tree)) undefined
-    else
-      cond(typeTreeFilters(undefined, proj, tree), objectOr(arrayOr(proj)), undefined)
+    else cond(typeTreeFilters(undefined, proj, tree), objectOr(arrayOr(proj)), undefined)
   }
 
   def apply(
@@ -150,12 +141,10 @@ object Mask {
     else masksToTypeTree(E.key(uniqueKey), masks) map { tree =>
       val projectObject =
         typeTreeToProjectObject(
-          E.key("non-existent-field"),
+          E.key(uniqueKey.concat("_non_existent_field")),
           E.Projection(),
           tree)
-      val project = Aggregator.project(projectObject)
-      val filterNulls = Aggregator.filter(E.Object(uniqueKey -> E.Object("$ne" -> E.Null)))
-      List(project, filterNulls)
+      List(Aggregator.project(projectObject), Aggregator.notNull(uniqueKey))
     }
   }
 }

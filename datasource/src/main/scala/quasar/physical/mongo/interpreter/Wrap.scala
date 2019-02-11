@@ -18,25 +18,19 @@ package quasar.physical.mongo.interpreter
 
 import slamdata.Predef._
 
-import cats.syntax.order._
-
 import quasar.physical.mongo.{Aggregator, Version, MongoExpression => E}
-
-import shims._
 
 object Wrap {
   def apply(
       uniqueKey: String,
       version: Version,
       name: String)
-      : Option[List[Aggregator]] = {
-
-    if (version < Version(3, 4, 0)) None
-    // Double project is needed here, because if we project "foo.bar" into "foo::Array"
-    // mongo for some reason multiplies result
-    else Some(List(
-      Aggregator.project(E.Object("tmp" -> E.Object(name -> E.key(uniqueKey)))),
-      Aggregator.project(E.Object(uniqueKey -> E.key("tmp")))))
-  }
+      : Option[List[Aggregator]] =
+    Some {
+      val tmpKey = uniqueKey.concat("_wrap")
+      List(
+        Aggregator.project(E.Object(tmpKey -> E.Object(name -> E.key(uniqueKey)))),
+        Aggregator.project(E.Object(uniqueKey -> E.key(tmpKey))))
+    }
 
 }

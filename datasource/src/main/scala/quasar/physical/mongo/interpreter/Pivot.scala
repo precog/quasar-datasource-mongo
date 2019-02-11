@@ -29,26 +29,26 @@ import quasar.IdStatus
 import shims._
 
 object Pivot {
-  val IndexKey: String = "index"
+  import E.helpers._
 
   def columnTypeVectorString(p: ColumnType.Vector): String = p match {
     case ColumnType.Array => "array"
     case ColumnType.Object => "object"
   }
 
-  def matchStructure(path: E.Projection, p: ColumnType.Vector): Aggregator =
-    Aggregator.filter(E.Object("typeTag" -> E.String(columnTypeVectorString(p))))
-
-  def toArray(projection: E.Projection, p: ColumnType.Vector): List[Aggregator] = p match {
-    case ColumnType.Array => List()
-    case ColumnType.Object => List(Aggregator.project(E.Object(projection.toKey -> E.Object("$objectToArray" -> projection))))
+  def toArray(key: String, projection: E.Projection, p: ColumnType.Vector): Aggregator = {
+    val refined: MongoExpression = p match {
+      case ColumnType.Array => cond(isArray(projection), projection, E.Array())
+      case ColumnType.Object => cond(isObject(projection), E.Object("$objectToArray" -> projection), E.Array())
+    }
+    Aggregator.project(E.Object(key -> refined))
   }
 
-  def mkValue(status: IdStatus, p: ColumnType.Vector, unwindedKey: E.Projection): MongoExpression = p match {
+  def mkValue(status: IdStatus, p: ColumnType.Vector, unwindedKey: E.Projection, indexKey: String): MongoExpression = p match {
     case ColumnType.Array => status match {
-      case IdStatus.IdOnly => E.key(IndexKey)
+      case IdStatus.IdOnly => E.key(indexKey)
       case IdStatus.ExcludeId => unwindedKey
-      case IdStatus.IncludeId => E.Array(E.key(IndexKey), unwindedKey)
+      case IdStatus.IncludeId => E.Array(E.key(indexKey), unwindedKey)
     }
     case ColumnType.Object => status match {
       case IdStatus.IdOnly => unwindedKey +/ E.key("k")
@@ -66,16 +66,25 @@ object Pivot {
 
     if (version < Version(3, 4, 0)) None
     else Some {
-      val projection = E.key(uniqueKey)
-      val addTypeTag = Aggregator.project(E.Object(
-        uniqueKey -> E.key(uniqueKey),
-        "typeTag" -> E.Object("$type" -> projection)))
-      val filter = matchStructure(projection, vectorType)
-      val mkArray = toArray(projection, vectorType)
-      val unwind = Aggregator.unwind(projection, IndexKey)
-      val toSet = mkValue(status, vectorType, projection)
-      val setProjection = Aggregator.project(E.Object(projection.toKey -> toSet))
-      List(addTypeTag, filter) ++ mkArray ++ List(unwind, setProjection)
+      val projection =
+        E.key(uniqueKey)
+
+      val unwindKey =
+        uniqueKey.concat("_unwind")
+
+      val indexKey =
+        uniqueKey.concat("_unwind_index")
+
+      val unwind =
+        Aggregator.unwind(E.key(unwindKey), indexKey)
+
+      val toSet =
+        mkValue(status, vectorType, E.key(unwindKey), indexKey)
+
+      val setProjection =
+        Aggregator.project(E.Object(projection.toKey -> toSet))
+
+      List(toArray(unwindKey, projection, vectorType), unwind, setProjection, Aggregator.notNull(uniqueKey))
     }
   }
 }

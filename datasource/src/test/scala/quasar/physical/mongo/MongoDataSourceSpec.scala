@@ -30,7 +30,7 @@ import quasar.api.resource.{ResourceName, ResourcePath, ResourcePathType}
 import quasar.connector.{QueryResult, ResourceError}
 import quasar.physical.mongo.MongoResource.Collection
 import quasar.qscript.InterpretedRead
-import quasar.{Disposable, EffectfulQSpec, IdStatus, ScalarStages}
+import quasar.{Disposable, EffectfulQSpec, ScalarStages}
 
 import shims._
 import testImplicits._

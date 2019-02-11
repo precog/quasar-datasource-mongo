@@ -22,13 +22,13 @@ import monocle.Prism
 
 import org.mongodb.scala._
 
+import quasar.physical.mongo.{MongoExpression => E}
+
 trait Aggregator {
   def toDocument: Document
 }
 
 object Aggregator {
-  val E = MongoExpression
-
   final case class Project(obj: MongoExpression) extends Aggregator {
     def toDocument: Document = Document(s"$$project" -> obj.toBsonValue)
   }
@@ -38,13 +38,23 @@ object Aggregator {
       Document(s"$$unwind" -> Document(
         "path" -> E.String("$" ++ path.toKey).toBsonValue,
         "includeArrayIndex" -> includeArrayIndex,
-        "preserveNullAndEmptyArrays" -> false))
+        "preserveNullAndEmptyArrays" -> true))
   }
 
   final case class Filter(obj: E.Object) extends Aggregator {
     def toDocument: Document =
       Document("$match" -> obj.toBsonValue)
   }
+
+  final case class NotNull(key: String) extends Aggregator {
+    def toDocument: Document =
+      Filter(E.Object(key -> E.Object("$ne" -> E.Null))).toDocument
+  }
+
+  def notNull: Prism[Aggregator, String] =
+    Prism.partial[Aggregator, String] {
+      case NotNull(k) => k
+    } ( x => NotNull(x) )
 
   def filter: Prism[Aggregator, E.Object] =
     Prism.partial[Aggregator, E.Object] {

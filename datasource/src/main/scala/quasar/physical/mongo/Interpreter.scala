@@ -49,7 +49,8 @@ class MongoInterpreter(version: Version, uniqueKey: String) extends Interpreter 
   @scala.annotation.tailrec
   private def refineInterpretationImpl(key: String, interpretation: Interpretation): Interpretation =
     interpretation.stages match {
-      case List() => interpretation
+      case List() =>
+        interpretation
       case hd :: tail => refineStep(key, hd) match {
         case None => interpretation
         case Some(aggregators) => refineInterpretationImpl(key, Interpretation(tail, interpretation.aggregators ++ aggregators))

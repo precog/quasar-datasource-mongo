@@ -19,49 +19,61 @@ package quasar.physical.mongo
 import slamdata.Predef._
 
 import cats.effect.IO
+import cats.syntax.foldable._
+import cats.instances.list._
 
-import quasar.common.{CPath, CPathField}
+import org.bson.{Document => _, _}
+import org.bson.types.Decimal128
+import org.mongodb.scala._
+import org.typelevel.jawn.{AsyncParser, Facade}
+
 import quasar.contrib.std.errorImpossible
-import quasar.{IdStatus, ScalarStageSpec => Spec, JsonSpec, ScalarStage, ScalarStages}, ScalarStage._
+import quasar.{JsonSpec, ScalarStages}
 
 import qdata.QDataEncode
 import qdata.json.QDataFacade
 import qdata.time.{DateTimeInterval, OffsetDate}
-
-import org.bson._
-import org.bson.types.Decimal128
-import org.specs2.mutable.Specification
 
 import java.time.{
   LocalDate,
   LocalDateTime,
   LocalTime,
   OffsetDateTime,
-  OffsetTime,
-  Instant,
+  OffsetTime
 }
-
-
-import org.typelevel.jawn.{AsyncParser, Facade}
 
 import spire.math.Real
 
 import shims._
 
-class MongoParseInstructionInterpreterSpec
-    extends JsonSpec
-//    with Spec.WrapSpec
-//    with Spec.ProjectSpec
-//    with Spec.PivotSpec
-//    with Spec.MaskSpec
-    with Spec.CartesianSpec
-{
-  import InterpreterSpec._
+trait StageInterpreterSpec extends JsonSpec {
   import MongoSpec.mkMongo
+
+  val E = MongoExpression
+
+  import MongoResource._
 
   type JsonElement = BsonValue
 
-  val RootKey: String = "rootKey"
+  def mkCollection(name: String): Collection = Collection(Database("aggregation_test"), name)
+
+  def dropCollection(collection: Collection, mongo: Mongo[IO]): IO[Unit] = {
+    Mongo.singleObservableAsF[IO, Completed](mongo.getCollection(collection).drop())
+      .attempt
+      .map(_ => ())
+  }
+
+  def insertValues(collection: Collection, mongo: Mongo[IO], vals: List[BsonValue]): IO[Unit] = {
+    def docs: List[Document] = vals foldMap {
+      case x: BsonDocument => List(Document(x))
+      case _ => List()
+    }
+    Mongo.singleObservableAsF[IO, Completed](
+      mongo.getCollection(collection) insertMany docs) map (_ => ())
+  }
+
+  val uniqueCollection: IO[Collection] =
+    IO.delay(java.util.UUID.randomUUID().toString) map mkCollection
 
   implicit def bsonValueQDataEncode: QDataEncode[BsonValue] = new QDataEncode[BsonValue] {
     def makeLong(l: Long): BsonValue = new BsonInt64(l)
@@ -102,33 +114,16 @@ class MongoParseInstructionInterpreterSpec
     def makeObject(a: BsonDocument): BsonValue = a
   }
 
-  def interpret(stages: List[ScalarStage], inp: JsonStream): JsonStream = {
+  def interpret(stages: ScalarStages, inp: JsonStream, mapper: (BsonValue => BsonValue)): JsonStream = {
     mkMongo.flatMap(_ { mongo => for {
       c <- uniqueCollection
       _ <- dropCollection(c, mongo)
-      _ <- insertValues(c, mongo, inp map { x => new BsonDocument(RootKey, x) })
-      stream <- mongo.evaluate(c, ScalarStages(
-        IdStatus.ExcludeId,
-        (Project(CPath.parse(s".${RootKey}")) :: stages)))
+      _ <- insertValues(c, mongo, inp map mapper)
+      stream <- mongo.evaluate(c, stages)
       actual <- stream._2.compile.toList
       _ <- dropCollection(c, mongo)
     } yield actual }).unsafeRunSync()
   }
-
-  def evalWrap(wrap: Wrap, stream: JsonStream): JsonStream =
-    interpret(List(wrap), stream)
-
-  def evalProject(project: Project, stream: JsonStream): JsonStream =
-    interpret(List(project), stream)
-
-  def evalPivot(pivot: Pivot, stream: JsonStream): JsonStream =
-    interpret(List(pivot), stream)
-
-  def evalMask(mask: Mask, stream: JsonStream): JsonStream =
-    interpret(List(mask), stream)
-
-  def evalCartesian(cartesian: Cartesian, stream: JsonStream): JsonStream =
-    interpret(List(cartesian), stream)
 
   protected def ldjson(str: String): JsonStream = {
     implicit val facade: Facade[JsonElement] = QDataFacade[JsonElement](isPrecise = false)

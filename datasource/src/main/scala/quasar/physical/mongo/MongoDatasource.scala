@@ -27,8 +27,6 @@ import eu.timepit.refined.auto._
 
 import fs2.Stream
 
-import org.bson.BsonValue
-
 import quasar.api.datasource.DatasourceType
 import quasar.api.resource.{ResourcePath, ResourceName, ResourcePathType}
 import quasar.connector.{MonadResourceErr, QueryResult, ResourceError}
@@ -36,7 +34,6 @@ import quasar.connector.datasource.LightweightDatasource
 import quasar.physical.mongo.decoder.qdataDecoder
 import quasar.physical.mongo.MongoResource.{Database, Collection}
 import quasar.qscript.InterpretedRead
-import quasar.ScalarStage
 
 import shims._
 

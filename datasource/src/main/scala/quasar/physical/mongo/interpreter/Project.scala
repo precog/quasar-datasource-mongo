@@ -19,11 +19,8 @@ package quasar.physical.mongo.interpreter
 import slamdata.Predef._
 
 import cats.syntax.order._
-import cats.syntax.foldable._
-import cats.instances.list._
-import cats.instances.option._
 
-import quasar.common.{CPath, CPathField, CPathIndex, CPathNode}
+import quasar.common.CPath
 
 import quasar.physical.mongo.{Aggregator, Version, MongoExpression => E}
 
@@ -37,22 +34,22 @@ object Project {
       : Option[List[Aggregator]] = {
 
     def filterGuard(prj: E.Projection): Boolean = {
-      val hasNotIx: Boolean = prj.steps.toList.forall {
-        case E.Index(_) => true
-        case E.Field(_) => false
-      }
+      val hasNotIx: Boolean = prj.steps.toList.forall(E.isField)
       version > (if (hasNotIx) Version(0, 0, 0) else Version(3, 2, 0)) // Not sure if $let works for < 2.0
     }
 
     E.cpathToProjection(path) flatMap { (fld: E.Projection) =>
       if (!filterGuard(fld)) None else Some {
-        val projection = E.key(uniqueKey) +/ fld
+        val tmpKey =
+          uniqueKey.concat("_project")
+        val projection =
+          E.key(uniqueKey) +/ fld
         val match_ =
           Aggregator.filter(E.Object(projection.toKey -> E.Object("$exists" -> E.Bool(true))))
         val move =
-          Aggregator.project(E.Object("tmp" -> projection))
+          Aggregator.project(E.Object(tmpKey -> projection))
         val project =
-          Aggregator.project(E.Object(uniqueKey -> E.key("tmp")))
+          Aggregator.project(E.Object(uniqueKey -> E.key(tmpKey)))
         List(match_, move, project)
       }
     }

@@ -23,7 +23,6 @@ import cats.syntax.eq._
 import cats.syntax.foldable._
 import cats.instances.option._
 import cats.instances.list._
-import cats.instances.string._
 
 import org.bson._
 
@@ -142,7 +141,7 @@ object MongoExpression {
       }
       new BsonDocument(elements.asJava)
     }
-    def +(obj: Object): Object = Object((this.fields ++ obj.fields):_*)
+    def +(obj: Object): Object = Object((this.fields.toList ++ obj.fields.toList):_*)
   }
 
   final case class Bool(b: Boolean) extends MongoExpression {
@@ -175,9 +174,8 @@ object MongoExpression {
 
     def or(lst: List[MongoExpression]): MongoExpression = {
       def unfoldOr(x: MongoExpression): List[MongoExpression] = x match {
-        case obj @ Object(_) => obj.fields.toList match {
-          case ("$or", arr @ Array(_)) :: List() =>
-            scala.Predef.println("!!!")
+        case obj @ Object(_*) => obj.fields.toList match {
+          case ("$or", arr @ Array(_*)) :: List() =>
             arr.elems.toList
           case _ => List(x)
         }
@@ -199,23 +197,5 @@ object MongoExpression {
 
     def typeExpr(expr: MongoExpression): Object =
       Object("$type" -> expr)
-
-    def onIndex(proj: Projection, ix: SInt, fn: (MongoExpression => MongoExpression)): MongoExpression = {
-      val indexProj = key("$value") +/ key("index")
-      val resultProj = key("$value") +/ key("result")
-      val thisProj = key("$this")
-      val applied = cond(equal(indexProj, Int(ix)), fn(thisProj), thisProj)
-      val in = Object(
-        "index" -> Object("$sum" -> Array(indexProj, Int(1))),
-        "result" -> Object("arrayConcat" -> Array(resultProj, Array(Array(applied))))
-      )
-      val reduceObj = Object("$reduce" -> Object(
-        "input" -> proj,
-        "initialValue" -> Object("result" -> Array(), "index" -> Int(0)),
-        "in" -> in
-      ))
-      val result = Let(Object("reduce" -> reduceObj), key("$reduce") +/ key("result"))
-      cond(isArray(proj), result, proj)
-    }
   }
 }
