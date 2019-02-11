@@ -19,14 +19,14 @@ package quasar.physical.mongo
 import slamdata.Predef._
 
 import argonaut._
-
-import cats.effect.{ConcurrentEffect, Timer, ContextShift}
+import cats.effect.{ConcurrentEffect, ContextShift, Timer}
 import cats.syntax.applicative._
 import cats.syntax.applicativeError._
 import cats.syntax.functor._
 
 import quasar.api.datasource.{DatasourceError, DatasourceType}, DatasourceError.InitializationError
 import quasar.connector.{LightweightDatasourceModule, MonadResourceErr}
+import quasar.physical.mongo.Mongo.{MongoAccessDenied, MongoConnectionFailed}
 import quasar.Disposable
 
 import scala.concurrent.ExecutionContext
@@ -39,10 +39,18 @@ object MongoDataSourceModule extends LightweightDatasourceModule {
   type Error = InitializationError[Json]
   type ErrorOrResult[F[_]] = Error \/ Result[F]
 
-  private def mkError[F[_]](config: Json, msg: String): ErrorOrResult[F] =
+  private def mkInvalidCfgError[F[_]](config: Json, msg: String): ErrorOrResult[F] =
     DatasourceError
       .invalidConfiguration[Json, Error](kind, sanitizeConfig(config), NonEmptyList(msg))
       .left[Result[F]]
+
+  private def mkError[F[_], A](config: Json, throwable: Throwable): ErrorOrResult[F] = throwable match {
+    case MongoConnectionFailed((ex, _)) =>
+      DatasourceError.ConnectionFailed(kind, sanitizeConfig(config), ex).left[Result[F]]
+    case MongoAccessDenied((_, detail)) =>
+      DatasourceError.AccessDenied(kind, sanitizeConfig(config), detail).left[Result[F]]
+    case t => mkInvalidCfgError(config, t.getMessage)
+  }
 
   @SuppressWarnings(Array("org.wartremover.warts.ImplicitParameter"))
   def lightweightDatasource[F[_]: ConcurrentEffect: ContextShift: MonadResourceErr: Timer]
@@ -52,13 +60,13 @@ object MongoDataSourceModule extends LightweightDatasourceModule {
 
     config.as[MongoConfig].result match {
       case Left((msg, _)) =>
-        mkError(config, msg).pure[F]
+        mkInvalidCfgError[F](config, msg).pure[F]
       case Right(mongoConfig) => {
-        Mongo(mongoConfig).attempt.map { _ match {
-          case Left(e) => mkError(config, e.getMessage)
+        Mongo(mongoConfig).attempt.map {
+          case Left(e) => mkError(config, e)
           case Right(disposableClient) =>
             disposableClient.map(client => (new MongoDataSource(client): DS[F])).right[Error]
-        }}
+        }
     }}
 
   def kind: DatasourceType = MongoDataSource.kind

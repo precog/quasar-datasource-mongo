@@ -45,8 +45,8 @@ class MongoDataSourceModuleSpec extends EffectfulQSpec[IO] {
   "Using unreachable config produces Left invalid configuration" >>* {
     val config = MongoConfig("mongodb://unreachable/?serverSelectionTimeoutMS=1000", None).asJson
     MongoDataSourceModule.lightweightDatasource[IO](config).map (_.asCats must beLike {
-      case Left(DatasourceError.InvalidConfiguration(MongoDataSource.kind, cfg, NonEmptyList(msg, _))) =>
-        (cfg must_=== config) and (msg must contain("Timed out after 1000 ms"))
+      case Left(DatasourceError.ConnectionFailed(MongoDataSource.kind, cfg, _)) =>
+        cfg must_=== config
     })
   }
 }

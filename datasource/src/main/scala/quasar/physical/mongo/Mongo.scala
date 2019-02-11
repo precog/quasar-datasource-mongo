@@ -89,28 +89,6 @@ class Mongo[F[_]: MonadResourceErr : ConcurrentEffect] private[mongo](
     } yield res)
   }
 
-  private def mkMsg(ex: MongoCommandException) = s"Mongo command error: ${ex.getErrorCodeName}"
-
-  object MongoConnectionFailed {
-    def unapply(t: Throwable): Option[(Throwable, String)] = t match {
-      case ex: MongoTimeoutException => Some((ex, "Timed out connecting to server"))
-      // see for a list of codes: https://github.com/mongodb/mongo/blob/master/src/mongo/base/error_codes.err
-      case ex: MongoCommandException if List(6, 7, 24, 89, 230, 231, 240).contains(ex.getErrorCode) =>
-        Some((ex, mkMsg(ex)))
-      case _ => None
-    }
-  }
-
-  object MongoAccessDenied {
-    def unapply(t: Throwable): Option[(Throwable, String)] = t match {
-      case ex: MongoSecurityException => Some((ex, "Client authentication error"))
-      // see for a list of codes: https://github.com/mongodb/mongo/blob/master/src/mongo/base/error_codes.err
-      case ex: MongoCommandException if List(11, 13, 18, 31, 33).contains(ex.getErrorCode) =>
-        Some((ex, mkMsg(ex)))
-      case _ => None
-    }
-  }
-
   def errorHandler[A](path: ResourcePath): Throwable => Stream[F, A] = {
     case MongoConnectionFailed((ex, detail)) =>
       Stream.eval(MonadResourceErr.raiseError(ResourceError.connectionFailed(path, Some(detail), Some(ex))))
@@ -235,6 +213,29 @@ object Mongo {
   val DefaultBsonBatch: Int = 1024 * 128
   val MaxBsonBatch: Long = 128L * 1024L * 1024L
   val DefaultQueueSize: Long = 256L
+
+  private def mkMsg(ex: MongoCommandException) = s"Mongo command error: ${ex.getErrorCodeName}"
+
+  object MongoConnectionFailed {
+    def unapply(t: Throwable): Option[(Exception, String)] = t match {
+      case ex: MongoTimeoutException => Some((ex, "Timed out connecting to server"))
+      case ex: MongoSocketException => Some((ex, "Error connecting to server"))
+      // see for a list of codes: https://github.com/mongodb/mongo/blob/master/src/mongo/base/error_codes.err
+      case ex: MongoCommandException if List(6, 7, 24, 89, 230, 231, 240).contains(ex.getErrorCode) =>
+        Some((ex, mkMsg(ex)))
+      case _ => None
+    }
+  }
+
+  object MongoAccessDenied {
+    def unapply(t: Throwable): Option[(Exception, String)] = t match {
+      case ex: MongoSecurityException => Some((ex, "Client authentication error"))
+      // see for a list of codes: https://github.com/mongodb/mongo/blob/master/src/mongo/base/error_codes.err
+      case ex: MongoCommandException if List(11, 13, 18, 31, 33).contains(ex.getErrorCode) =>
+        Some((ex, mkMsg(ex)))
+      case _ => None
+    }
+  }
 
   def singleObservableAsF[F[_]: Async, A](obs: SingleObservable[A]): F[A] =
     Async[F].async { cb: (Either[Throwable, A] => Unit) =>
