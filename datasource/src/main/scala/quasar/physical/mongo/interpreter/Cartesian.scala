@@ -45,30 +45,37 @@ object Cartesian {
     }
 
     @scala.annotation.tailrec
-    def spanUnwind(
-        unwind: Option[Aggregator],
+    def spanHead(
+        head: Option[Aggregator],
         processed: List[List[Aggregator]],
         inp: List[List[Aggregator]])
         : Option[(Aggregator, List[List[Aggregator]])] = inp match {
       case List() =>
-        unwind map (x => (x, processed.reverse))
-      case hd :: inpTail => unwind match {
-        case Some(u) => spanUnwind(unwind, hd :: processed, inpTail)
+        head map (x => (x, processed.reverse))
+      case hd :: inpTail => head match {
+        case Some(u) => spanHead(head, hd :: processed, inpTail)
         case None => hd match {
-          case (uw @ (Aggregator.unwind(_, _))) :: nestedTail => spanUnwind(Some(uw), nestedTail :: processed, inpTail)
-          case other => spanUnwind(None, other :: processed, inpTail)
+          case aggregator :: nestedTail => spanHead(Some(aggregator), nestedTail :: processed, inpTail)
+          case other => spanHead(None, other :: processed, inpTail)
         }
       }
     }
+
+    def takeHead(head: Option[Aggregator], nestedList: List[List[Aggregator]]): Option[Aggregator] =
+      nestedList.foldLeft(None: Option[Aggregator]) { (acc: Option[Aggregator], lst: List[Aggregator]) =>
+        acc orElse lst.headOption }
 
     val spannedPrefix = positioned map spanProjectPrefix
 
     val projects = spannedPrefix flatMap (_._1.toList)
 
+    val next = spannedPrefix map (_._2)
+
     if (projects.isEmpty) {
-      spanUnwind(None, List(), positioned) match {
+      spanHead(None, List(), positioned) match {
         case None => accum.reverse
-        case Some((unwind, next)) => flattenAggregators(defaultObject, unwind :: accum, next)
+        case Some((agg, next)) =>
+          flattenAggregators(defaultObject, agg :: accum, next)
       }
     }
     else {
@@ -91,7 +98,7 @@ object Cartesian {
     else {
       val cartoucheList = cartouches.toList
 
-      val interpretations: Option[List[List[Aggregator]]] =
+      val interpretations: Option[List[List[MongoExpression]]] =
         cartoucheList.traverse {
           case (alias, (_, instructions)) =>
             val interpreted: Interpretation =
@@ -115,6 +122,8 @@ object Cartesian {
           case (alias, _) => alias.name -> E.key(alias.name)
         }
         val lastProjection = Aggregator.project(E.Object(uniqueKey -> E.Object(lastProjectionPairs:_*)))
+        val flatten = flattenAggregators(E.Object(defaultPairs:_*), List(), is) ++ List(lastProjection)
+        scala.Predef.println(s"FLATTEN ::: ${flatten map (_.toDocument)}")
         List(initialProjection) ++ flattenAggregators(E.Object(defaultPairs:_*), List(), is) ++ List(lastProjection)
       }
     }

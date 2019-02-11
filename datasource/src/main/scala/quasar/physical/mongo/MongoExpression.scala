@@ -132,8 +132,8 @@ object MongoExpression {
     def toBsonValue: BsonValue = this.toObj.toBsonValue
   }
 
-  final case class Array(projections: MongoExpression*) extends MongoExpression {
-    def toBsonValue: BsonValue = new BsonArray((projections map (_.toBsonValue)).asJava)
+  final case class Array(elems: MongoExpression*) extends MongoExpression {
+    def toBsonValue: BsonValue = new BsonArray((elems map (_.toBsonValue)).asJava)
   }
   final case class Object(fields: (SString, MongoExpression)*) extends MongoExpression {
     def toBsonValue: BsonDocument = {
@@ -173,10 +173,22 @@ object MongoExpression {
     def cond(test: MongoExpression, ok: MongoExpression, fail: MongoExpression): Object =
       Object("$cond" -> Array(test, ok, fail))
 
-    def or(lst: List[MongoExpression]): Object =
-      Object("$or" -> Array(lst:_*))
+    def or(lst: List[MongoExpression]): MongoExpression = {
+      def unfoldOr(x: MongoExpression): List[MongoExpression] = x match {
+        case obj @ Object(_) => obj.fields.toList match {
+          case ("$or", arr @ Array(_)) :: List() =>
+            scala.Predef.println("!!!")
+            arr.elems.toList
+          case _ => List(x)
+        }
+      }
+      lst flatMap unfoldOr match {
+        case a :: List() => a
+        case x => Object("$or" -> Array(x:_*))
+      }
+    }
 
-    def equal(a: MongoExpression, b: MongoExpression): MongoExpression =
+    def equal(a: MongoExpression, b: MongoExpression): Object =
       Object("$eq" -> Array(a, b))
 
     def isObject(proj: Projection): MongoExpression =
@@ -185,7 +197,7 @@ object MongoExpression {
     def isArray(proj: Projection): MongoExpression =
       equal(typeExpr(proj), String("array"))
 
-    def typeExpr(expr: MongoExpression): MongoExpression =
+    def typeExpr(expr: MongoExpression): Object =
       Object("$type" -> expr)
 
     def onIndex(proj: Projection, ix: SInt, fn: (MongoExpression => MongoExpression)): MongoExpression = {

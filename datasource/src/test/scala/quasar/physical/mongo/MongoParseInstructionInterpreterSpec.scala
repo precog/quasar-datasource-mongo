@@ -53,7 +53,8 @@ class MongoParseInstructionInterpreterSpec
 //    with Spec.WrapSpec
 //    with Spec.ProjectSpec
 //    with Spec.PivotSpec
-    with Spec.MaskSpec
+//    with Spec.MaskSpec
+    with Spec.CartesianSpec
 {
   import InterpreterSpec._
   import MongoSpec.mkMongo
@@ -109,10 +110,7 @@ class MongoParseInstructionInterpreterSpec
       stream <- mongo.evaluate(c, ScalarStages(
         IdStatus.ExcludeId,
         (Project(CPath.parse(s".${RootKey}")) :: stages)))
-//      _ <- IO.delay(scala.Predef.println(s"stages: ${stages}"))
-//      _ <- IO.delay(scala.Predef.println(s"inserted: ${inp map { x => new BsonDocument(RootKey, x) }}"))
       actual <- stream._2.compile.toList
-//      _ <- IO.delay(scala.Predef.println(s"actual: ${actual}"))
       _ <- dropCollection(c, mongo)
     } yield actual }).unsafeRunSync()
   }
@@ -126,10 +124,11 @@ class MongoParseInstructionInterpreterSpec
   def evalPivot(pivot: Pivot, stream: JsonStream): JsonStream =
     interpret(List(pivot), stream)
 
-
   def evalMask(mask: Mask, stream: JsonStream): JsonStream =
     interpret(List(mask), stream)
 
+  def evalCartesian(cartesian: Cartesian, stream: JsonStream): JsonStream =
+    interpret(List(cartesian), stream)
 
   protected def ldjson(str: String): JsonStream = {
     implicit val facade: Facade[JsonElement] = QDataFacade[JsonElement](isPrecise = false)
