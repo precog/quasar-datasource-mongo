@@ -177,9 +177,9 @@ class Mongo[F[_]: MonadResourceErr : ConcurrentEffect] private[mongo](
       else {
         val aggregated = aggregate(collection, result.aggregators)
         val newStages = ScalarStages(IdStatus.ExcludeId, result.stages)
-        val parsed = aggregated map  (x => (newStages, x map interpreter.mapper))
+        val parsed = aggregated map (x => (newStages, x map interpreter.mapper))
         // versioning last stand
-        ConcurrentEffect[F].handleErrorWith(parsed)(e => fallback)
+        F.handleErrorWith(parsed)(_ => fallback)
       }
     }
   }
@@ -288,7 +288,7 @@ object Mongo {
     // case of error of decoding or something, although this checks that db is reachable
     def getVersion(client: MongoClient): F[Version] =
       buildInfo(client) map { x =>
-        getVersionString(x) map (_.split("\\.")) flatMap mkVersion getOrElse Version(0, 0, 0)
+        getVersionString(x) map (_.split("\\.")) flatMap mkVersion getOrElse Version.zero
       }
 
     for {

@@ -35,7 +35,7 @@ object Project {
 
     def filterGuard(prj: E.Projection): Boolean = {
       val hasNotIx: Boolean = prj.steps.toList.forall(E.isField)
-      version > (if (hasNotIx) Version(0, 0, 0) else Version(3, 2, 0)) // Not sure if $let works for < 2.0
+      version >= (if (hasNotIx) Version.zero else Version.$arrayElemAt) // Not sure if $let works for < 2.0
     }
 
     E.cpathToProjection(path) flatMap { (fld: E.Projection) =>

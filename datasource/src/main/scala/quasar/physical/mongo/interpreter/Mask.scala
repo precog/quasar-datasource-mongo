@@ -136,7 +136,7 @@ object Mask {
       masks: Map[CPath, Set[ColumnType]])
       : Option[List[Aggregator]] = {
 
-    if (version < Version(3, 4, 0)) None
+    if (version < Version.$type) None
     else if (masks.isEmpty) Some(List(Aggregator.filter(E.Object(uniqueKey -> E.Bool(false)))))
     else masksToTypeTree(E.key(uniqueKey), masks) map { tree =>
       val projectObject =

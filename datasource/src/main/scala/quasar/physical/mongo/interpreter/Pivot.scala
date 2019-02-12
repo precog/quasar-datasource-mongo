@@ -64,7 +64,7 @@ object Pivot {
       vectorType: ColumnType.Vector)
       : Option[List[Aggregator]] = {
 
-    if (version < Version(3, 4, 0)) None
+    if ((version < Version.$objectToArray && vectorType === ColumnType.Object) || version < Version.$type) None
     else Some {
       val projection =
         E.key(uniqueKey)
