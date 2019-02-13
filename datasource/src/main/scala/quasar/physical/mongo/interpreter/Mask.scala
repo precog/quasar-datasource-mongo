@@ -81,6 +81,7 @@ object Mask {
     case ColumnType.OffsetDateTime => List("date")
     case ColumnType.Array => List("array")
     case ColumnType.Object => List("object")
+    case _ => List()
   }
 
   @SuppressWarnings(Array("org.wartremover.warts.Recursion"))
