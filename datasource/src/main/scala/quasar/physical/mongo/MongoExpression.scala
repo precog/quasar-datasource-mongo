@@ -21,8 +21,10 @@ import slamdata.Predef._
 import cats.kernel.Eq
 import cats.syntax.eq._
 import cats.syntax.foldable._
-import cats.instances.option._
+import cats.instances.int._
 import cats.instances.list._
+import cats.instances.option._
+import cats.instances.string._
 
 import org.bson._
 
@@ -42,7 +44,18 @@ object MongoExpression {
   final case class Index(int: SInt) extends ProjectionStep
 
   object ProjectionStep {
-    implicit val eqProjectionStep: Eq[ProjectionStep] = Eq.fromUniversalEquals
+    implicit val eqProjectionStep: Eq[ProjectionStep] = new Eq[ProjectionStep] {
+      def eqv(a: ProjectionStep, b: ProjectionStep) = a match {
+        case Field(x) => b match {
+          case Field(y) => x === y
+          case Index(_) => false
+        }
+        case Index(x) => b match {
+          case Index(y) => x === y
+          case Field(_) => false
+        }
+      }
+    }
   }
 
   def isField(step: ProjectionStep): Boolean = step match {

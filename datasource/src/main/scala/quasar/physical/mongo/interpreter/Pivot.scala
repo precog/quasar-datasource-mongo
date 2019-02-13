@@ -38,7 +38,7 @@ object Pivot {
 
   def toArray(key: String, projection: E.Projection, p: ColumnType.Vector): Aggregator = {
     val refined: MongoExpression = p match {
-      case ColumnType.Array => cond(isArray(projection), projection, E.Array())
+      case ColumnType.Array => projection
       case ColumnType.Object => cond(isObject(projection), E.Object("$objectToArray" -> projection), E.Array())
     }
     Aggregator.project(E.Object(key -> refined))
