@@ -44,6 +44,7 @@ import shims._
 class Mongo[F[_]: MonadResourceErr : ConcurrentEffect] private[mongo](
     client: MongoClient,
     maxMemory: Int,
+    pushdownDisabled: Boolean,
     val interpreter: Interpreter,
     val accessedResource: Option[MongoResource]) {
   import Mongo._
@@ -170,7 +171,7 @@ class Mongo[F[_]: MonadResourceErr : ConcurrentEffect] private[mongo](
 
     val fallback: F[(ScalarStages, Stream[F, BsonValue])] = findAll(collection) map (x => (stages, x))
 
-    if (ScalarStages.Id === stages) fallback
+    if (ScalarStages.Id === stages || pushdownDisabled) fallback
     else {
       val result = interpreter.interpret(stages)
       if (result.aggregators.isEmpty) fallback
@@ -299,6 +300,7 @@ object Mongo {
       new Mongo[F](
         client,
         config.resultBatchSizeBytes.getOrElse(DefaultBsonBatch),
+        config.disablePushdown getOrElse false,
         interpreter,
         config.accessedResource),
       close(client))

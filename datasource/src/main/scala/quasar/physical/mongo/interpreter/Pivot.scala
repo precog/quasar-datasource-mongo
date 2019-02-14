@@ -28,8 +28,6 @@ import quasar.IdStatus
 import shims._
 
 object Pivot {
-  import E.helpers._
-
   def columnTypeVectorString(p: ColumnType.Vector): String = p match {
     case ColumnType.Array => "array"
     case ColumnType.Object => "object"

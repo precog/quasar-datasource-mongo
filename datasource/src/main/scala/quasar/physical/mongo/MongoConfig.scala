@@ -24,7 +24,10 @@ import com.mongodb.ConnectionString
 
 import quasar.physical.mongo.MongoResource.{Database, Collection}
 
-final case class MongoConfig(connectionString: String, resultBatchSizeBytes: Option[Int]) {
+final case class MongoConfig(
+    connectionString: String,
+    resultBatchSizeBytes: Option[Int],
+    disablePushdown: Option[Boolean]) {
   def accessedResource: Option[MongoResource] = {
     val connString = new ConnectionString(connectionString)
     val dbStr = Option(connString.getDatabase())
@@ -38,14 +41,18 @@ final case class MongoConfig(connectionString: String, resultBatchSizeBytes: Opt
 
 object MongoConfig {
   implicit val codecMongoConfig: CodecJson[MongoConfig] =
-    casecodec2(MongoConfig.apply, MongoConfig.unapply)("connectionString", "resultBatchSizeBytes")
+    casecodec3(MongoConfig.apply, MongoConfig.unapply)(
+      "connectionString",
+      "resultBatchSizeBytes",
+      "disablePushdown")
 
   private val credentialsRegex = "://[^@+]+@".r
 
   def sanitize(config: Json): Json = config.as[MongoConfig].result match {
     case Left(_) => config
-    case Right(MongoConfig(value, mem)) => {
-      MongoConfig(credentialsRegex.replaceFirstIn(value, "://<REDACTED>:<REDACTED>@"), mem).asJson
+    case Right(cfg) => {
+      val newConnectionString = credentialsRegex.replaceFirstIn(cfg.connectionString, "://<REDACTED>:<REDACTED>@")
+      cfg.copy(connectionString = newConnectionString).asJson
     }
   }
 }

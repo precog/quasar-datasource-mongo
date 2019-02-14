@@ -28,9 +28,9 @@ import quasar.physical.mongo.MongoResource.{Database, Collection}
 class MongoConfigSpec extends Specification with ScalaCheck {
   "works for mongodb protocol" >> {
     Json.obj("connectionString" -> jString("mongodb://localhost"))
-      .as[MongoConfig].toEither === Right(MongoConfig("mongodb://localhost", None))
+      .as[MongoConfig].toEither === Right(MongoConfig("mongodb://localhost", None, None))
     Json.obj("connectionString" -> jString("mongodb://user:password@anyhost:2980/database?a=b&c=d"))
-      .as[MongoConfig].toEither === Right(MongoConfig("mongodb://user:password@anyhost:2980/database?a=b&c=d", None))
+      .as[MongoConfig].toEither === Right(MongoConfig("mongodb://user:password@anyhost:2980/database?a=b&c=d", None, None))
   }
 
   "sanitized config hides credentials" >> {
@@ -43,6 +43,7 @@ class MongoConfigSpec extends Specification with ScalaCheck {
 
     MongoConfig.sanitize(input) === expected
   }
+
   "sanitized config without credentials isn't changed" >> {
     val input = Json.obj(
       "connectionString" -> jString("mongodb://host:1234/db?foo=bar"),
@@ -52,19 +53,39 @@ class MongoConfigSpec extends Specification with ScalaCheck {
 
   "accessed resource" >> {
     "for default params is None" >> {
-      MongoConfig("mongodb://localhost", None).accessedResource === None
+      MongoConfig("mongodb://localhost", None, None).accessedResource === None
     }
     "for db provided is Some(Database(_))" >> {
-      MongoConfig("mongodb://localhost/db", None).accessedResource === Some(Database("db"))
+      MongoConfig("mongodb://localhost/db", None, None).accessedResource === Some(Database("db"))
     }
     "for collection provided is Some(Collection(_, _))" >> {
-      MongoConfig("mongodb://localhost/db.coll", None).accessedResource === Some(Collection(Database("db"), "coll"))
+      MongoConfig("mongodb://localhost/db.coll", None, None).accessedResource === Some(Collection(Database("db"), "coll"))
+    }
+  }
+
+  "disabled pushdown" >> {
+    "true provided" >> {
+      val input = Json.obj(
+        "connectionString" -> jString("mongodb://user:password@anyhost:1234"),
+        "resultBatchSizeBytes" -> jNumber(128),
+        "disablePushdown" -> jBool(true))
+      input.as[MongoConfig].toEither === Right(MongoConfig("mongodb://user:password@anyhost:1234", Some(128), Some(true)))
+    }
+    "false provided" >> {
+      val input = Json.obj(
+        "connectionString" -> jString("mongodb://user:password@anyhost:1234"),
+        "disablePushdown" -> jBool(false))
+      input.as[MongoConfig].toEither === Right(MongoConfig("mongodb://user:password@anyhost:1234", None, Some(false)))
+    }
+    "omitted" >> {
+      val input = Json.obj("connectionString" -> jString("mongodb://user:password@anyhost:1234"))
+      input.as[MongoConfig].toEither === Right(MongoConfig("mongodb://user:password@anyhost:1234", None, None))
     }
   }
 
   "json codec" >> {
     "lawful" >> prop { params: (String, Option[Int])  =>
-      CodecJson.codecLaw(MongoConfig.codecMongoConfig)(MongoConfig(params._1, params._2))
+      CodecJson.codecLaw(MongoConfig.codecMongoConfig)(MongoConfig(params._1, params._2, None))
     }
   }
 }

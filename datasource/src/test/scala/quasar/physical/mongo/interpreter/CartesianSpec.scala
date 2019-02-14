@@ -22,7 +22,6 @@ import org.specs2.mutable.Specification
 
 import quasar.api.table.ColumnType
 import quasar.common.{CPath, CPathField}
-import quasar.physical.mongo.MongoExpression
 import quasar.physical.mongo.{MongoInterpreter, Version, Aggregator, MongoExpression => E}
 import quasar.{ScalarStage, IdStatus}
 

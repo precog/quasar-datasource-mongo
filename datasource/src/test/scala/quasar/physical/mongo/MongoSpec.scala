@@ -46,11 +46,11 @@ class MongoSpec extends EffectfulQSpec[IO] {
 
   "can't create client from incorrect connection string" >> {
     "for incorrect protocol" >> {
-      Mongo[IO](MongoConfig("http://localhost", Some(128))).unsafeRunSync() must throwA[java.lang.IllegalArgumentException]
+      Mongo[IO](MongoConfig("http://localhost", Some(128), None)).unsafeRunSync() must throwA[java.lang.IllegalArgumentException]
     }
 
     "for unreachable config" >> {
-      Mongo[IO](MongoConfig("mongodb://unreachable", Some(128))).unsafeRunSync() must throwA[MongoTimeoutException]
+      Mongo[IO](MongoConfig("mongodb://unreachable", Some(128), None)).unsafeRunSync() must throwA[MongoTimeoutException]
     }
   }
 
@@ -162,25 +162,25 @@ object MongoSpec {
   val bbConnectionString: String = s"mongodb://bUser:bPassword@${host}:${port}/B.b"
 
   def mkMongo: IO[Disposable[IO, Mongo[IO]]] =
-    Mongo[IO](MongoConfig(connectionString, None))
+    Mongo[IO](MongoConfig(connectionString, None, None))
 
   def mkAMongo: IO[Disposable[IO, Mongo[IO]]] =
-    Mongo[IO](MongoConfig(aConnectionString, None))
+    Mongo[IO](MongoConfig(aConnectionString, None, None))
 
   def mkInvalidAMongo: IO[Disposable[IO, Mongo[IO]]] =
-    Mongo[IO](MongoConfig(invalidAConnectionString, None))
+    Mongo[IO](MongoConfig(invalidAConnectionString, None, None))
 
   // create an invalid Mongo to test error scenarios, bypassing the ping check that's done in Mongo.apply
   def mkMongoInvalidPort: IO[Disposable[IO, Mongo[IO]]] =
     for {
-      client <- Mongo.mkClient[IO](MongoConfig(connectionStringInvalidPort, None))
+      client <- Mongo.mkClient[IO](MongoConfig(connectionStringInvalidPort, None, None))
       interpreter = new MongoInterpreter(Version(0, 0, 0), "redundant")
-    } yield Disposable(new Mongo[IO](client, Mongo.DefaultBsonBatch, interpreter, None), Mongo.close[IO](client))
+    } yield Disposable(new Mongo[IO](client, Mongo.DefaultBsonBatch, false, interpreter, None), Mongo.close[IO](client))
 
   def mkBMongo: IO[Disposable[IO, Mongo[IO]]] =
-    Mongo[IO](MongoConfig(bConnectionString, None))
+    Mongo[IO](MongoConfig(bConnectionString, None, None))
   def mkBBMongo: IO[Disposable[IO, Mongo[IO]]] =
-    Mongo[IO](MongoConfig(bbConnectionString, None))
+    Mongo[IO](MongoConfig(bbConnectionString, None, None))
 
 
   def incorrectCollections: List[Collection] = {

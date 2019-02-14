@@ -21,7 +21,6 @@ import slamdata.Predef._
 import org.specs2.mutable.Specification
 import org.specs2.ScalaCheck
 
-import quasar.{IdStatus, ScalarStages, ScalarStage}
 import quasar.physical.mongo.{Version, Aggregator, MongoExpression => E}
 
 class WrapSpec extends Specification with ScalaCheck {
