@@ -90,17 +90,25 @@ object Mask {
     val typeStrings: List[String] = tree.types.toList flatMap parseTypeStrings
     val typeExprs: List[MongoExpression] = typeStrings map E.String
     val eqExprs: List[E.Object] = typeExprs map (x => equal(typeExpr(proj), x))
-    val listExprs: List[MongoExpression] = tree.list.toList.sortBy(_._1) map {
-      case (i, child) => typeTreeFilters(undefined, proj +/ E.index(i), child)
-    }
-    val objExprs: List[MongoExpression] = tree.obj.toList map {
-      case (key, child) => typeTreeFilters(undefined, proj +/ E.key(key), child)
-    }
+    val listExprs: List[MongoExpression] =
+      if (tree.types.contains(ColumnType.Array)) List()
+      else tree.list.toList.sortBy(_._1) map {
+        case (i, child) => typeTreeFilters(undefined, proj +/ E.index(i), child)
+      }
+    val objExprs: List[MongoExpression] =
+      if (tree.types.contains(ColumnType.Object)) List()
+      else tree.obj.toList map {
+        case (key, child) => typeTreeFilters(undefined, proj +/ E.key(key), child)
+      }
     or(eqExprs ++ listExprs ++ objExprs)
   }
 
   @SuppressWarnings(Array("org.wartremover.warts.Recursion"))
-  private def typeTreeToProjectObject(undefined: E.Projection, proj: E.Projection, tree: TypeTree): MongoExpression = {
+  private def typeTreeToProjectObject(
+      undefined: E.Projection,
+      proj: E.Projection,
+      tree: TypeTree)
+      : MongoExpression = {
     import E.helpers._
 
     lazy val obj: MongoExpression = {
@@ -120,15 +128,28 @@ object Mask {
 
     def arrayOr(expr: MongoExpression): MongoExpression =
       if (tree.types.contains(ColumnType.Array) || tree.list.isEmpty) expr
-      else array
+      else cond(isArray(proj), array, expr)
 
     def objectOr(expr: MongoExpression): MongoExpression =
       if (tree.types.contains(ColumnType.Object) || tree.obj.isEmpty) expr
-      else obj
+      else cond(isObject(proj), obj, expr)
+
+    def projectionOr(expr: MongoExpression): MongoExpression =
+      if (tree.types.isEmpty) expr else proj
 
     if (proj === E.Projection()) obj
-    else if(isEmpty(tree)) undefined
-    else cond(typeTreeFilters(undefined, proj, tree), objectOr(arrayOr(proj)), undefined)
+    else
+      // we need double check to exclude empty objects and other redundant stuff
+      cond(
+        // At first we filter that there is anything in this or children
+        typeTreeFilters(undefined, proj, tree),
+        // and if so, we look if it's nested array
+        arrayOr(
+          // or nested object
+          objectOr(
+            // or at least something
+            projectionOr(undefined))),
+        undefined)
   }
 
   def apply(
@@ -137,12 +158,14 @@ object Mask {
       masks: Map[CPath, Set[ColumnType]])
       : Option[List[Aggregator]] = {
 
+    val undefinedKey = uniqueKey.concat("_non_existent_field")
+
     if (version < Version.$type) None
-    else if (masks.isEmpty) Some(List(Aggregator.filter(E.Object(uniqueKey -> E.Bool(false)))))
+    else if (masks.isEmpty) Some(List(Aggregator.filter(E.Object(undefinedKey -> E.Bool(false)))))
     else masksToTypeTree(E.key(uniqueKey), masks) map { tree =>
       val projectObject =
         typeTreeToProjectObject(
-          E.key(uniqueKey.concat("_non_existent_field")),
+          E.key(undefinedKey),
           E.Projection(),
           tree)
       List(Aggregator.project(projectObject), Aggregator.notNull(uniqueKey))

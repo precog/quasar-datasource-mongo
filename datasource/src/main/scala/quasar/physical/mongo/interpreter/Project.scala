@@ -33,13 +33,8 @@ object Project {
       path: CPath)
       : Option[List[Aggregator]] = {
 
-    def filterGuard(prj: E.Projection): Boolean = {
-      val hasNotIx: Boolean = prj.steps.toList.forall(E.isField)
-      version >= (if (hasNotIx) Version.zero else Version.$arrayElemAt) // Not sure if $let works for < 2.0
-    }
-
     E.cpathToProjection(path) flatMap { (fld: E.Projection) =>
-      if (!filterGuard(fld)) None else Some {
+      if (fld.minVersion > version) None else Some {
         val tmpKey =
           uniqueKey.concat("_project")
         val projection =

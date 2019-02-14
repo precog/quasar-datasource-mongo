@@ -74,6 +74,10 @@ object MongoExpression {
       case hd :: tail => tail.foldLeft (keyPart(hd)) { (acc, x) => acc ++ "." ++ keyPart(x) }
     }
 
+    def hasOnlyFields: Boolean = steps.toList.forall(isField)
+
+    def minVersion: Version = if (hasOnlyFields) Version.zero else Version.$arrayElemAt
+
     private def levelString(ix: SInt): SString =
       s"level_${ix.toString}"
 
@@ -154,7 +158,7 @@ object MongoExpression {
       }
       new BsonDocument(elements.asJava)
     }
-    def +(obj: Object): Object = Object((this.fields.toList ++ obj.fields.toList):_*)
+    def +(obj: Object): Object = Object((fields ++ obj.fields):_*)
   }
 
   final case class Bool(b: Boolean) extends MongoExpression {

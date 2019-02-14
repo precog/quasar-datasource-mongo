@@ -20,7 +20,6 @@ import slamdata.Predef._
 
 import cats.syntax.order._
 
-
 import quasar.api.table.ColumnType
 import quasar.physical.mongo.MongoExpression
 import quasar.physical.mongo.{Aggregator, Version, MongoExpression => E}
@@ -36,10 +35,12 @@ object Pivot {
     case ColumnType.Object => "object"
   }
 
+  // input to a `Pivot` is guaranteed to be `Mask`ed with the appropriate type. i.e.
+  // there will always be, effectively, `Mask(. -> Object), Pivot(_, Object)`.
   def toArray(key: String, projection: E.Projection, p: ColumnType.Vector): Aggregator = {
     val refined: MongoExpression = p match {
       case ColumnType.Array => projection
-      case ColumnType.Object => cond(isObject(projection), E.Object("$objectToArray" -> projection), E.Array())
+      case ColumnType.Object => E.Object("$objectToArray" -> projection)
     }
     Aggregator.project(E.Object(key -> refined))
   }
@@ -64,7 +65,7 @@ object Pivot {
       vectorType: ColumnType.Vector)
       : Option[List[Aggregator]] = {
 
-    if ((version < Version.$objectToArray && vectorType === ColumnType.Object) || version < Version.$type) None
+    if ((version < Version.$objectToArray && vectorType === ColumnType.Object) || version < Version.$unwind) None
     else Some {
       val projection =
         E.key(uniqueKey)

@@ -22,6 +22,9 @@ import cats.kernel.Order
 import cats.syntax.eq._
 import cats.instances.int._
 
+import org.scalacheck._
+import Arbitrary._
+
 final case class Version(major: Int, minor: Int, patch: Int)
 
 object Version {
@@ -39,8 +42,15 @@ object Version {
     }
   }
 
+  implicit def arbitraryVersion: Arbitrary[Version] = Arbitrary (for {
+    a <- arbitrary[Int]
+    b <- arbitrary[Int]
+    c <- arbitrary[Int]
+  } yield Version(a, b, c))
+
   val zero: Version = Version(0, 0, 0)
   val $type: Version = Version(3, 4, 0)
   val $objectToArray: Version = Version(3, 4, 4)
   val $arrayElemAt: Version = Version(3, 2, 0)
+  val $unwind: Version = Version(3, 2, 0) // we use includeArrayIndices added in 3.2.0
 }

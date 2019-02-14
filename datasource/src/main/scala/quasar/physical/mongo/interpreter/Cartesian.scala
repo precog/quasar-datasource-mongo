@@ -37,7 +37,8 @@ object Cartesian {
       interpreter: Interpreter)
       : Option[List[Aggregator]] = {
 
-    if (cartouches.isEmpty) Some(List(Aggregator.filter(E.Object(uniqueKey -> E.Bool(false)))))
+    val undefinedKey = uniqueKey.concat("_cartesian_empty")
+    if (cartouches.isEmpty) Some(List(Aggregator.filter(E.Object(undefinedKey -> E.Bool(false)))))
     else {
       val cartoucheList = cartouches.toList
 
