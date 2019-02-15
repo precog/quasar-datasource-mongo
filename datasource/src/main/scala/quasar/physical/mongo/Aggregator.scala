@@ -23,6 +23,7 @@ import monocle.Prism
 import org.mongodb.scala._
 
 import quasar.physical.mongo.{MongoExpression => E}
+import quasar.{RenderTree, NonTerminal, Terminal}, RenderTree.ops._
 
 trait Aggregator {
   def toDocument: Document
@@ -70,4 +71,11 @@ object Aggregator {
     Prism.partial[Aggregator, MongoExpression] {
       case Project(obj) => obj
     } (x => Project(x))
+
+  implicit val renderTreeAggregator: RenderTree[Aggregator] = RenderTree.make {
+    case Project(obj) => NonTerminal(List("Project"), None, List((obj: MongoExpression).render))
+    case Unwind(path, arrayIndex) => NonTerminal(List("Unwind"), Some(arrayIndex), List((path: MongoExpression).render))
+    case Filter(obj) => NonTerminal(List("Project"), None, List((obj: MongoExpression).render))
+    case NotNull(str) => Terminal(List("NotNull"), Some(str))
+  }
 }

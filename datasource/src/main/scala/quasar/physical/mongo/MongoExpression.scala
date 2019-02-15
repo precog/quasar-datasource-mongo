@@ -18,6 +18,7 @@ package quasar.physical.mongo
 
 import slamdata.Predef._
 
+import cats.Show
 import cats.kernel.Eq
 import cats.syntax.eq._
 import cats.syntax.foldable._
@@ -31,6 +32,9 @@ import org.bson._
 import scala.collection.JavaConverters._
 
 import quasar.common.{CPath, CPathField, CPathIndex}
+import quasar.{RenderTree, NonTerminal, Terminal}, RenderTree.ops._
+
+import shims._
 
 trait MongoExpression {
   def toBsonValue: BsonValue
@@ -56,6 +60,11 @@ object MongoExpression {
         }
       }
     }
+
+    implicit val showProjectionStep: Show[ProjectionStep] =
+      Show.fromToString
+    implicit val renderTreeProjectionStep: RenderTree[ProjectionStep] =
+      RenderTree.fromShowAsType("ProjectionStep")
   }
 
   def isField(step: ProjectionStep): Boolean = step match {
@@ -214,5 +223,18 @@ object MongoExpression {
 
     def typeExpr(expr: MongoExpression): Object =
       Object("$type" -> expr)
+  }
+
+  implicit val renderTreeMongoExpression: RenderTree[MongoExpression] = RenderTree.make {
+    case Projection(flds @ _*) => NonTerminal(List("Projection"), None, flds.toList map (_.render))
+    case String(s) => Terminal(List("String"), Some(s))
+    case Int(i) => Terminal(List("Int"), Some(i.toString))
+    case Null => Terminal(List("Null"), None)
+    case Bool(b) => Terminal(List("Bool"), Some(b.toString))
+    case Array(flds @ _*) => NonTerminal(List("Array"), None, flds.toList map (_.render))
+    case Object(flds @ _*) => NonTerminal(List("Object"), None, flds.toList map (_.render))
+    case Let(vars, in) => NonTerminal(List("Let"), None, List(
+      NonTerminal(List("vars"), None, List((vars: MongoExpression).render)),
+      NonTerminal(List("in"), None, List(in.render))))
   }
 }
