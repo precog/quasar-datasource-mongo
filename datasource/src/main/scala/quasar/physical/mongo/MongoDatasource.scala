@@ -55,7 +55,7 @@ class MongoDataSource[F[_]: ConcurrentEffect: ContextShift: MonadResourceErr: Ti
         case Some(collection@Collection(_, _)) => mongo.findAll(collection)
       }
     }
-    fStream.map(stream => QueryResult.parsed(qdataDecoder, stream, iRead.instructions))
+    fStream.map(stream => QueryResult.parsed(qdataDecoder, stream, iRead.stages))
   }
 
   override def pathIsResource(path: ResourcePath): F[Boolean] = path match {

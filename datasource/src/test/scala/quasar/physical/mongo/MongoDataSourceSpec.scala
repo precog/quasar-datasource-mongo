@@ -26,6 +26,7 @@ import org.bson._
 import org.specs2.matcher.MatchResult
 import org.specs2.specification.core._
 
+import quasar.{IdStatus, ScalarStages}
 import quasar.api.resource.{ResourceName, ResourcePath, ResourcePathType}
 import quasar.connector.{QueryResult, ResourceError}
 import quasar.physical.mongo.MongoResource.Collection
@@ -44,7 +45,7 @@ class MongoDataSourceSpec extends EffectfulQSpec[IO] {
 
   step(MongoSpec.setupDB)
 
-  private def iRead[A](path: A): InterpretedRead[A] = InterpretedRead(path, List())
+  private def iRead[A](path: A): InterpretedRead[A] = InterpretedRead(path, ScalarStages(IdStatus.ExcludeId, List()))
 
   def connFailed[A]: PartialFunction[Either[Throwable, A], MatchResult[Any]] = {
     case Left(t) => ResourceError.throwableP.getOption(t) must beLike {
