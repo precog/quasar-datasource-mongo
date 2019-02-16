@@ -40,6 +40,7 @@ lazy val core = project
       "io.netty"                   %  "netty-all"                  % nettyVersion,
 
       "com.slamdata"               %% "quasar-foundation"          % quasarVersion % Test classifier "tests",
+      "com.slamdata"               %% "quasar-frontend"            % quasarVersion % Test classifier "tests",
       "org.slf4j"                  %  "slf4j-log4j12"              % slf4jVersion % Test,
       "org.specs2"                 %% "specs2-core"                % specsVersion % Test,
       "org.specs2"                 %% "specs2-scalaz"              % specsVersion % Test,

@@ -47,15 +47,18 @@ class MongoDataSource[F[_]: ConcurrentEffect: ContextShift: MonadResourceErr: Ti
     val errored =
       MonadResourceErr.raiseError(ResourceError.pathNotFound(path))
 
-    val fStream = path match {
+    val fStreamPair = path match {
       case ResourcePath.Root => errored
       case ResourcePath.Leaf(file) => MongoResource.ofFile(file) match {
         case None => errored
         case Some(Database(_)) => errored
-        case Some(collection@Collection(_, _)) => mongo.findAll(collection)
+        case Some(collection@Collection(_, _)) =>
+          mongo.evaluate(collection, iRead.stages)
       }
     }
-    fStream.map(stream => QueryResult.parsed(qdataDecoder, stream, iRead.instructions))
+    fStreamPair map {
+      case (insts, stream) => QueryResult.parsed(qdataDecoder, stream, insts)
+    }
   }
 
   override def pathIsResource(path: ResourcePath): F[Boolean] = path match {
