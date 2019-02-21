@@ -22,6 +22,8 @@ import cats.kernel.Order
 import cats.syntax.eq._
 import cats.instances.int._
 
+import scalaz.{Order => Zorder, Ordering}
+
 import org.scalacheck._
 import Arbitrary._
 
@@ -41,12 +43,19 @@ object Version {
       }
     }
   }
+  // shims are very slow in functors
+  implicit val zorderVersion: Zorder[Version] = new Zorder[Version] {
+    def order(a: Version, b: Version) = {
+      Ordering.fromInt(orderVersion.compare(a, b))
+    }
+  }
 
   implicit def arbitraryVersion: Arbitrary[Version] = Arbitrary (for {
     a <- arbitrary[Int]
     b <- arbitrary[Int]
     c <- arbitrary[Int]
   } yield Version(a, b, c))
+
 
   val zero: Version = Version(0, 0, 0)
   val $type: Version = Version(3, 4, 0)

@@ -164,6 +164,9 @@ class Mongo[F[_]: MonadResourceErr : ConcurrentEffect] private[mongo](
   def aggregate(collection: Collection, aggs: List[Aggregator]): F[Stream[F, BsonValue]] =
     withCollectionExists(collection, getCollection(collection).aggregate[BsonValue](aggs map (_.toDocument)))
 
+  def aggregate0(collection: Collection, aggs: List[BsonDocument]): F[Stream[F, BsonValue]] =
+    withCollectionExists(collection, getCollection(collection).aggregate[BsonValue](aggs))
+
   def evaluate(
       collection: Collection,
       stages: ScalarStages)
@@ -173,10 +176,13 @@ class Mongo[F[_]: MonadResourceErr : ConcurrentEffect] private[mongo](
 
     if (ScalarStages.Id === stages || pushdownDisabled) fallback
     else {
-      val result = interpreter.interpret(stages)
-      if (result.aggregators.isEmpty) fallback
+//      val result = interpreter.interpret(stages)
+      val result = interpreter.interpret0(stages)
+//      if (result.aggregators.isEmpty) fallback
+      if (result.docs.isEmpty) fallback
       else {
-        val aggregated = aggregate(collection, result.aggregators)
+//        val aggregated = aggregate(collection, result.aggregators)
+        val aggregated = aggregate0(collection, result.docs)
         val newStages = ScalarStages(IdStatus.ExcludeId, result.stages)
         val parsed = aggregated map (x => (newStages, x map interpreter.mapper))
         // versioning last stand

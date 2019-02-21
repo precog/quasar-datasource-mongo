@@ -20,16 +20,27 @@ import slamdata.Predef._
 
 import cats.effect.Sync
 import cats.syntax.functor._
+import cats.syntax.foldable._
+import cats.instances.option._
+import cats.instances.list._
 
-import org.bson.BsonValue
+import org.bson.{BsonValue, BsonDocument}
 
-import quasar.{ScalarStage, ScalarStages}
+import matryoshka.birecursiveIso
+import matryoshka.data.Fix
+
+import quasar.{ScalarStage, ScalarStages, RenderTree}, RenderTree._, RenderTree.ops._
 import quasar.IdStatus
 import quasar.physical.mongo.interpreter._
+import quasar.physical.mongo.{Expression, Optics, CustomPipeline, MongoPipeline, Pipeline, Projection, Step, Field, Index}, Expression._
 
 final case class Interpretation(
   stages: List[ScalarStage],
   aggregators: List[Aggregator])
+
+final case class Interpretation0(
+  stages: List[ScalarStage],
+  docs: List[BsonDocument])
 
 object Interpretation {
   def initial(inst: List[ScalarStage]): Interpretation = Interpretation(inst, List())
@@ -37,8 +48,10 @@ object Interpretation {
 
 trait Interpreter {
   def interpret(stages: ScalarStages): Interpretation
+  def interpret0(stages: ScalarStages): Interpretation0
   def refineInterpretation(key: String, interpretation: Interpretation): Interpretation
   def mapper(x: BsonValue): BsonValue
+  def interpretStep(key: String, instruction: ScalarStage): Option[List[Pipeline[Fix[Projected]]]]
 }
 
 class MongoInterpreter(version: Version, uniqueKey: String) extends Interpreter {
@@ -60,12 +73,40 @@ class MongoInterpreter(version: Version, uniqueKey: String) extends Interpreter 
   def refineInterpretation(key: String, interpretation: Interpretation): Interpretation =
     refineInterpretationImpl(key, interpretation)
 
+  @scala.annotation.tailrec
+  private def refineInterpretation0Impl(key: String, interpretation: Interpretation0): Interpretation0 =
+    interpretation.stages match {
+      case List() => interpretation
+      case hd :: tail =>
+        val o = interpretStep(key, hd)
+        println(o map (_ map (_.render.shows)))
+        interpretStep(key, hd) flatMap (Expression.compilePipeline[Fix](version, _)) match {
+        case None => interpretation
+        case Some(docs) => refineInterpretation0Impl(key, Interpretation0(tail, interpretation.docs ++ docs))
+      }
+    }
+
+  def refineInterpretation0(key: String, interpretation: Interpretation0): Interpretation0 =
+    refineInterpretation0Impl(key, interpretation)
+
   private def refineStep(key: String, instruction: ScalarStage): Option[List[Aggregator]] = instruction match {
     case ScalarStage.Wrap(name) => Wrap(key, version, name)
     case ScalarStage.Mask(masks) => Mask(key, version, masks)
     case ScalarStage.Pivot(status, structure) => Pivot(key, version, status, structure)
     case ScalarStage.Project(path) => Project(key, version, path)
     case ScalarStage.Cartesian(cartouches) => Cartesian(key, version, cartouches, this)
+  }
+
+  import matryoshka.birecursiveIso
+  import matryoshka.data.Fix
+  import quasar.physical.mongo.{Expression, Optics, CustomPipeline, MongoPipeline, Pipeline, Projection, Step, Field, Index}, Expression._
+
+  def interpretStep(key: String, instruction: ScalarStage): Option[List[Pipeline[Fix[Projected]]]] = instruction match {
+    case ScalarStage.Wrap(name) => Wrap.apply0(key, name)
+    case ScalarStage.Mask(masks) => Mask.apply0(key, masks)
+    case ScalarStage.Pivot(status, structure) => Pivot.apply0(key, status, structure)
+    case ScalarStage.Project(path) => Project.apply0(key, path)
+    case ScalarStage.Cartesian(cartouches) => Cartesian.apply0(key, cartouches, this)
   }
 
   private def initialAggregators(idStatus: IdStatus): Aggregator = idStatus match {
@@ -80,8 +121,26 @@ class MongoInterpreter(version: Version, uniqueKey: String) extends Interpreter 
       "_id" -> E.Int(0)))
   }
 
+  val O = Optics.full(birecursiveIso[Fix[Projected], Projected].reverse.asPrism)
+  private def initialProjection(idStatus: IdStatus): Pipeline[Fix[Projected]] = idStatus match {
+    case IdStatus.IdOnly => Pipeline.$project(Map(
+      uniqueKey -> O.key("_id"),
+      "_id" -> O.int(0)))
+    case IdStatus.ExcludeId => Pipeline.$project(Map(
+      uniqueKey -> O.steps(List()),
+      "_id" -> O.int(0)))
+    case IdStatus.IncludeId => Pipeline.$project(Map(
+      uniqueKey -> O.array(List(O.key("_id"), O.steps(List()))),
+      "_id" -> O.int(0)))
+  }
+
   def interpret(stages: ScalarStages): Interpretation =
     refineInterpretation(uniqueKey, Interpretation(stages.stages, List(initialAggregators(stages.idStatus))))
+
+  def interpret0(stages: ScalarStages): Interpretation0 = {
+    val initialDocs = compilePipe[Fix](version, initialProjection(stages.idStatus)) foldMap (List(_))
+    refineInterpretation0(uniqueKey, Interpretation0(stages.stages, initialDocs))
+  }
 }
 
 object MongoInterpreter {

@@ -86,4 +86,40 @@ object Pivot {
       List(toArray(unwindKey, projection, vectorType), unwind, setProjection, Aggregator.notNull(uniqueKey))
     }
   }
+  import matryoshka.birecursiveIso
+  import matryoshka.data.Fix
+  import quasar.physical.mongo.{Expression, Optics, CustomPipeline, MongoPipeline, Pipeline, Projection}, Expression._
+  def apply0(uniqueKey: String, status: IdStatus, vectorType: ColumnType.Vector): Option[List[Pipeline[Fix[Projected]]]] = {
+    val O = Optics.full(birecursiveIso[Fix[Projected], Projected].reverse.asPrism)
+    val unwindKey = uniqueKey.concat("_unwind")
+    val indexKey = uniqueKey.concat("_unwind_index")
+    val unwind = Pipeline.$unwind(unwindKey, indexKey)
+
+    val valueToSet = vectorType match {
+      case ColumnType.Array => status match {
+        case IdStatus.IdOnly => O.key(indexKey)
+        case IdStatus.ExcludeId => O.key(unwindKey)
+        case IdStatus.IncludeId => O.array(List(O.key(indexKey), O.key(unwindKey)))
+      }
+      case ColumnType.Object => status match {
+        case IdStatus.IdOnly => O.projection(Projection.key(unwindKey) + Projection.key("k"))
+        case IdStatus.ExcludeId => O.projection(Projection.key(unwindKey) + Projection.key("v"))
+        case IdStatus.IncludeId =>
+          O.array(List(
+            O.projection(Projection.key(unwindKey) + Projection.key("k")),
+            O.projection(Projection.key(unwindKey) + Projection.key("v"))))
+      }
+    }
+
+    val setProjection = Pipeline.$project(Map(uniqueKey -> valueToSet))
+
+    val toArray = vectorType match {
+      case ColumnType.Array =>
+        List()
+      case ColumnType.Object =>
+        List(Pipeline.$project(Map(unwindKey -> O.$objectToArray(O.key(uniqueKey)))))
+    }
+
+    Some(toArray ++ List(unwind, setProjection, CustomPipeline.NotNull(uniqueKey)))
+  }
 }

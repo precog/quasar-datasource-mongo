@@ -21,8 +21,12 @@ import slamdata.Predef._
 import cats.syntax.order._
 
 import quasar.common.CPath
-
 import quasar.physical.mongo.{Aggregator, Version, MongoExpression => E}
+
+import org.bson._
+
+import matryoshka.birecursiveIso
+import matryoshka.data.Fix
 
 import shims._
 
@@ -48,6 +52,19 @@ object Project {
         List(match_, move, project)
       }
     }
+  }
 
+  import quasar.physical.mongo.{Expression, Optics, CustomPipeline, MongoPipeline, Pipeline, Projection}, Expression._
+  def apply0(uniqueKey: String, path: CPath): Option[List[Pipeline[Fix[Projected]]]] = {
+    val O = Optics.full(birecursiveIso[Fix[Projected], Projected].reverse.asPrism)
+
+    Projection.fromCPath(path) map { (fld: Projection) =>
+      val tmpKey = uniqueKey.concat("_project")
+      val projection = Projection.key(uniqueKey) + fld
+      val match_ = Pipeline.$match(Map(projection.toKey -> O.$exists(O.bool(true))))
+      val move = Pipeline.$project(Map(tmpKey -> O.projection(projection)))
+      val project = Pipeline.$project(Map(uniqueKey -> O.key(tmpKey)))
+      List(match_, move, project)
+    }
   }
 }

@@ -18,6 +18,7 @@ package quasar.physical.mongo.interpreter
 
 import slamdata.Predef._
 
+import cats.syntax.foldable._
 import cats.syntax.traverse._
 import cats.instances.option._
 import cats.instances.list._
@@ -83,4 +84,56 @@ object Cartesian {
     }
   }
 
+  import matryoshka.birecursiveIso
+  import matryoshka.data.Fix
+  import quasar.physical.mongo.{Expression, Optics, CustomPipeline, MongoPipeline, Pipeline, Projection, Step, Field, Index}, Expression._
+  val O = Optics.full(birecursiveIso[Fix[Projected], Projected].reverse.asPrism)
+  def apply0(uniqueKey: String, cartouches: Map[CPathField, (CPathField, List[ScalarStage.Focused])], interpreter: Interpreter)
+      : Option[List[Pipeline[Fix[Projected]]]] = {
+
+    val undefinedKey = uniqueKey.concat("_cartesian_empty")
+    if (cartouches.isEmpty) Some(List(Pipeline.$match(Map(undefinedKey -> O.bool(true)))))
+    else {
+      val cartoucheList = cartouches.toList
+
+      val interpretations: Option[List[List[Pipeline[Fix[Projected]]]]] =
+        cartoucheList.traverse {
+          case (alias, (_, instructions)) =>
+            instructions foldMapM { x => interpreter.interpretStep(alias.name, x) }
+        }
+
+      interpretations map { is =>
+        val defaultPairs: List[(String, Fix[Projected])] =
+          cartoucheList map {
+            case (alias, _) => (alias.name, O.key(alias.name))
+          }
+
+        val defaultObject = Map(defaultPairs:_*)
+
+        val initialProjectionPairs = cartoucheList map {
+          case (alias, (field, instructions)) => alias.name -> O.projection(Projection.key(uniqueKey) + Projection.key(field.name))
+        }
+
+        val initialProjection =
+          Pipeline.$project(Map(initialProjectionPairs:_*))
+
+        val lastProjectionPairs = cartoucheList map {
+          case (alias, _) => alias.name -> O.key(alias.name)
+        }
+
+        val lastProjection =
+          Pipeline.$project(Map(uniqueKey -> O.obj(Map(lastProjectionPairs:_*))))
+
+        val instructions = is flatMap (_ flatMap {
+          case Pipeline.$project(mp) =>
+            List(Pipeline.$project(defaultObject ++ mp))
+          case CustomPipeline.NotNull(_) =>
+            List()
+          case x => List(x)
+        })
+
+        List(initialProjection) ++ instructions ++ List(lastProjection, CustomPipeline.NotNull(uniqueKey))
+      }
+    }
+  }
 }

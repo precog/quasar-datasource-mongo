@@ -27,14 +27,17 @@ import monocle._
 
 import org.bson._
 
-import quasar.{RenderTree, NonTerminal, Terminal}, RenderTree.ops._
+import quasar.common.{CPath, CPathField, CPathIndex}
+import quasar.{RenderTree, NonTerminal, Terminal, RenderTreeT}, RenderTree.ops._
+import quasar.fp.PrismNT
 
-import scalaz.{Applicative, Traverse, Scalaz, Const, Coproduct}
+import scalaz.{Equal, Applicative, Traverse, Scalaz, Const, Coproduct, :<:}
 import Scalaz._
+import scalaz.syntax._
+import scalaz.std._
 
 trait Core[A] extends Product with Serializable
 trait Op[A] extends Product with Serializable
-trait Projected[A] extends Product with Serializable
 
 object Core {
   final case class Array[A](arr: List[A]) extends Core[A]
@@ -211,12 +214,36 @@ trait Step extends Product with Serializable
 final case class Field(f: SString) extends Step
 final case class Index(i: SInt) extends Step
 
-final case class Projection(steps: List[Step]) extends Product with Serializable
+final case class Projection(steps: List[Step]) extends Product with Serializable {
+  private def keyPart(step: Step): SString = step match {
+    case Field(s) => s
+    case Index(i) => i.toString
+  }
+
+  def +(prj: Projection): Projection = Projection(steps ++ prj.steps)
+  def toKey: SString = steps match {
+    case List() => "$$ROOT"
+    case hd :: tail => tail.foldl(keyPart(hd)) { acc => x => acc.concat(".").concat(keyPart(x)) }
+  }
+}
 
 object Step {
   implicit val renderTree: RenderTree[Step] = RenderTree.make {
     case Field(s) => Terminal(List("Field"), Some(s))
     case Index(i) => Terminal(List("Index"), Some(i.toString))
+  }
+
+  implicit val equal: Equal[Step] = new Equal[Step] {
+    def equal(a: Step, b: Step): Boolean = a match {
+      case Field(s1) => b match {
+        case Field(s2) => s1 === s2
+        case Index(_) => false
+      }
+      case Index(i1) => b match {
+        case Index(i2) => i1 === i2
+        case Field(_) => false
+      }
+    }
   }
 }
 
@@ -224,43 +251,95 @@ object Projection {
   implicit val renderTree: RenderTree[Projection] = RenderTree.make { x =>
     NonTerminal(List("Projection"), None, x.steps map (_.render))
   }
+
+  implicit val equal: Equal[Projection] = new Equal[Projection] {
+    def equal(a: Projection, b: Projection): Boolean = a.steps === b.steps
+  }
+
+  def key(s: SString): Projection = Projection(List(Field(s)))
+  def index(i: SInt): Projection = Projection(List(Index(i)))
+  def fromCPath(cpath: CPath): Option[Projection] =
+    cpath.nodes.foldMapM {
+      case CPathField(str) => Some(List(Field(str)))
+      case CPathIndex(ix) => Some(List(Index(ix)))
+      case _ => None
+    } map (Projection(_))
+
 }
 
 object Optics {
-  class CoreOptics[A, O](val corePrism: Prism[O, Core[A]])
-      extends Core.Optics[A, O]
+  class CoreOptics[A, O, F[_]] private[Optics] (basePrism: Prism[O, F[A]])(implicit c: Core :<: F) extends {
+    val corePrism = basePrism composePrism PrismNT.inject[Core, F].asPrism[A]
+  } with Core.Optics[A, O]
 
-  class CoreOpOptics[A, O](val corePrism: Prism[O, Core[A]], val opPrism: Prism[O, Op[A]])
-      extends Core.Optics[A, O]
-      with Op.Optics[A, O]
+  class CoreOpOptics[A, O, F[_]] private[Optics] (basePrism: Prism[O, F[A]])(
+      implicit c: Core :<: F, o: Op :<: F) extends {
+    val corePrism = basePrism composePrism PrismNT.inject[Core, F].asPrism[A]
+    val opPrism = basePrism composePrism PrismNT.inject[Op, F].asPrism[A]
+  } with Core.Optics[A, O] with Op.Optics[A, O]
 
-  class FullOptics[A, O](
-      val corePrism: Prism[O, Core[A]],
-      val opPrism: Prism[O, Op[A]],
-      val prjPrism: Prism[O, Const[Projection, A]])
-      extends Core.Optics[A, O]
-      with Op.Optics[A, O] {
-
-    val _projection: Iso[Const[Projection, A], List[Step]] =
+  class FullOptics[A, O, F[_]] private[Optics] (basePrism: Prism[O, F[A]])(
+      implicit c: Core :<: F, o: Op :<: F, p: Const[Projection, ?] :<: F) extends {
+    val corePrism = basePrism composePrism PrismNT.inject[Core, F].asPrism[A]
+    val opPrism = basePrism composePrism PrismNT.inject[Op, F].asPrism[A]
+    val prjPrism = basePrism composePrism PrismNT.inject[Const[Projection, ?], F].asPrism[A]
+  }  with Core.Optics[A, O] with Op.Optics[A, O] {
+    val _steps: Iso[Const[Projection, A], List[Step]] =
       Iso[Const[Projection, A], List[Step]] {
         case Const(Projection(steps)) => steps
       } { steps => Const(Projection(steps)) }
 
-    val projection: Prism[O, List[Step]] =
+    val steps: Prism[O, List[Step]] =
+      prjPrism composeIso _steps
+
+    val _projection: Iso[Const[Projection, A], Projection] =
+      Iso[Const[Projection, A], Projection] {
+        case Const(p) => p
+      } { p => Const(p) }
+
+    val projection: Prism[O, Projection] =
       prjPrism composeIso _projection
+
+    val key: Prism[O, SString] =
+      steps composePrism {
+        Prism.partial[List[Step], SString] {
+          case Field(s) :: List() => s
+        } { s => List(Field(s)) }
+      }
+  }
+
+  def core[A, O, F[_]](basePrism: Prism[O, F[A]])(implicit c: Core :<: F): CoreOptics[A, O, F] =
+    new CoreOptics(basePrism)
+
+  def coreOp[A, O, F[_]](basePrism: Prism[O, F[A]])(implicit c: Core :<: F, o: Op :<: F): CoreOpOptics[A, O, F] =
+    new CoreOpOptics(basePrism)
+
+  def full[A, O, F[_]](basePrism: Prism[O, F[A]])(
+      implicit c: Core :<: F,
+      o: Op :<: F,
+      p: Const[Projection, ?] :<: F)
+      : FullOptics[A, O, F] = {
+    new FullOptics(basePrism)
   }
 }
 
 trait Pipeline[+A] extends Product with Serializable
+
+trait MongoPipeline[+A] extends Pipeline[A]
 object Pipeline {
-  final case class $project[A](obj: Map[SString, A]) extends Pipeline[A]
-  final case class $match[A](obj: Map[SString, A]) extends Pipeline[A]
-  final case class $unwind(path: SString, arrayIndex: SString) extends Pipeline[Nothing]
+  final case class $project[A](obj: Map[SString, A]) extends MongoPipeline[A]
+  final case class $match[A](obj: Map[SString, A]) extends MongoPipeline[A]
+  final case class $unwind(path: SString, arrayIndex: SString) extends MongoPipeline[Nothing]
+
+  implicit def renderTree[A: RenderTree]: RenderTree[Pipeline[A]] = RenderTree.make {
+    case $project(obj) => NonTerminal(List("$project"), None, obj.toList map (_.render))
+    case $match(obj) => NonTerminal(List("$match"), None, obj.toList map (_.render))
+    case $unwind(p, a) => NonTerminal(List("$unwind"), None, List(p.render, a.render))
+  }
 }
 
 trait CustomPipeline extends Pipeline[Nothing]
 object CustomPipeline {
-  final case object Erase extends CustomPipeline
   final case class NotNull(field: SString) extends CustomPipeline
 }
 
@@ -269,44 +348,82 @@ object Expression {
   import Pipeline._
   import Op._
   import Core._
-
   type CoreOp[A] = Coproduct[Op, Core, A]
   type Projected[A] = Coproduct[Const[Projection, ?], CoreOp, A]
 
-  import scalaz.Inject, Inject._
+  def pipeMinVersion[A](pipe: MongoPipeline[A]): Version = pipe match {
+    case $project(_) => Version.zero
+    case $match(_) => Version.zero
+    case $unwind(_, _) => Version.$unwind
+  }
 
-  @scala.annotation.tailrec
-  def pipelineObjects[T[_[_]]: BirecursiveT](pipeline: Pipeline[T[Projected]]): T[Projected] = {
-    def prism[A]: Prism[Projected[A], Core[A]] =
-      Prism((x: Projected[A]) => Inject[Core, Projected].prj(x))((x: Core[A]) => Inject[Core, Projected].inj(x))
-    val corePrism =
-      birecursiveIso[T[Projected], Projected].reverse composePrism prism[T[Projected]]
+  def opVersion[A](op: Op[A]): Version = op match {
+    case Let(_, _) => Version.zero
+    case Type(_) => Version.$type
+    case Eq(_) => Version.zero
+    case Or(_) => Version.zero
+    case Exists(_) => Version.zero
+    case Cond(_, _, _) => Version.zero
+    case ArrayElemAt(_, _) => Version.$arrayElemAt
+    case ObjectToArray(_) => Version.$objectToArray
+    case Ne(_) => Version.zero
+  }
 
-    val O = new Optics.CoreOptics(corePrism)
+  def compilePipeline[T[_[_]]: BirecursiveT](
+      version: Version,
+      pipes: List[Pipeline[T[Projected]]])
+      : Option[List[BsonDocument]] = {
+
+    pipes.foldMapM { x => compilePipe(version, x) map (List(_)) }
+  }
+
+  def compilePipe[T[_[_]]: BirecursiveT](version: Version, customPipe: Pipeline[T[Projected]]): Option[BsonDocument] = {
+    val pipe = eraseCustomPipeline(customPipe)
+    if (version < pipeMinVersion(pipe)) None
+    else {
+      def transformM(op: Op[T[Core]]): Option[Core[T[Core]]] = {
+        if (version < opVersion(op)) None
+        else Some(opsToCore[T](op))
+      }
+
+      optimizeOrs(compileProjections(pipelineObjects(pipe)))
+        .transCataM[Option, T[Core], Core] (_.run.fold(transformM, Some(_)))
+        .map(coreToBson[T](_))
+        .flatMap(mbBsonDocument)
+    }
+  }
+  val mbBsonDocument: BsonValue => Option[BsonDocument] = {
+    case x: BsonDocument => Some(x)
+    case _ => None
+  }
+
+  def eraseCustomPipeline[T[_[_]]: BirecursiveT](pipeline: Pipeline[T[Projected]]): MongoPipeline[T[Projected]] = {
+    val O = Optics.full(birecursiveIso[T[Projected], Projected].reverse.asPrism)
 
     pipeline match {
-      case Erase =>
-        pipelineObjects($match(Map("non_existent_field" -> O.array(List()))))
-      case NotNull(fld) =>
-        pipelineObjects($match(Map("non_existent_field" -> O.bool(true))))
+      case NotNull(fld) => $match(Map("non_existent_field" -> O.$ne(O.nil())))
+      case $project(obj) => $project(obj)
+      case $match(obj) => $match(obj)
+      case $unwind(a, i) => $unwind(a, i)
+    }
+  }
+
+  def pipelineObjects[T[_[_]]: BirecursiveT](pipeline: MongoPipeline[T[Projected]]): T[Projected] = {
+    val O = Optics.full(birecursiveIso[T[Projected], Projected].reverse.asPrism)
+    pipeline match {
       case $match(mp) =>
         O.obj(Map("$match" -> O.obj(mp)))
       case $project(mp) =>
         O.obj(Map("$project" -> O.obj(mp)))
       case $unwind(path, arrayIndex) =>
         O.obj(Map("$unwind" -> O.obj(Map(
-          "path" -> O.string(path),
-          "includeArrayIndex" -> O.string(arrayIndex),
+          "path" -> O.key(path),
+          "includeArrayIndex" -> O.key(arrayIndex),
           "preserveNullAndEmptyArrays" -> O.bool(true)))))
     }
   }
 
   def unfoldProjection[T[_[_]]: BirecursiveT](prj: Projection): T[CoreOp] = {
-    def coreInj[A] =
-      Prism((x: CoreOp[A]) => Inject[Core, CoreOp].prj(x))((x: Core[A]) => Inject[Core, CoreOp].inj(x))
-    def opInj[A] =
-      Prism((x: CoreOp[A]) => Inject[Op, CoreOp].prj(x))((x: Op[A]) => Inject[Op, CoreOp].inj(x))
-
     trait GrouppedSteps
     final case class IndexGroup(i: SInt) extends GrouppedSteps
     final case class FieldGroup(s: List[SString]) extends GrouppedSteps
@@ -327,7 +444,7 @@ object Expression {
 
     type Elem = (GrouppedSteps, SInt)
 
-    val O = new Optics.CoreOpOptics[List[Elem], CoreOp[List[Elem]]](coreInj, opInj)
+    val O = Optics.coreOp(Prism.id[CoreOp[List[Elem]]])
 
     val ψ: Coalgebra[CoreOp, List[Elem]] = {
       case List() =>
@@ -338,10 +455,10 @@ object Expression {
         case IndexedAccess(i) =>
           O.$arrayElemAt(tl, i)
         case IndexGroup(i) =>
-          val level = "level".concat(levelIx.toString)
+          val level = "level" concat levelIx.toString
           val varSteps: List[Elem] = (IndexedAccess(i), levelIx) :: tl
           val vars: Map[SString, List[Elem]] = Map(level -> varSteps)
-          val expSteps: GrouppedSteps = FieldGroup(List(level))
+          val expSteps: GrouppedSteps = FieldGroup(List("$" concat level))
           val exp = List((expSteps, 0))
           O.$let(vars, exp)
         case FieldGroup(steps) =>
@@ -361,9 +478,9 @@ object Expression {
     inp.transCata[T[CoreOp]](_.run.fold(τ, (x => x)))
   }
 
-  def compileOps[T[_[_]]: BirecursiveT](inp: T[CoreOp]): T[Core] = {
-    val O = new Optics.CoreOptics(birecursiveIso[T[Core], Core].reverse.asPrism)
-    def τ(inp: Op[T[Core]]): Core[T[Core]] = inp match {
+  def opsToCore[T[_[_]]: BirecursiveT](inp: Op[T[Core]]): Core[T[Core]] = {
+    val O = Optics.core(birecursiveIso[T[Core], Core].reverse.asPrism)
+    inp match {
       case Let(vars, in) => O._obj(Map("$let" -> O.obj(Map(
         "vars" -> O.obj(vars),
         "in" -> in))))
@@ -376,27 +493,32 @@ object Expression {
       case ObjectToArray(a) => O._obj(Map("$objectToArray" -> a))
       case ArrayElemAt(a, ix) => O._obj(Map("$arrayElemAt" -> O.array(List(a, O.int(ix)))))
     }
+  }
 
-    inp.transCata[T[Core]](_.run.fold(τ, (x => x)))
+  def compileOps[T[_[_]]: BirecursiveT](inp: T[CoreOp]): T[Core] = {
+    inp.transCata[T[Core]](_.run.fold(opsToCore[T], (x => x)))
   }
 
   def optimizeOrs[T[_[_]]: BirecursiveT](inp: T[CoreOp]): T[CoreOp] = {
-    val iso =
-      birecursiveIso[T[CoreOp], CoreOp].reverse
-    val coreInj =
-      Prism((x: CoreOp[T[CoreOp]]) => Inject[Core, CoreOp].prj(x))((x: Core[T[CoreOp]]) => Inject[Core, CoreOp].inj(x))
-    val opInj =
-      Prism((x: CoreOp[T[CoreOp]]) => Inject[Op, CoreOp].prj(x))((x: Op[T[CoreOp]]) => Inject[Op, CoreOp].inj(x))
+    def opPrismNT = PrismNT.inject[Op, CoreOp]
 
-    val O = new Optics.CoreOpOptics(
-      iso composePrism coreInj,
-      iso composePrism opInj)
+    val O = Optics.coreOp(birecursiveIso[T[CoreOp], CoreOp].reverse.asPrism)
 
+    val opList = opPrismNT.asPrism[List[T[CoreOp]]]
+
+    val ϕ: Algebra[CoreOp, List[T[CoreOp]]] = {
+      case opList(Or(lst)) => lst flatMap (x => x)
+      case x =>
+        // erase children, bubble coreop flatten list of list of functors embed functors into t
+        List(x map (a => List[T[CoreOp]]())) map (_.sequence) flatMap (x => x) map (_.embed)
+    }
+
+    val opT = opPrismNT.asPrism[T[CoreOp]]
     def τ(inp: CoreOp[T[CoreOp]]): CoreOp[T[CoreOp]] = inp match {
-      case opInj(Or(lst)) => lst match {
+      case opT(Or(lst)) => lst match {
         case a :: List() => a.project
         case List() => O.bool(false).project
-        case x => inp
+        case prjs => O.$or(O.$or(prjs).cata[List[T[CoreOp]]](ϕ)).project
       }
       case x => x
     }
@@ -425,4 +547,5 @@ object Expression {
     }
     inp.cata[BsonValue](ϕ)
   }
+
 }
