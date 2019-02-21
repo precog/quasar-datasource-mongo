@@ -20,6 +20,7 @@ import slamdata.Predef._
 
 import cats.effect.Sync
 import cats.syntax.functor._
+import cats.syntax.order._
 
 import org.bson.BsonValue
 
@@ -41,7 +42,7 @@ trait Interpreter {
   def mapper(x: BsonValue): BsonValue
 }
 
-class MongoInterpreter(version: Version, uniqueKey: String) extends Interpreter {
+class MongoInterpreter(version: Version, uniqueKey: String, pushdownLevel: PushdownLevel) extends Interpreter {
   private val E = MongoExpression
   def mapper(x: BsonValue): BsonValue =
     x.asDocument().get(uniqueKey)
@@ -61,11 +62,11 @@ class MongoInterpreter(version: Version, uniqueKey: String) extends Interpreter 
     refineInterpretationImpl(key, interpretation)
 
   private def refineStep(key: String, instruction: ScalarStage): Option[List[Aggregator]] = instruction match {
-    case ScalarStage.Wrap(name) => Wrap(key, version, name)
-    case ScalarStage.Mask(masks) => Mask(key, version, masks)
-    case ScalarStage.Pivot(status, structure) => Pivot(key, version, status, structure)
-    case ScalarStage.Project(path) => Project(key, version, path)
-    case ScalarStage.Cartesian(cartouches) => Cartesian(key, version, cartouches, this)
+    case ScalarStage.Wrap(name) => if (pushdownLevel < Light) None else  Wrap(key, version, name)
+    case ScalarStage.Mask(masks) => if (pushdownLevel < Light) None else Mask(key, version, masks)
+    case ScalarStage.Pivot(status, structure) => if (pushdownLevel < Light) None else Pivot(key, version, status, structure)
+    case ScalarStage.Project(path) => if (pushdownLevel < Light) None else Project(key, version, path)
+    case ScalarStage.Cartesian(cartouches) => if (pushdownLevel < Full) None else Cartesian(key, version, cartouches, this)
   }
 
   private def initialAggregators(idStatus: IdStatus): Aggregator = idStatus match {
@@ -85,6 +86,6 @@ class MongoInterpreter(version: Version, uniqueKey: String) extends Interpreter 
 }
 
 object MongoInterpreter {
-  def apply[F[_]: Sync](version: Version): F[MongoInterpreter] =
-    Sync[F].delay(java.util.UUID.randomUUID().toString) map (new MongoInterpreter(version, _))
+  def apply[F[_]: Sync](version: Version, pushdownLevel: PushdownLevel): F[MongoInterpreter] =
+    Sync[F].delay(java.util.UUID.randomUUID().toString) map (new MongoInterpreter(version, _, pushdownLevel))
 }

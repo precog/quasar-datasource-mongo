@@ -33,7 +33,6 @@ import quasar.connector.{MonadResourceErr, ResourceError}
 import quasar.physical.mongo.MongoResource.{Collection, Database}
 import quasar.{Disposable, IdStatus, ScalarStages}
 
-
 import org.bson.{Document => _, _}
 import com.mongodb.ConnectionString
 import org.mongodb.scala._
@@ -44,7 +43,7 @@ import shims._
 class Mongo[F[_]: MonadResourceErr : ConcurrentEffect] private[mongo](
     client: MongoClient,
     maxMemory: Int,
-    pushdownDisabled: Boolean,
+    pushdownLevel: PushdownLevel,
     val interpreter: Interpreter,
     val accessedResource: Option[MongoResource]) {
   import Mongo._
@@ -171,7 +170,7 @@ class Mongo[F[_]: MonadResourceErr : ConcurrentEffect] private[mongo](
 
     val fallback: F[(ScalarStages, Stream[F, BsonValue])] = findAll(collection) map (x => (stages, x))
 
-    if (ScalarStages.Id === stages || pushdownDisabled) fallback
+    if (ScalarStages.Id === stages || pushdownLevel === Disabled) fallback
     else {
       val result = interpreter.interpret(stages)
       if (result.aggregators.isEmpty) fallback
@@ -291,16 +290,16 @@ object Mongo {
       buildInfo(client) map { x =>
         getVersionString(x) map (_.split("\\.")) flatMap mkVersion getOrElse Version.zero
       }
-
+    val pushdownLevel = config.pushdownLevel getOrElse Full
     for {
       client <- mkClient(config)
       version <- getVersion(client)
-      interpreter <- MongoInterpreter(version)
+      interpreter <- MongoInterpreter(version, pushdownLevel)
     } yield Disposable(
       new Mongo[F](
         client,
         config.resultBatchSizeBytes.getOrElse(DefaultBsonBatch),
-        config.disablePushdown getOrElse false,
+        pushdownLevel,
         interpreter,
         config.accessedResource),
       close(client))
