@@ -26,7 +26,8 @@ object Wrap {
       version: Version,
       name: String)
       : Option[List[Aggregator]] =
-    Some {
+    if (name contains ".") None
+    else Some {
       val tmpKey = uniqueKey.concat("_wrap")
       List(
         Aggregator.project(E.Object(tmpKey -> E.Object(name -> E.key(uniqueKey)))),
