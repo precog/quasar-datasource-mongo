@@ -20,53 +20,9 @@ import slamdata.Predef._
 
 import argonaut._, Argonaut._
 
-import cats.kernel.Order
-
 import com.mongodb.ConnectionString
 
 import quasar.physical.mongo.MongoResource.{Database, Collection}
-
-trait PushdownLevel extends Product with Serializable
-final case object Disabled extends PushdownLevel
-final case object Light extends PushdownLevel
-final case object Full extends PushdownLevel
-
-object PushdownLevel {
-  implicit val orderPushdownLevel: Order[PushdownLevel] = new Order[PushdownLevel] {
-    def compare(a: PushdownLevel, b: PushdownLevel) = a match {
-      case Disabled => b match {
-        case Disabled => 0
-        case _ => -1
-      }
-      case Light => b match {
-        case Disabled => 1
-        case Light => 0
-        case Full => -1
-      }
-      case Full => b match {
-        case Full => 0
-        case _ => 1
-      }
-    }
-  }
-
-  implicit val encodePushdownLevel: EncodeJson[PushdownLevel] = new EncodeJson[PushdownLevel] {
-    def encode(p: PushdownLevel): Json = p match {
-      case Disabled => jString("disabled")
-      case Light => jString("light")
-      case Full => jString("full")
-    }
-  }
-  implicit val decodePushdownLevel: DecodeJson[PushdownLevel] = new DecodeJson[PushdownLevel] {
-    def decode(j: HCursor): DecodeResult[PushdownLevel] = j.as[String] flatMap {
-      case "disabled" => DecodeResult.ok(Disabled)
-      case "light" => DecodeResult.ok(Light)
-      case "full" => DecodeResult.ok(Full)
-      case _ => DecodeResult.fail("This is not PushdownLevel", CursorHistory(List()))
-    }
-  }
-
-}
 
 final case class MongoConfig(
     connectionString: String,
@@ -84,7 +40,6 @@ final case class MongoConfig(
 }
 
 object MongoConfig {
-
   implicit val codecMongoConfig: CodecJson[MongoConfig] =
     casecodec3(MongoConfig.apply, MongoConfig.unapply)(
       "connectionString",

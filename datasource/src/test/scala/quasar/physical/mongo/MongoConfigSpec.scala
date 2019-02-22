@@ -72,19 +72,22 @@ class MongoConfigSpec extends Specification with ScalaCheck {
         "connectionString" -> jString("mongodb://user:password@anyhost:1234"),
         "resultBatchSizeBytes" -> jNumber(128),
         "pushdownLevel" -> jString("full"))
-      input.as[MongoConfig].toEither === Right(MongoConfig("mongodb://user:password@anyhost:1234", Some(128), Some(Full)))
+      input.as[MongoConfig].toEither ===
+        Right(MongoConfig("mongodb://user:password@anyhost:1234", Some(128), Some(PushdownLevel.Full)))
     }
     "disabled provided" >> {
       val input = Json.obj(
         "connectionString" -> jString("mongodb://user:password@anyhost:1234"),
         "pushdownLevel" -> jString("disabled"))
-      input.as[MongoConfig].toEither === Right(MongoConfig("mongodb://user:password@anyhost:1234", None, Some(Disabled)))
+      input.as[MongoConfig].toEither ===
+        Right(MongoConfig("mongodb://user:password@anyhost:1234", None, Some(PushdownLevel.Disabled)))
     }
     "light provided" >> {
       val input = Json.obj(
         "connectionString" -> jString("mongodb://user:password@anyhost:1234"),
         "pushdownLevel" -> jString("light"))
-      input.as[MongoConfig].toEither === Right(MongoConfig("mongodb://user:password@anyhost:1234", None, Some(Light)))
+      input.as[MongoConfig].toEither ===
+        Right(MongoConfig("mongodb://user:password@anyhost:1234", None, Some(PushdownLevel.Light)))
     }
     "incorrect provided" >> {
       val input = Json.obj(

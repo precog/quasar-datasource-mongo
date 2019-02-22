@@ -21,14 +21,14 @@ import slamdata.Predef._
 import org.specs2.mutable.Specification
 import org.specs2.ScalaCheck
 
-import quasar.physical.mongo.{Version, Aggregator, MongoExpression => E}
+import quasar.physical.mongo.{Version, Aggregator, MongoExpression => E}, E.ProjectionStep.Field
 
 class WrapSpec extends Specification with ScalaCheck {
   "wrap interpreter produces two projects" >> prop { (wrapString: String, version: Version, rootKey: String) =>
     ((wrapString.length > 0) && (wrapString != "\u0000")) ==> {
-      val interpretation = Wrap(rootKey, version, wrapString)
+      val interpretation = Wrap(rootKey, version, Field(wrapString))
       interpretation must beLike {
-        case Some(Aggregator.project(E.Object(firstPair)) :: Aggregator.project(E.Object(secondPair)) :: List()) =>
+        case Aggregator.project(E.Object(firstPair)) :: Aggregator.project(E.Object(secondPair)) :: List() =>
           (secondPair._1 === rootKey) and
           (secondPair._2 === E.key(firstPair._1)) and
           (firstPair._2 === E.Object(wrapString -> E.key(rootKey)))
@@ -36,10 +36,10 @@ class WrapSpec extends Specification with ScalaCheck {
     }
   }
   "wrap example" >> {
-    val actual = Wrap("root", Version.zero, "wrapper")
-    val expected = Some(List(
+    val actual = Wrap("root", Version.zero, Field("wrapper"))
+    val expected = List(
       Aggregator.project(E.Object("root_wrap" -> E.Object("wrapper" -> E.key("root")))),
-      Aggregator.project(E.Object("root" -> E.key("root_wrap")))))
+      Aggregator.project(E.Object("root" -> E.key("root_wrap"))))
     actual === expected
   }
 }

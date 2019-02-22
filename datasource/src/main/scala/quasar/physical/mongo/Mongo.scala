@@ -170,7 +170,7 @@ class Mongo[F[_]: MonadResourceErr : ConcurrentEffect] private[mongo](
 
     val fallback: F[(ScalarStages, Stream[F, BsonValue])] = findAll(collection) map (x => (stages, x))
 
-    if (ScalarStages.Id === stages || pushdownLevel === Disabled) fallback
+    if (ScalarStages.Id === stages || pushdownLevel === PushdownLevel.Disabled) fallback
     else {
       val result = interpreter.interpret(stages)
       if (result.aggregators.isEmpty) fallback
@@ -290,7 +290,7 @@ object Mongo {
       buildInfo(client) map { x =>
         getVersionString(x) map (_.split("\\.")) flatMap mkVersion getOrElse Version.zero
       }
-    val pushdownLevel = config.pushdownLevel getOrElse Full
+    val pushdownLevel = config.pushdownLevel getOrElse PushdownLevel.Full
     for {
       client <- mkClient(config)
       version <- getVersion(client)

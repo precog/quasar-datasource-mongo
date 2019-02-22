@@ -22,14 +22,20 @@ import org.specs2.mutable.Specification
 
 import quasar.api.table.ColumnType
 import quasar.common.{CPath, CPathField}
-import quasar.physical.mongo.{MongoInterpreter, Version, Full, Aggregator, MongoExpression => E}
+import quasar.physical.mongo.{
+  MongoInterpreter,
+  Version,
+  Aggregator,
+  MongoExpression => E,
+  PushdownLevel }
 import quasar.{ScalarStage, IdStatus}
 
 class CartesianSpec extends Specification {
   import E.helpers._
   def evalCartesian(cartouches: Map[CPathField, (CPathField, List[ScalarStage.Focused])]): Option[List[Aggregator]] = {
-    val interpreter = new MongoInterpreter(Version.$objectToArray, "root", Full)
-    Cartesian("root", Version.$objectToArray, cartouches, interpreter)
+    val interpreter = new MongoInterpreter(Version.$objectToArray, "root", PushdownLevel.Full)
+    E.safeCartouches(cartouches) flatMap { x => Cartesian("root", Version.$objectToArray, x, interpreter) }
+
   }
   "empty cartesian should erase everything" >> {
     val actual = evalCartesian(Map.empty)

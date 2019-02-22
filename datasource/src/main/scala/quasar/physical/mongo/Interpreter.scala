@@ -62,11 +62,19 @@ class MongoInterpreter(version: Version, uniqueKey: String, pushdownLevel: Pushd
     refineInterpretationImpl(key, interpretation)
 
   private def refineStep(key: String, instruction: ScalarStage): Option[List[Aggregator]] = instruction match {
-    case ScalarStage.Wrap(name) => if (pushdownLevel < Light) None else  Wrap(key, version, name)
-    case ScalarStage.Mask(masks) => if (pushdownLevel < Light) None else Mask(key, version, masks)
-    case ScalarStage.Pivot(status, structure) => if (pushdownLevel < Light) None else Pivot(key, version, status, structure)
-    case ScalarStage.Project(path) => if (pushdownLevel < Light) None else Project(key, version, path)
-    case ScalarStage.Cartesian(cartouches) => if (pushdownLevel < Full) None else Cartesian(key, version, cartouches, this)
+    case ScalarStage.Wrap(name) =>
+      if (pushdownLevel < PushdownLevel.Light) None
+      else E.safeField(name) map { wrap => Wrap(key, version, wrap) }
+    case ScalarStage.Mask(masks) =>
+      if (pushdownLevel < PushdownLevel.Light) None else Mask(key, version, masks)
+    case ScalarStage.Pivot(status, structure) =>
+      if (pushdownLevel < PushdownLevel.Light) None else Pivot(key, version, status, structure)
+    case ScalarStage.Project(path) =>
+      if (pushdownLevel < PushdownLevel.Light) None else Project(key, version, path)
+    case ScalarStage.Cartesian(cartouches) =>
+      if (pushdownLevel < PushdownLevel.Full) None
+      else E.safeCartouches(cartouches) flatMap { x => Cartesian(key, version, x, this) }
+
   }
 
   private def initialAggregators(idStatus: IdStatus): Aggregator = idStatus match {
