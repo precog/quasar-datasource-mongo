@@ -20,7 +20,6 @@ import slamdata.Predef._
 
 import cats.Show
 import cats.kernel.Order
-//import cats.kernel.instances.list._
 import cats.syntax.foldable._
 import cats.syntax.order._
 import cats.instances.int._
