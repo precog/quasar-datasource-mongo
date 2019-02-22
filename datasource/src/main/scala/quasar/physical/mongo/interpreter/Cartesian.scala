@@ -44,6 +44,8 @@ object Cartesian {
 
       val interpretations: Option[List[List[Aggregator]]] =
         cartoucheList.traverse {
+          case (alias, _) if (alias.name contains ".") =>
+            None
           case (alias, (_, instructions)) =>
             val interpreted: Interpretation =
               interpreter.refineInterpretation(alias.name, Interpretation.initial(instructions))

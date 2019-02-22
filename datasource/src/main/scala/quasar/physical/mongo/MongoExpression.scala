@@ -188,7 +188,7 @@ object MongoExpression {
 
   def cpathToProjection(cpath: CPath): Option[Projection] = {
     cpath.nodes.foldM(Projection()) { (acc, node) => node match {
-      case CPathField(str) => Some(acc +/ key(str))
+      case CPathField(str) if !(str contains ".") => Some(acc +/ key(str))
       case CPathIndex(ix) => Some(acc +/ index(ix))
       case _ => None
     }}
