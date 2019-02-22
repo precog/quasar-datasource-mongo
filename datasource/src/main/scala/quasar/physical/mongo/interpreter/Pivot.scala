@@ -113,13 +113,12 @@ object Pivot {
 
     val setProjection = Pipeline.$project(Map(uniqueKey -> valueToSet))
 
-    val toArray = vectorType match {
-      case ColumnType.Array =>
-        List()
-      case ColumnType.Object =>
-        List(Pipeline.$project(Map(unwindKey -> O.$objectToArray(O.key(uniqueKey)))))
-    }
+    val toArray =
+      Pipeline.$project(Map(unwindKey -> (vectorType match {
+        case ColumnType.Object => O.$objectToArray(O.key(uniqueKey))
+        case ColumnType.Array => O.key(uniqueKey)
+      })))
 
-    Some(toArray ++ List(unwind, setProjection, CustomPipeline.NotNull(uniqueKey)))
+    Some(List(toArray, unwind, setProjection, CustomPipeline.NotNull(uniqueKey)))
   }
 }

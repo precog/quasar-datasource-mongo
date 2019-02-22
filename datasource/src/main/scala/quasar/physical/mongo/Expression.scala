@@ -100,15 +100,18 @@ object Core {
     val nil: Prism[O, Unit] = corePrism composePrism _nil
   }
 
-  implicit def renderTree[A: RenderTree]: RenderTree[Core[A]] = RenderTree.make {
-    case Array(a) => NonTerminal(List("Array"), None, a map (_.render))
-    case Object(a) => NonTerminal(List("Object"), None, a.toList map {
-      case (k, v) => NonTerminal(List(), Some(k), List(v.render)).render
-    })
-    case Bool(a) => Terminal(List("Boolean"), Some(a.toString))
-    case Int(a) => Terminal(List("Int"), Some(a.toString))
-    case String(a) => Terminal(List("String"), Some(a))
-    case Null() => Terminal(List("Null"), None)
+  implicit val delayRenderTreeCore: Delay[RenderTree, Core] = new Delay[RenderTree, Core] {
+    def apply[A](fa: RenderTree[A]): RenderTree[Core[A]] = RenderTree.make {
+      case Array(a) => NonTerminal(List("Array"), None, a map fa.render)
+        case Object(a) => NonTerminal(List("Object"), None, a.toList map {
+          case (k, v) => NonTerminal(List(), Some(k), List(fa.render(v)))
+        })
+      case Bool(a) => Terminal(List("Boolean"), Some(a.toString))
+      case Int(a) => Terminal(List("Int"), Some(a.toString))
+      case String(a) => Terminal(List("String"), Some(a))
+      case Null() => Terminal(List("Null"), None)
+    }
+
   }
 }
 
@@ -138,24 +141,27 @@ object Op {
       case Let(vars, in) => ((vars traverse f) |@| f(in))(Let(_, _))
     }
   }
-  implicit def renderTree[A: RenderTree]: RenderTree[Op[A]] = RenderTree.make {
-    case Let(vars, in) => NonTerminal(List("Let"), None, List(
-      NonTerminal(List(), Some("vars"), vars.toList map {
-        case (k, v) => NonTerminal(List(), Some(k), List(v.render))
-      }),
-      NonTerminal(List(), Some("in"), List(in.render))) map (_.render))
-    case Type(a) => NonTerminal(List("Type"), None, List(a.render))
-    case Eq(a) => NonTerminal(List("Eq"), None, a map (_.render))
-    case Or(a) => NonTerminal(List("Or"), None, a map (_.render))
-    case Exists(a) => NonTerminal(List("Exists"), None, List(a.render))
-    case Cond(a, b, c) => NonTerminal(List("Cond"), None, List(
-      NonTerminal(List(), Some("check"), List(a.render)).render,
-      NonTerminal(List(), Some("ok"), List(b.render)).render,
-      NonTerminal(List(), Some("fail"), List(c.render)).render
-    ))
-    case Ne(a) => NonTerminal(List("Ne"), None, List(a.render))
-    case ObjectToArray(a) => NonTerminal(List("ObjectToArray"), None, List(a.render))
-    case ArrayElemAt(a, i) => NonTerminal(List("ArrayElemAt"), Some(i.toString), List(a.render))
+
+  implicit val delayRenderTreeOp: Delay[RenderTree, Op] = new Delay[RenderTree, Op] {
+    def apply[A](fa: RenderTree[A]): RenderTree[Op[A]] = RenderTree.make {
+      case Let(vars, in) => NonTerminal(List("Let"), None, List(
+        NonTerminal(List(), Some("vars"), vars.toList map {
+          case (k, v) => NonTerminal(List(), Some(k), List(fa.render(v)))
+        }),
+        NonTerminal(List(), Some("in"), List(fa.render(in)))))
+      case Type(a) => NonTerminal(List("Type"), None, List(fa.render(a)))
+      case Eq(a) => NonTerminal(List("Eq"), None, a map fa.render)
+      case Or(a) => NonTerminal(List("Or"), None, a map fa.render)
+      case Exists(a) => NonTerminal(List("Exists"), None, List(fa.render(a)))
+      case Cond(a, b, c) => NonTerminal(List("Cond"), None, List(
+        NonTerminal(List(), Some("check"), List(fa.render(a))),
+        NonTerminal(List(), Some("ok"), List(fa.render(b))),
+        NonTerminal(List(), Some("fail"), List(fa.render(c)))
+      ))
+      case Ne(a) => NonTerminal(List("Ne"), None, List(fa.render(a)))
+      case ObjectToArray(a) => NonTerminal(List("ObjectToArray"), None, List(fa.render(a)))
+      case ArrayElemAt(a, i) => NonTerminal(List("ArrayElemAt"), Some(i.toString), List(fa.render(a)))
+    }
   }
 
   trait Optics[A, O] {
@@ -228,7 +234,7 @@ final case class Projection(steps: List[Step]) extends Product with Serializable
 }
 
 object Step {
-  implicit val renderTree: RenderTree[Step] = RenderTree.make {
+  implicit val renderTreeStep: RenderTree[Step] = RenderTree.make {
     case Field(s) => Terminal(List("Field"), Some(s))
     case Index(i) => Terminal(List("Index"), Some(i.toString))
   }
@@ -248,7 +254,7 @@ object Step {
 }
 
 object Projection {
-  implicit val renderTree: RenderTree[Projection] = RenderTree.make { x =>
+  implicit val renderTreeProjection: RenderTree[Projection] = RenderTree.make { x =>
     NonTerminal(List("Projection"), None, x.steps map (_.render))
   }
 
@@ -329,12 +335,18 @@ trait MongoPipeline[+A] extends Pipeline[A]
 object Pipeline {
   final case class $project[A](obj: Map[SString, A]) extends MongoPipeline[A]
   final case class $match[A](obj: Map[SString, A]) extends MongoPipeline[A]
-  final case class $unwind(path: SString, arrayIndex: SString) extends MongoPipeline[Nothing]
+  final case class $unwind[A](path: SString, arrayIndex: SString) extends MongoPipeline[A]
 
-  implicit def renderTree[A: RenderTree]: RenderTree[Pipeline[A]] = RenderTree.make {
-    case $project(obj) => NonTerminal(List("$project"), None, obj.toList map (_.render))
-    case $match(obj) => NonTerminal(List("$match"), None, obj.toList map (_.render))
-    case $unwind(p, a) => NonTerminal(List("$unwind"), None, List(p.render, a.render))
+  implicit val delayRenderTreeMongoPipeline: Delay[RenderTree, MongoPipeline] = new Delay[RenderTree, MongoPipeline] {
+    def apply[A](fa: RenderTree[A]): RenderTree[MongoPipeline[A]] = RenderTree.make {
+      case $project(obj) => NonTerminal(List("$project"), None, obj.toList map {
+        case (k, v) => NonTerminal(List(), Some(k), List(fa.render(v)))
+      })
+      case $match(obj) => NonTerminal(List("$match"), None, obj.toList map {
+        case (k, v) => NonTerminal(List(), Some(k), List(fa.render(v)))
+      })
+      case $unwind(p, a) => NonTerminal(List("$unwind"), None, List(p.render, a.render))
+    }
   }
 }
 
@@ -401,7 +413,7 @@ object Expression {
     val O = Optics.full(birecursiveIso[T[Projected], Projected].reverse.asPrism)
 
     pipeline match {
-      case NotNull(fld) => $match(Map("non_existent_field" -> O.$ne(O.nil())))
+      case NotNull(fld) => $match(Map(fld -> O.$ne(O.nil())))
       case $project(obj) => $project(obj)
       case $match(obj) => $match(obj)
       case $unwind(a, i) => $unwind(a, i)
@@ -418,7 +430,7 @@ object Expression {
       case $unwind(path, arrayIndex) =>
         O.obj(Map("$unwind" -> O.obj(Map(
           "path" -> O.key(path),
-          "includeArrayIndex" -> O.key(arrayIndex),
+          "includeArrayIndex" -> O.string(arrayIndex),
           "preserveNullAndEmptyArrays" -> O.bool(true)))))
     }
   }
@@ -450,21 +462,24 @@ object Expression {
       case List() =>
         O.string("$$ROOT")
       case (FieldGroup(hd :: tail), _) :: List() =>
-        O.string(tail.foldl(hd) { accum => s => accum.concat(".").concat(s) })
+        O.string(tail.foldl("$" concat hd) { accum => s => accum concat "." concat s  })
       case (hd, levelIx) :: tl => hd match {
         case IndexedAccess(i) =>
           O.$arrayElemAt(tl, i)
         case IndexGroup(i) =>
           val level = "level" concat levelIx.toString
           val varSteps: List[Elem] = (IndexedAccess(i), levelIx) :: tl
-          val vars: Map[SString, List[Elem]] = Map(level -> varSteps)
-          val expSteps: GrouppedSteps = FieldGroup(List("$" concat level))
-          val exp = List((expSteps, 0))
+
+          val vars: Map[SString, List[Elem]] = Map(level -> tl)
+//          val expSteps: GrouppedSteps = FieldGroup(List("$$" concat level))
+          val expSteps = IndexedAccess(i)
+          val exp = List((expSteps, 0), (FieldGroup(List("$" concat level)), 1))
+//          val exp = List() //(IndexedAccess(i),
           O.$let(vars, exp)
         case FieldGroup(steps) =>
           val level = "level".concat(levelIx.toString)
           val vars = Map(level -> tl)
-          val expSteps: GrouppedSteps = FieldGroup(level :: steps)
+          val expSteps: GrouppedSteps = FieldGroup("$".concat(level) :: steps)
           val exp = List((expSteps, 0))
           O.$let(vars, exp)
       }

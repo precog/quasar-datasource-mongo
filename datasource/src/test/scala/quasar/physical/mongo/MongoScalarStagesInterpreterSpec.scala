@@ -21,15 +21,15 @@ import slamdata.Predef._
 import org.bson.{Document => _, _}
 
 import quasar.common.CPath
-import quasar.{IdStatus, ScalarStageSpec => Spec, JsonSpec, ScalarStage, ScalarStages}
+import quasar.{IdStatus, ScalarStageSpec => Spec, JsonSpec, ScalarStage, ScalarStages}, ScalarStage._
 
 class MongoScalarStagesInterpreterSpec
     extends JsonSpec
-    with Spec.WrapSpec
-    with Spec.ProjectSpec
-    with Spec.PivotSpec
+//    with Spec.WrapSpec
+//    with Spec.ProjectSpec
+//    with Spec.PivotSpec
     with Spec.MaskSpec
-    with Spec.CartesianSpec
+//    with Spec.CartesianSpec
     with StageInterpreterSpec {
 
   "Id statuses" >> {

@@ -270,7 +270,7 @@ object Mask {
     val undefinedKey = uniqueKey.concat("_non_existent_field")
     if (masks.isEmpty) Some(List(Pipeline.$match(Map(undefinedKey -> O.bool(true)))))
     else masksToTypeTree0(uniqueKey, masks) map { tree =>
-      val projected = rebuildDoc(Projection.key(undefinedKey), Projection.key(uniqueKey), tree)
+      val projected = rebuildDoc(Projection.key(undefinedKey), Projection(List()), tree)
       val projectMap = Map(uniqueKey -> projected)
       List(Pipeline.$project(projectMap), CustomPipeline.NotNull(uniqueKey))
     }

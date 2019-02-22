@@ -46,7 +46,7 @@ object Wrap {
       Pipeline.$project(Map(
         tmpKey -> O.obj(Map(name -> O.key(uniqueKey))))),
       Pipeline.$project(Map(
-        uniqueKey -> O.obj(Map(uniqueKey -> O.key(tmpKey)))))
+        uniqueKey -> O.key(tmpKey)))
     ))
   }
 

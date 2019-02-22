@@ -26,13 +26,17 @@ import cats.instances.list._
 
 import org.bson.{BsonValue, BsonDocument}
 
-import matryoshka.birecursiveIso
+import matryoshka.{birecursiveIso, Birecursive}
 import matryoshka.data.Fix
 
-import quasar.{ScalarStage, ScalarStages, RenderTree}, RenderTree._, RenderTree.ops._
+import quasar.{ScalarStage, ScalarStages, RenderTree, RenderTreeT, RenderedTree}, RenderTree.ops._, RenderTreeT.ops._, RenderTree._
 import quasar.IdStatus
 import quasar.physical.mongo.interpreter._
 import quasar.physical.mongo.{Expression, Optics, CustomPipeline, MongoPipeline, Pipeline, Projection, Step, Field, Index}, Expression._
+
+import scalaz.syntax.show._
+
+import shims._
 
 final case class Interpretation(
   stages: List[ScalarStage],
@@ -73,13 +77,19 @@ class MongoInterpreter(version: Version, uniqueKey: String) extends Interpreter 
   def refineInterpretation(key: String, interpretation: Interpretation): Interpretation =
     refineInterpretationImpl(key, interpretation)
 
+  import Pipeline._
+
   @scala.annotation.tailrec
   private def refineInterpretation0Impl(key: String, interpretation: Interpretation0): Interpretation0 =
     interpretation.stages match {
       case List() => interpretation
       case hd :: tail =>
         val o = interpretStep(key, hd)
-        println(o map (_ map (_.render.shows)))
+//        val pp: Fix[Projected] = Pipeline.$project[Fix[Projected]](Map())
+//        println(pp.render)
+//        println((Pipeline.$project[Fix[Option]](Map()): Pipeline[Fix[Option]]).render)
+        println(o map (_ map ((x: Pipeline[Fix[Projected]]) => Expression.eraseCustomPipeline(x).render.shows)))
+//        val oo = (Pipeline.$project[Fix[Core]](Map()): MongoPipeline[Fix[Core]]).render
         interpretStep(key, hd) flatMap (Expression.compilePipeline[Fix](version, _)) match {
         case None => interpretation
         case Some(docs) => refineInterpretation0Impl(key, Interpretation0(tail, interpretation.docs ++ docs))
