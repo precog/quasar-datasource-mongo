@@ -83,7 +83,7 @@ class MongoConfigSpec extends Specification with ScalaCheck {
     "light provided" >> {
       val input = Json.obj(
         "connectionString" -> jString("mongodb://user:password@anyhost:1234"),
-        "pushdownLevel" -> jString("disabled"))
+        "pushdownLevel" -> jString("light"))
       input.as[MongoConfig].toEither === Right(MongoConfig("mongodb://user:password@anyhost:1234", None, Some(Light)))
     }
     "incorrect provided" >> {
