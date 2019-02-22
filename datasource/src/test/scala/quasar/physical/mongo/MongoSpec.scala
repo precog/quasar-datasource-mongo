@@ -162,7 +162,7 @@ object MongoSpec {
   val bbConnectionString: String = s"mongodb://bUser:bPassword@${host}:${port}/B.b"
 
   def mkMongo: IO[Disposable[IO, Mongo[IO]]] =
-    Mongo[IO](MongoConfig(connectionString, None, None))
+    Mongo[IO](MongoConfig(connectionString, None, Some(PushdownLevel.Full)))
 
   def mkAMongo: IO[Disposable[IO, Mongo[IO]]] =
     Mongo[IO](MongoConfig(aConnectionString, None, None))

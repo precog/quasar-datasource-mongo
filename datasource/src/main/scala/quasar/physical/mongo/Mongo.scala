@@ -290,7 +290,7 @@ object Mongo {
       buildInfo(client) map { x =>
         getVersionString(x) map (_.split("\\.")) flatMap mkVersion getOrElse Version.zero
       }
-    val pushdownLevel = config.pushdownLevel getOrElse PushdownLevel.Full
+    val pushdownLevel = config.pushdownLevel getOrElse PushdownLevel.Disabled
     for {
       client <- mkClient(config)
       version <- getVersion(client)
