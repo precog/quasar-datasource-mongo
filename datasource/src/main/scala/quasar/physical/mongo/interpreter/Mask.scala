@@ -50,11 +50,11 @@ object Mask {
     case List() =>
       TypeTree(insertee.types ++ tree.types, tree.obj ++ insertee.obj, tree.list ++ insertee.list)
     case child :: tail => child match {
-      case E.Field(str) =>
+      case E.ProjectionStep.Field(str) =>
         val insertTo = tree.obj.get(str) getOrElse emptyTree
         val inserted = insert(E.Projection(tail:_*), insertee, insertTo)
         tree.copy(obj = tree.obj.updated(str, inserted))
-      case E.Index(ix) =>
+      case E.ProjectionStep.Index(ix) =>
         val insertTo = tree.list.lift(ix) getOrElse emptyTree
         val inserted = insert(E.Projection(tail:_*), insertee, insertTo)
         tree.copy(list = tree.list.updated(ix, inserted))

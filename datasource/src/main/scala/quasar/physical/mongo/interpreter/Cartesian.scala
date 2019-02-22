@@ -22,18 +22,19 @@ import cats.syntax.traverse._
 import cats.instances.option._
 import cats.instances.list._
 
-import quasar.common.CPathField
 import quasar.physical.mongo.MongoExpression
 import quasar.physical.mongo.{Interpretation, Interpreter, Aggregator, Version, MongoExpression => E}
 import quasar.ScalarStage
 
 import shims._
 
+import E.ProjectionStep._
+
 object Cartesian {
   def apply(
       uniqueKey: String,
       version: Version,
-      cartouches: Map[CPathField, (CPathField, List[ScalarStage.Focused])],
+      cartouches: Map[Field, (Field, List[ScalarStage.Focused])],
       interpreter: Interpreter)
       : Option[List[Aggregator]] = {
 
