@@ -23,6 +23,7 @@ import cats.syntax.functor._
 import cats.syntax.foldable._
 import cats.instances.option._
 import cats.instances.list._
+import cats.syntax.order._
 
 import org.bson.{BsonValue, BsonDocument}
 
@@ -58,7 +59,7 @@ trait Interpreter {
   def interpretStep(key: String, instruction: ScalarStage): Option[List[Pipeline[Fix[Projected]]]]
 }
 
-class MongoInterpreter(version: Version, uniqueKey: String) extends Interpreter {
+class MongoInterpreter(version: Version, uniqueKey: String, pushdownLevel: PushdownLevel) extends Interpreter {
   private val E = MongoExpression
   def mapper(x: BsonValue): BsonValue =
     x.asDocument().get(uniqueKey)
@@ -100,11 +101,19 @@ class MongoInterpreter(version: Version, uniqueKey: String) extends Interpreter 
     refineInterpretation0Impl(key, interpretation)
 
   private def refineStep(key: String, instruction: ScalarStage): Option[List[Aggregator]] = instruction match {
-    case ScalarStage.Wrap(name) => Wrap(key, version, name)
-    case ScalarStage.Mask(masks) => Mask(key, version, masks)
-    case ScalarStage.Pivot(status, structure) => Pivot(key, version, status, structure)
-    case ScalarStage.Project(path) => Project(key, version, path)
-    case ScalarStage.Cartesian(cartouches) => Cartesian(key, version, cartouches, this)
+    case ScalarStage.Wrap(name) =>
+      if (pushdownLevel < PushdownLevel.Light) None
+      else E.safeField(name) map { wrap => Wrap(key, version, wrap) }
+    case ScalarStage.Mask(masks) =>
+      if (pushdownLevel < PushdownLevel.Light) None else Mask(key, version, masks)
+    case ScalarStage.Pivot(status, structure) =>
+      if (pushdownLevel < PushdownLevel.Light) None else Pivot(key, version, status, structure)
+    case ScalarStage.Project(path) =>
+      if (pushdownLevel < PushdownLevel.Light) None else Project(key, version, path)
+    case ScalarStage.Cartesian(cartouches) =>
+      if (pushdownLevel < PushdownLevel.Full) None
+      else E.safeCartouches(cartouches) flatMap { x => Cartesian(key, version, x, this) }
+
   }
 
   import matryoshka.birecursiveIso
@@ -112,11 +121,21 @@ class MongoInterpreter(version: Version, uniqueKey: String) extends Interpreter 
   import quasar.physical.mongo.{Expression, Optics, CustomPipeline, MongoPipeline, Pipeline, Projection, Step, Field, Index}, Expression._
 
   def interpretStep(key: String, instruction: ScalarStage): Option[List[Pipeline[Fix[Projected]]]] = instruction match {
-    case ScalarStage.Wrap(name) => Wrap.apply0(key, name)
-    case ScalarStage.Mask(masks) => Mask.apply0(key, masks)
-    case ScalarStage.Pivot(status, structure) => Pivot.apply0(key, status, structure)
-    case ScalarStage.Project(path) => Project.apply0(key, path)
-    case ScalarStage.Cartesian(cartouches) => Cartesian.apply0(key, cartouches, this)
+    case ScalarStage.Wrap(name) =>
+      if (pushdownLevel < PushdownLevel.Light) None
+      else Projection.safeField(name) map (Wrap.apply0(key, _))
+    case ScalarStage.Mask(masks) =>
+      if (pushdownLevel < PushdownLevel.Light) None
+      else Mask.apply0(key, masks)
+    case ScalarStage.Pivot(status, structure) =>
+      if (pushdownLevel < PushdownLevel.Light) None
+      else Pivot.apply0(key, status, structure)
+    case ScalarStage.Project(path) =>
+      if (pushdownLevel < PushdownLevel.Light) None
+      else Project.apply0(key, path)
+    case ScalarStage.Cartesian(cartouches) =>
+      if (pushdownLevel < PushdownLevel.Full) None
+      else Projection.safeCartouches(cartouches) flatMap (Cartesian.apply0(key, _, this))
   }
 
   private def initialAggregators(idStatus: IdStatus): Aggregator = idStatus match {
@@ -154,6 +173,6 @@ class MongoInterpreter(version: Version, uniqueKey: String) extends Interpreter 
 }
 
 object MongoInterpreter {
-  def apply[F[_]: Sync](version: Version): F[MongoInterpreter] =
-    Sync[F].delay(java.util.UUID.randomUUID().toString) map (new MongoInterpreter(version, _))
+  def apply[F[_]: Sync](version: Version, pushdownLevel: PushdownLevel): F[MongoInterpreter] =
+    Sync[F].delay(java.util.UUID.randomUUID().toString) map (new MongoInterpreter(version, _, pushdownLevel))
 }

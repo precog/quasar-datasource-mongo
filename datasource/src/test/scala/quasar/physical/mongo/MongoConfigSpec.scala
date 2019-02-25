@@ -37,11 +37,11 @@ class MongoConfigSpec extends Specification with ScalaCheck {
     val input = Json.obj(
       "connectionString" -> jString("mongodb://user:password@anyhost:2980/database"),
       "resultBatchSizeBytes" -> jNumber(128),
-      "disablePushdown" -> jBool(true))
+      "pushdownLevel" -> jString("light"))
     val expected = Json.obj(
       "connectionString" -> jString("mongodb://<REDACTED>:<REDACTED>@anyhost:2980/database"),
       "resultBatchSizeBytes" -> jNumber(128),
-      "disablePushdown" -> jBool(true))
+      "pushdownLevel" -> jString("light"))
 
     MongoConfig.sanitize(input) === expected
   }
@@ -50,7 +50,7 @@ class MongoConfigSpec extends Specification with ScalaCheck {
     val input = Json.obj(
       "connectionString" -> jString("mongodb://host:1234/db?foo=bar"),
       "resultBatchSizeBytes" -> jNumber(234),
-      "disablePushdown" -> jBool(false))
+      "pushdownLevel" -> jString("full"))
     MongoConfig.sanitize(input) === input
   }
 
@@ -66,20 +66,36 @@ class MongoConfigSpec extends Specification with ScalaCheck {
     }
   }
 
-  "disabled pushdown" >> {
-    "true provided" >> {
+  "pushdown level" >> {
+    "full provided" >> {
       val input = Json.obj(
         "connectionString" -> jString("mongodb://user:password@anyhost:1234"),
         "resultBatchSizeBytes" -> jNumber(128),
-        "disablePushdown" -> jBool(true))
-      input.as[MongoConfig].toEither === Right(MongoConfig("mongodb://user:password@anyhost:1234", Some(128), Some(true)))
+        "pushdownLevel" -> jString("full"))
+      input.as[MongoConfig].toEither ===
+        Right(MongoConfig("mongodb://user:password@anyhost:1234", Some(128), Some(PushdownLevel.Full)))
     }
-    "false provided" >> {
+    "disabled provided" >> {
       val input = Json.obj(
         "connectionString" -> jString("mongodb://user:password@anyhost:1234"),
-        "disablePushdown" -> jBool(false))
-      input.as[MongoConfig].toEither === Right(MongoConfig("mongodb://user:password@anyhost:1234", None, Some(false)))
+        "pushdownLevel" -> jString("disabled"))
+      input.as[MongoConfig].toEither ===
+        Right(MongoConfig("mongodb://user:password@anyhost:1234", None, Some(PushdownLevel.Disabled)))
     }
+    "light provided" >> {
+      val input = Json.obj(
+        "connectionString" -> jString("mongodb://user:password@anyhost:1234"),
+        "pushdownLevel" -> jString("light"))
+      input.as[MongoConfig].toEither ===
+        Right(MongoConfig("mongodb://user:password@anyhost:1234", None, Some(PushdownLevel.Light)))
+    }
+    "incorrect provided" >> {
+      val input = Json.obj(
+        "connectionString" -> jString("mongodb://user:password@anyhost:1234"),
+        "pushdownLevel" -> jString("incorrect"))
+      input.as[MongoConfig].toEither must beLeft
+    }
+
     "omitted" >> {
       val input = Json.obj("connectionString" -> jString("mongodb://user:password@anyhost:1234"))
       input.as[MongoConfig].toEither === Right(MongoConfig("mongodb://user:password@anyhost:1234", None, None))

@@ -23,18 +23,19 @@ import cats.syntax.traverse._
 import cats.instances.option._
 import cats.instances.list._
 
-import quasar.common.CPathField
 import quasar.physical.mongo.MongoExpression
 import quasar.physical.mongo.{Interpretation, Interpreter, Aggregator, Version, MongoExpression => E}
 import quasar.ScalarStage
 
 import shims._
 
+import E.ProjectionStep._
+
 object Cartesian {
   def apply(
       uniqueKey: String,
       version: Version,
-      cartouches: Map[CPathField, (CPathField, List[ScalarStage.Focused])],
+      cartouches: Map[Field, (Field, List[ScalarStage.Focused])],
       interpreter: Interpreter)
       : Option[List[Aggregator]] = {
 
@@ -88,7 +89,7 @@ object Cartesian {
   import matryoshka.data.Fix
   import quasar.physical.mongo.{Expression, Optics, CustomPipeline, MongoPipeline, Pipeline, Projection, Step, Field, Index}, Expression._
   val O = Optics.full(birecursiveIso[Fix[Projected], Projected].reverse.asPrism)
-  def apply0(uniqueKey: String, cartouches: Map[CPathField, (CPathField, List[ScalarStage.Focused])], interpreter: Interpreter)
+  def apply0(uniqueKey: String, cartouches: Map[Field, (Field, List[ScalarStage.Focused])], interpreter: Interpreter)
       : Option[List[Pipeline[Fix[Projected]]]] = {
 
     val undefinedKey = uniqueKey.concat("_cartesian_empty")

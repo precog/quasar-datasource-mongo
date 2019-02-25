@@ -162,7 +162,7 @@ object MongoSpec {
   val bbConnectionString: String = s"mongodb://bUser:bPassword@${host}:${port}/B.b"
 
   def mkMongo: IO[Disposable[IO, Mongo[IO]]] =
-    Mongo[IO](MongoConfig(connectionString, None, None))
+    Mongo[IO](MongoConfig(connectionString, None, Some(PushdownLevel.Full)))
 
   def mkAMongo: IO[Disposable[IO, Mongo[IO]]] =
     Mongo[IO](MongoConfig(aConnectionString, None, None))
@@ -174,8 +174,10 @@ object MongoSpec {
   def mkMongoInvalidPort: IO[Disposable[IO, Mongo[IO]]] =
     for {
       client <- Mongo.mkClient[IO](MongoConfig(connectionStringInvalidPort, None, None))
-      interpreter = new MongoInterpreter(Version(0, 0, 0), "redundant")
-    } yield Disposable(new Mongo[IO](client, Mongo.DefaultBsonBatch, false, interpreter, None), Mongo.close[IO](client))
+      interpreter = new MongoInterpreter(Version(0, 0, 0), "redundant", PushdownLevel.Full)
+    } yield Disposable(
+      new Mongo[IO](client, Mongo.DefaultBsonBatch, PushdownLevel.Full, interpreter, None),
+      Mongo.close[IO](client))
 
   def mkBMongo: IO[Disposable[IO, Mongo[IO]]] =
     Mongo[IO](MongoConfig(bConnectionString, None, None))

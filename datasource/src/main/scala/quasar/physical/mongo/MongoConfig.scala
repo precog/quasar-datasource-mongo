@@ -27,7 +27,7 @@ import quasar.physical.mongo.MongoResource.{Database, Collection}
 final case class MongoConfig(
     connectionString: String,
     resultBatchSizeBytes: Option[Int],
-    disablePushdown: Option[Boolean]) {
+    pushdownLevel: Option[PushdownLevel]) {
   def accessedResource: Option[MongoResource] = {
     val connString = new ConnectionString(connectionString)
     val dbStr = Option(connString.getDatabase())
@@ -44,7 +44,7 @@ object MongoConfig {
     casecodec3(MongoConfig.apply, MongoConfig.unapply)(
       "connectionString",
       "resultBatchSizeBytes",
-      "disablePushdown")
+      "pushdownLevel")
 
   private val credentialsRegex = "://[^@+]+@".r
 

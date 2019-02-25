@@ -31,7 +31,7 @@ import quasar.common.{CPath, CPathField, CPathIndex}
 import quasar.{RenderTree, NonTerminal, Terminal, RenderTreeT}, RenderTree.ops._
 import quasar.fp.PrismNT
 
-import scalaz.{Equal, Applicative, Traverse, Scalaz, Const, Coproduct, :<:}
+import scalaz.{Equal, Order, Ordering, Applicative, Traverse, Scalaz, Const, Coproduct, :<:}
 import Scalaz._
 import scalaz.syntax._
 import scalaz.std._
@@ -217,9 +217,6 @@ object Op {
 
 trait Step extends Product with Serializable
 
-final case class Field(f: SString) extends Step
-final case class Index(i: SInt) extends Step
-
 final case class Projection(steps: List[Step]) extends Product with Serializable {
   private def keyPart(step: Step): SString = step match {
     case Field(s) => s
@@ -232,22 +229,25 @@ final case class Projection(steps: List[Step]) extends Product with Serializable
     case hd :: tail => tail.foldl(keyPart(hd)) { acc => x => acc.concat(".").concat(keyPart(x)) }
   }
 }
+final case class Field(name: SString) extends Step
+final case class Index(ix: SInt) extends Step
 
 object Step {
+
   implicit val renderTreeStep: RenderTree[Step] = RenderTree.make {
     case Field(s) => Terminal(List("Field"), Some(s))
     case Index(i) => Terminal(List("Index"), Some(i.toString))
   }
 
-  implicit val equal: Equal[Step] = new Equal[Step] {
-    def equal(a: Step, b: Step): Boolean = a match {
-      case Field(s1) => b match {
-        case Field(s2) => s1 === s2
-        case Index(_) => false
+  implicit val orderStep: Order[Step] = new Order[Step] {
+    def order(a: Step, b: Step) = a match {
+      case Field(x) => b match {
+        case Field(y) => Order[SString].order(x, y)
+        case Index(_) => Ordering.LT
       }
-      case Index(i1) => b match {
-        case Index(i2) => i1 === i2
-        case Field(_) => false
+      case Index(x) => b match {
+        case Index(y) => Order[SInt].order(x, y)
+        case Field(_) => Ordering.GT
       }
     }
   }
@@ -264,13 +264,30 @@ object Projection {
 
   def key(s: SString): Projection = Projection(List(Field(s)))
   def index(i: SInt): Projection = Projection(List(Index(i)))
+
+  implicit val orderProjection: Order[Projection] = new Order[Projection] {
+    def order(a: Projection, b: Projection): Ordering =
+      Order[List[Step]].order(a.steps.toList, b.steps.toList)
+  }
+
+  def safeField(str: SString): Option[Field] =
+    if (str contains ".") None
+    else Some(Field(str))
+
+  def safeCartouches[A](inp: Map[CPathField, (CPathField, A)]): Option[Map[Field, (Field, A)]] =
+    inp.toList.foldlM(Map.empty[Field, (Field, A)]){ acc => {
+      case (alias, (focus, lst)) => for {
+        newAlias <- safeField(alias.name)
+        newFocus <- safeField(focus.name)
+      } yield acc.updated(newAlias, (newFocus, lst))
+    }}
+
   def fromCPath(cpath: CPath): Option[Projection] =
     cpath.nodes.foldMapM {
-      case CPathField(str) => Some(List(Field(str)))
+      case CPathField(str) => safeField(str) map (List(_))
       case CPathIndex(ix) => Some(List(Index(ix)))
       case _ => None
     } map (Projection(_))
-
 }
 
 object Optics {

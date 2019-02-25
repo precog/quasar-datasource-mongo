@@ -23,31 +23,32 @@ import org.bson._
 import matryoshka.birecursiveIso
 import matryoshka.data.Fix
 
-import quasar.physical.mongo.{Aggregator, Version, MongoExpression => E}
+import quasar.physical.mongo.{Aggregator, Version, MongoExpression => E}, E.ProjectionStep.Field
 
 object Wrap {
   def apply(
       uniqueKey: String,
       version: Version,
-      name: String)
-      : Option[List[Aggregator]] =
-    Some {
-      val tmpKey = uniqueKey.concat("_wrap")
-      List(
-        Aggregator.project(E.Object(tmpKey -> E.Object(name -> E.key(uniqueKey)))),
-        Aggregator.project(E.Object(uniqueKey -> E.key(tmpKey))))
-    }
+      wrap: Field)
+      : List[Aggregator] = {
 
-  import quasar.physical.mongo.{Expression, Optics, CustomPipeline, MongoPipeline, Pipeline}, Expression._
-  def apply0(uniqueKey: String, name: String): Option[List[Pipeline[Fix[Projected]]]] = {
+    val tmpKey = uniqueKey.concat("_wrap")
+    List(
+      Aggregator.project(E.Object(tmpKey -> E.Object(wrap.name -> E.key(uniqueKey)))),
+      Aggregator.project(E.Object(uniqueKey -> E.key(tmpKey))))
+  }
+
+
+  import quasar.physical.mongo.{Expression, Optics, CustomPipeline, MongoPipeline, Pipeline, Field}, Expression._
+  def apply0(uniqueKey: String, name: Field): List[Pipeline[Fix[Projected]]] = {
     val O = Optics.full(birecursiveIso[Fix[Projected], Projected].reverse.asPrism)
     val tmpKey = uniqueKey.concat("_wrap")
-    Some(List(
+    List(
       Pipeline.$project(Map(
-        tmpKey -> O.obj(Map(name -> O.key(uniqueKey))))),
+        tmpKey -> O.obj(Map(name.name -> O.key(uniqueKey))))),
       Pipeline.$project(Map(
         uniqueKey -> O.key(tmpKey)))
-    ))
+    )
   }
 
 }

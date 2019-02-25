@@ -19,9 +19,9 @@ package quasar.physical.mongo
 import slamdata.Predef._
 
 import cats.Show
-import cats.kernel.Eq
-import cats.syntax.eq._
+import cats.kernel.Order
 import cats.syntax.foldable._
+import cats.syntax.order._
 import cats.instances.int._
 import cats.instances.list._
 import cats.instances.option._
@@ -44,19 +44,20 @@ object MongoExpression {
   import slamdata.Predef.{String => SString, Int => SInt}
 
   trait ProjectionStep
-  final case class Field(str: SString) extends ProjectionStep
-  final case class Index(int: SInt) extends ProjectionStep
 
   object ProjectionStep {
-    implicit val eqProjectionStep: Eq[ProjectionStep] = new Eq[ProjectionStep] {
-      def eqv(a: ProjectionStep, b: ProjectionStep) = a match {
+    final case class Field(name: SString) extends ProjectionStep
+    final case class Index(ix: SInt) extends ProjectionStep
+
+    implicit val orderProjectionStep: Order[ProjectionStep] = new Order[ProjectionStep] {
+      def compare(a: ProjectionStep, b: ProjectionStep) = a match {
         case Field(x) => b match {
-          case Field(y) => x === y
-          case Index(_) => false
+          case Field(y) => x compare y
+          case Index(_) => 1
         }
         case Index(x) => b match {
-          case Index(y) => x === y
-          case Field(_) => false
+          case Index(y) => x compare y
+          case Field(_) => -1
         }
       }
     }
@@ -66,6 +67,20 @@ object MongoExpression {
     implicit val renderTreeProjectionStep: RenderTree[ProjectionStep] =
       RenderTree.fromShowAsType("ProjectionStep")
   }
+
+  import ProjectionStep._
+
+  def safeField(str: SString): Option[Field] =
+    if (str contains ".") None
+    else Some(Field(str))
+
+  def safeCartouches[A](inp: Map[CPathField, (CPathField, A)]): Option[Map[Field, (Field, A)]] =
+    inp.toList.foldM(Map.empty[Field, (Field, A)]) {
+      case (acc, (alias, (focus, lst))) => for {
+        newAlias <- safeField(alias.name)
+        newFocus <- safeField(focus.name)
+      } yield acc.updated(newAlias, (newFocus, lst))
+    }
 
   def isField(step: ProjectionStep): Boolean = step match {
     case Field(_) => true
@@ -140,8 +155,9 @@ object MongoExpression {
   }
 
   object Projection {
-    implicit val eqProjection: Eq[Projection] = new Eq[Projection] {
-      def eqv(a: Projection, b: Projection): Boolean = a.steps.toList === b.steps.toList
+    implicit val orderProjection: Order[Projection] = new Order[Projection] {
+      def compare(a: Projection, b: Projection): SInt =
+        Order[List[ProjectionStep]].compare(a.steps.toList, b.steps.toList)
     }
   }
 
@@ -188,7 +204,7 @@ object MongoExpression {
 
   def cpathToProjection(cpath: CPath): Option[Projection] = {
     cpath.nodes.foldM(Projection()) { (acc, node) => node match {
-      case CPathField(str) => Some(acc +/ key(str))
+      case CPathField(str) => safeField(str) map (fld => acc +/ Projection(fld))
       case CPathIndex(ix) => Some(acc +/ index(ix))
       case _ => None
     }}
