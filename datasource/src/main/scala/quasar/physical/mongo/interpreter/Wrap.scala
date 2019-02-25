@@ -21,7 +21,7 @@ import slamdata.Predef._
 import quasar.physical.mongo.expression._
 
 object Wrap {
-  def apply0(uniqueKey: String, name: Field): List[Pipe] = {
+  def apply(uniqueKey: String, name: Field): List[Pipe] = {
     val tmpKey = uniqueKey.concat("_wrap")
     List(
       Pipeline.$project(Map(

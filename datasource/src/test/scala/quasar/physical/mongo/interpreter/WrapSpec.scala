@@ -27,7 +27,7 @@ import quasar.physical.mongo.expression._
 class WrapSpec extends Specification with ScalaCheck {
   "wrap interpreter produces two projects" >> prop { (wrapString: String, version: Version, rootKey: String) =>
     ((wrapString.length > 0) && (wrapString != "\u0000")) ==> {
-      val interpretation = Wrap.apply0(rootKey, Field(wrapString))
+      val interpretation = Wrap(rootKey, Field(wrapString))
       interpretation must beLike {
         case Pipeline.$project(prj1) :: Pipeline.$project(prj2) :: List() =>
           (prj1.get(rootKey concat "_wrap") === Some(O.obj(Map(wrapString -> O.key(rootKey))))) and
@@ -36,7 +36,7 @@ class WrapSpec extends Specification with ScalaCheck {
     }
   }
   "wrap example" >> {
-    val actual = Wrap.apply0("root", Field("wrapper"))
+    val actual = Wrap("root", Field("wrapper"))
     val expected = List(
       Pipeline.$project(Map("root_wrap" -> O.obj(Map("wrapper" -> O.key("root"))))),
       Pipeline.$project(Map("root" -> O.key("root_wrap"))))

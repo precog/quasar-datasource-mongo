@@ -172,12 +172,9 @@ class Mongo[F[_]: MonadResourceErr : ConcurrentEffect] private[mongo](
 
     if (ScalarStages.Id === stages || pushdownLevel === PushdownLevel.Disabled) fallback
     else {
-//      val result = interpreter.interpret(stages)
-      val result = interpreter.interpret0(stages)
-//      if (result.aggregators.isEmpty) fallback
+      val result = interpreter.interpret(stages)
       if (result.docs.isEmpty) fallback
       else {
-//        val aggregated = aggregate(collection, result.aggregators)
         val aggregated = aggregate0(collection, result.docs)
         val newStages = ScalarStages(IdStatus.ExcludeId, result.stages)
         val parsed = aggregated map (x => (newStages, x map interpreter.mapper))

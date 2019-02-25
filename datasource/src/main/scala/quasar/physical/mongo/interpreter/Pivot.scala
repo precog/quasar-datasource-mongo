@@ -23,7 +23,7 @@ import quasar.physical.mongo.expression._
 import quasar.IdStatus
 
 object Pivot {
-  def apply0(uniqueKey: String, status: IdStatus, vectorType: ColumnType.Vector): Option[List[Pipe]] = {
+  def apply(uniqueKey: String, status: IdStatus, vectorType: ColumnType.Vector): Option[List[Pipe]] = {
     val unwindKey = uniqueKey.concat("_unwind")
     val indexKey = uniqueKey.concat("_unwind_index")
     val unwind = Pipeline.$unwind(unwindKey, indexKey)

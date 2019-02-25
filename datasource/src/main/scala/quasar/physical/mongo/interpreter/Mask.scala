@@ -39,25 +39,25 @@ object Mask {
     tree.types.isEmpty && tree.obj.isEmpty && tree.list.isEmpty
 
   @SuppressWarnings(Array("org.wartremover.warts.Recursion"))
-  private def insert0(steps: List[Step], insertee: TypeTree, tree: TypeTree): TypeTree = steps match {
+  private def insert(steps: List[Step], insertee: TypeTree, tree: TypeTree): TypeTree = steps match {
     case List() =>
       TypeTree(insertee.types ++ tree.types, tree.obj ++ insertee.obj, tree.list ++ insertee.list)
     case child :: tail => child match {
       case Field(str) =>
         val insertTo = tree.obj.get(str) getOrElse emptyTree
-        val inserted = insert0(tail, insertee, insertTo)
+        val inserted = insert(tail, insertee, insertTo)
         tree.copy(obj = tree.obj.updated(str, inserted))
       case Index(ix) =>
         val insertTo = tree.list.lift(ix) getOrElse emptyTree
-        val inserted = insert0(tail, insertee, insertTo)
+        val inserted = insert(tail, insertee, insertTo)
         tree.copy(list = tree.list.updated(ix, inserted))
     }
   }
 
-  private def masksToTypeTree0(uniqueKey: String, masks: Map[CPath, Set[ColumnType]]): Option[TypeTree] = {
+  private def masksToTypeTree(uniqueKey: String, masks: Map[CPath, Set[ColumnType]]): Option[TypeTree] = {
     masks.toList.foldM(emptyTree) {
       case (acc, (cpath, types)) => Projection.fromCPath(cpath) map { p =>
-        insert0(Field(uniqueKey) :: p.steps, TypeTree(types, Map.empty, Map.empty), acc)
+        insert(Field(uniqueKey) :: p.steps, TypeTree(types, Map.empty, Map.empty), acc)
       }
     }
   }
@@ -74,18 +74,18 @@ object Mask {
   }
 
   @SuppressWarnings(Array("org.wartremover.warts.Recursion"))
-  private def typeTreeFilters0(undefined: Projection, proj: Projection, tree: TypeTree): Expr = {
+  private def typeTreeFilters(undefined: Projection, proj: Projection, tree: TypeTree): Expr = {
     val typeStrings: List[Expr] = tree.types.toList flatMap parseTypeStrings map (O.string(_))
     val eqExprs: List[Expr] = typeStrings map (x => O.$eq(List(O.$type(O.projection(proj)), x)))
     val listExprs: List[Expr] =
       if (tree.types.contains(ColumnType.Array)) List()
       else tree.list.toList.sortBy(_._1) map {
-        case (i, child) => typeTreeFilters0(undefined, proj + Projection.index(i), child)
+        case (i, child) => typeTreeFilters(undefined, proj + Projection.index(i), child)
       }
     val objExprs: List[Expr] =
       if (tree.types.contains(ColumnType.Object)) List()
       else tree.obj.toList map {
-        case (key, child) => typeTreeFilters0(undefined, proj + Projection.key(key), child)
+        case (key, child) => typeTreeFilters(undefined, proj + Projection.key(key), child)
       }
     O.$or(eqExprs ++ listExprs ++ objExprs)
   }
@@ -129,7 +129,7 @@ object Mask {
     else // we need double check to exclude empty objects and other redundant stuff
       O.$cond(
         // At first we filter that there is anything in this or children
-        typeTreeFilters0(undefined, proj, tree),
+        typeTreeFilters(undefined, proj, tree),
         // and if so, we look if it's nested array
         arrayOr(
           // or nested object
@@ -139,11 +139,11 @@ object Mask {
         O.projection(undefined))
   }
 
-  def apply0(uniqueKey: String, masks: Map[CPath, Set[ColumnType]]): Option[List[Pipe]] = {
+  def apply(uniqueKey: String, masks: Map[CPath, Set[ColumnType]]): Option[List[Pipe]] = {
     val undefinedKey = uniqueKey.concat("_non_existent_field")
     if (masks.isEmpty) Some(List(Pipeline.$match(Map(undefinedKey -> O.bool(true)))))
     else for {
-      tree <- masksToTypeTree0(uniqueKey, masks)
+      tree <- masksToTypeTree(uniqueKey, masks)
       projected = rebuildDoc(Projection.key(undefinedKey), Projection(List()), tree)
       projObj <- O.obj.getOption(projected)
     } yield List(Pipeline.$project(projObj), Pipeline.NotNull(uniqueKey))

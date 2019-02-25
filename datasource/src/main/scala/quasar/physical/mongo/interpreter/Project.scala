@@ -21,7 +21,7 @@ import slamdata.Predef._
 import quasar.physical.mongo.expression._
 
 object Project {
-  def apply0(uniqueKey: String, fld: Projection): List[Pipe] = {
+  def apply(uniqueKey: String, fld: Projection): List[Pipe] = {
     val tmpKey = uniqueKey.concat("_project")
     val projection = Projection.key(uniqueKey) + fld
     val match_ = Pipeline.$match(Map(projection.toKey -> O.$exists(O.bool(true))))

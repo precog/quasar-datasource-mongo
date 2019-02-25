@@ -28,7 +28,7 @@ import quasar.physical.mongo.expression._
 
 class MaskSpec extends Specification {
   "examples" >> {
-    def evalMask(masks: Map[CPath, Set[ColumnType]]): Option[List[Pipe]] =  Mask.apply0("root", masks)
+    def evalMask(masks: Map[CPath, Set[ColumnType]]): Option[List[Pipe]] =  Mask("root", masks)
 
     val rootKey = O.key("root")
 

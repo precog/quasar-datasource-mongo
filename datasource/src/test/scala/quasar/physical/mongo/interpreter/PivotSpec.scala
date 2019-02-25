@@ -33,17 +33,17 @@ class PivotSpec extends Specification {
       Pipeline.NotNull("root")))
 
     "id only" >> {
-      val actual = Pivot.apply0("root", IdStatus.IdOnly, ColumnType.Array)
+      val actual = Pivot("root", IdStatus.IdOnly, ColumnType.Array)
       val expected = mkExpected(O.key("root_unwind_index"))
       actual === expected
     }
     "values only" >> {
-      val actual = Pivot.apply0("root", IdStatus.ExcludeId, ColumnType.Array)
+      val actual = Pivot("root", IdStatus.ExcludeId, ColumnType.Array)
       val expected = mkExpected(O.key("root_unwind"))
       actual === expected
     }
     "both" >> {
-      val actual = Pivot.apply0("root", IdStatus.IncludeId, ColumnType.Array)
+      val actual = Pivot("root", IdStatus.IncludeId, ColumnType.Array)
       val expected = mkExpected(O.array(List(O.key("root_unwind_index"), O.key("root_unwind"))))
       actual === expected
     }
@@ -57,17 +57,17 @@ class PivotSpec extends Specification {
       Pipeline.NotNull("root")))
 
     "id only" >> {
-      val actual = Pivot.apply0("root", IdStatus.IdOnly, ColumnType.Object)
+      val actual = Pivot("root", IdStatus.IdOnly, ColumnType.Object)
       val expected = mkExpected(O.projection(Projection.key("root_unwind") + Projection.key("k")))
       actual === expected
     }
     "values only" >> {
-      val actual = Pivot.apply0("root", IdStatus.ExcludeId, ColumnType.Object)
+      val actual = Pivot("root", IdStatus.ExcludeId, ColumnType.Object)
       val expected = mkExpected(O.projection(Projection.key("root_unwind") + Projection.key("v")))
       actual === expected
     }
     "both" >> {
-      val actual = Pivot.apply0("root", IdStatus.IncludeId, ColumnType.Object)
+      val actual = Pivot("root", IdStatus.IncludeId, ColumnType.Object)
       val expected = mkExpected(O.array(List(
         O.projection(Projection.key("root_unwind") + Projection.key("k")),
         O.projection(Projection.key("root_unwind") + Projection.key("v")))))

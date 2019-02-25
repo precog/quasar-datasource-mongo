@@ -30,7 +30,7 @@ import quasar.ScalarStage
 import shims._
 
 object Cartesian {
-  def apply0(uniqueKey: String, cartouches: Map[Field, (Field, List[ScalarStage.Focused])], interpreter: Interpreter)
+  def apply(uniqueKey: String, cartouches: Map[Field, (Field, List[ScalarStage.Focused])], interpreter: Interpreter)
       : Option[List[Pipe]] = {
 
     val undefinedKey = uniqueKey.concat("_cartesian_empty")

@@ -27,7 +27,7 @@ import quasar.physical.mongo.expression._
 class ProjectSpec extends Specification {
   "Project examples" >> {
     "old mongo without indices" >> {
-      val actual = Project.apply0("root", Projection.key("foo") + Projection.key("bar"))
+      val actual = Project("root", Projection.key("foo") + Projection.key("bar"))
       val expected = List(
         Pipeline.$match(Map("root.foo.bar" -> O.$exists(O.bool(true)))),
         Pipeline.$project(Map("root_project" -> O.projection(
@@ -36,7 +36,7 @@ class ProjectSpec extends Specification {
       actual === expected
     }
     "new mongo with indices" >> {
-      val actual = Project.apply0("other", Projection.key("foo") + Projection.index(1))
+      val actual = Project("other", Projection.key("foo") + Projection.index(1))
       val expected = List(
         Pipeline.$match(Map("other.foo.1" -> O.$exists(O.bool(true)))),
         Pipeline.$project(Map("other_project" -> O.projection(

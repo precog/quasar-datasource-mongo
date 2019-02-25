@@ -29,7 +29,7 @@ import quasar.physical.mongo.expression._
 class CartesianSpec extends Specification {
   def evalCartesian(cartouches: Map[CPathField, (CPathField, List[ScalarStage.Focused])]): Option[List[Pipe]] = {
     val interpreter = new MongoInterpreter(Version.$objectToArray, "root", PushdownLevel.Full)
-    Projection.safeCartouches(cartouches) flatMap { x => Cartesian.apply0("root", x, interpreter) }
+    Projection.safeCartouches(cartouches) flatMap { x => Cartesian("root", x, interpreter) }
 
   }
   "empty cartesian should erase everything" >> {

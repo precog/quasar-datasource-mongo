@@ -34,13 +34,13 @@ import quasar.physical.mongo.expression._
 
 import shims._
 
-final case class Interpretation0(
+final case class Interpretation(
   stages: List[ScalarStage],
   docs: List[BsonDocument])
 
 trait Interpreter {
-  def interpret0(stages: ScalarStages): Interpretation0
-  def refineInterpretation0(key: String, interpretation: Interpretation0): Interpretation0
+  def interpret(stages: ScalarStages): Interpretation
+  def refineInterpretation(key: String, interpretation: Interpretation): Interpretation
   def mapper(x: BsonValue): BsonValue
   def interpretStep(key: String, instruction: ScalarStage): Option[List[Pipe]]
 }
@@ -50,35 +50,35 @@ class MongoInterpreter(version: Version, uniqueKey: String, pushdownLevel: Pushd
     x.asDocument().get(uniqueKey)
 
   @scala.annotation.tailrec
-  private def refineInterpretation0Impl(key: String, interpretation: Interpretation0): Interpretation0 =
+  private def refineInterpretationImpl(key: String, interpretation: Interpretation): Interpretation =
     interpretation.stages match {
       case List() => interpretation
       case hd :: tail =>
         interpretStep(key, hd) flatMap (compilePipeline(version, _)) match {
         case None => interpretation
-        case Some(docs) => refineInterpretation0Impl(key, Interpretation0(tail, interpretation.docs ++ docs))
+        case Some(docs) => refineInterpretationImpl(key, Interpretation(tail, interpretation.docs ++ docs))
       }
     }
 
-  def refineInterpretation0(key: String, interpretation: Interpretation0): Interpretation0 =
-    refineInterpretation0Impl(key, interpretation)
+  def refineInterpretation(key: String, interpretation: Interpretation): Interpretation =
+    refineInterpretationImpl(key, interpretation)
 
   def interpretStep(key: String, instruction: ScalarStage): Option[List[Pipe]] = instruction match {
     case ScalarStage.Wrap(name) =>
       if (pushdownLevel < PushdownLevel.Light) None
-      else Projection.safeField(name) map (Wrap.apply0(key, _))
+      else Projection.safeField(name) map (Wrap(key, _))
     case ScalarStage.Mask(masks) =>
       if (pushdownLevel < PushdownLevel.Light) None
-      else Mask.apply0(key, masks)
+      else Mask(key, masks)
     case ScalarStage.Pivot(status, structure) =>
       if (pushdownLevel < PushdownLevel.Light) None
-      else Pivot.apply0(key, status, structure)
+      else Pivot(key, status, structure)
     case ScalarStage.Project(path) =>
       if (pushdownLevel < PushdownLevel.Light) None
-      else Projection.fromCPath(path) map (Project.apply0(key, _))
+      else Projection.fromCPath(path) map (Project(key, _))
     case ScalarStage.Cartesian(cartouches) =>
       if (pushdownLevel < PushdownLevel.Full) None
-      else Projection.safeCartouches(cartouches) flatMap (Cartesian.apply0(key, _, this))
+      else Projection.safeCartouches(cartouches) flatMap (Cartesian(key, _, this))
   }
 
   private def initialProjection(idStatus: IdStatus): Pipe = idStatus match {
@@ -93,9 +93,9 @@ class MongoInterpreter(version: Version, uniqueKey: String, pushdownLevel: Pushd
       "_id" -> O.int(0)))
   }
 
-  def interpret0(stages: ScalarStages): Interpretation0 = {
+  def interpret(stages: ScalarStages): Interpretation = {
     val initialDocs = compilePipe(version, initialProjection(stages.idStatus)) foldMap (List(_))
-    refineInterpretation0(uniqueKey, Interpretation0(stages.stages, initialDocs))
+    refineInterpretation(uniqueKey, Interpretation(stages.stages, initialDocs))
   }
 }
 
