@@ -33,7 +33,7 @@ import matryoshka.data.Fix
 import quasar.{ScalarStage, ScalarStages, RenderTree, RenderTreeT, RenderedTree}, RenderTree.ops._, RenderTreeT.ops._, RenderTree._
 import quasar.IdStatus
 import quasar.physical.mongo.interpreter._
-import quasar.physical.mongo.{Expression, Optics, CustomPipeline, MongoPipeline, Pipeline, Projection, Step, Field, Index}, Expression._
+import quasar.physical.mongo.expression._
 
 import scalaz.syntax.show._
 
@@ -52,18 +52,17 @@ object Interpretation {
 }
 
 trait Interpreter {
-  def interpret(stages: ScalarStages): Interpretation
   def interpret0(stages: ScalarStages): Interpretation0
-  def refineInterpretation(key: String, interpretation: Interpretation): Interpretation
+  def refineInterpretation0(key: String, interpretation: Interpretation0): Interpretation0
   def mapper(x: BsonValue): BsonValue
-  def interpretStep(key: String, instruction: ScalarStage): Option[List[Pipeline[Fix[Projected]]]]
+  def interpretStep(key: String, instruction: ScalarStage): Option[List[Pipe]]
 }
 
 class MongoInterpreter(version: Version, uniqueKey: String, pushdownLevel: PushdownLevel) extends Interpreter {
   private val E = MongoExpression
   def mapper(x: BsonValue): BsonValue =
     x.asDocument().get(uniqueKey)
-
+/*
   @scala.annotation.tailrec
   private def refineInterpretationImpl(key: String, interpretation: Interpretation): Interpretation =
     interpretation.stages match {
@@ -77,21 +76,13 @@ class MongoInterpreter(version: Version, uniqueKey: String, pushdownLevel: Pushd
 
   def refineInterpretation(key: String, interpretation: Interpretation): Interpretation =
     refineInterpretationImpl(key, interpretation)
-
-  import Pipeline._
-
+ */
   @scala.annotation.tailrec
   private def refineInterpretation0Impl(key: String, interpretation: Interpretation0): Interpretation0 =
     interpretation.stages match {
       case List() => interpretation
       case hd :: tail =>
-        val o = interpretStep(key, hd)
-//        val pp: Fix[Projected] = Pipeline.$project[Fix[Projected]](Map())
-//        println(pp.render)
-//        println((Pipeline.$project[Fix[Option]](Map()): Pipeline[Fix[Option]]).render)
-        println(o map (_ map ((x: Pipeline[Fix[Projected]]) => Expression.eraseCustomPipeline(x).render.shows)))
-//        val oo = (Pipeline.$project[Fix[Core]](Map()): MongoPipeline[Fix[Core]]).render
-        interpretStep(key, hd) flatMap (Expression.compilePipeline[Fix](version, _)) match {
+        interpretStep(key, hd) flatMap (compilePipeline(version, _)) match {
         case None => interpretation
         case Some(docs) => refineInterpretation0Impl(key, Interpretation0(tail, interpretation.docs ++ docs))
       }
@@ -99,7 +90,7 @@ class MongoInterpreter(version: Version, uniqueKey: String, pushdownLevel: Pushd
 
   def refineInterpretation0(key: String, interpretation: Interpretation0): Interpretation0 =
     refineInterpretation0Impl(key, interpretation)
-
+/*
   private def refineStep(key: String, instruction: ScalarStage): Option[List[Aggregator]] = instruction match {
     case ScalarStage.Wrap(name) =>
       if (pushdownLevel < PushdownLevel.Light) None
@@ -112,15 +103,11 @@ class MongoInterpreter(version: Version, uniqueKey: String, pushdownLevel: Pushd
       if (pushdownLevel < PushdownLevel.Light) None else Project(key, version, path)
     case ScalarStage.Cartesian(cartouches) =>
       if (pushdownLevel < PushdownLevel.Full) None
-      else E.safeCartouches(cartouches) flatMap { x => Cartesian(key, version, x, this) }
+      else Projection.safeCartouches(cartouches) flatMap { x => Cartesian(key, version, x, this) }
 
   }
-
-  import matryoshka.birecursiveIso
-  import matryoshka.data.Fix
-  import quasar.physical.mongo.{Expression, Optics, CustomPipeline, MongoPipeline, Pipeline, Projection, Step, Field, Index}, Expression._
-
-  def interpretStep(key: String, instruction: ScalarStage): Option[List[Pipeline[Fix[Projected]]]] = instruction match {
+ */
+  def interpretStep(key: String, instruction: ScalarStage): Option[List[Pipe]] = instruction match {
     case ScalarStage.Wrap(name) =>
       if (pushdownLevel < PushdownLevel.Light) None
       else Projection.safeField(name) map (Wrap.apply0(key, _))
@@ -137,7 +124,7 @@ class MongoInterpreter(version: Version, uniqueKey: String, pushdownLevel: Pushd
       if (pushdownLevel < PushdownLevel.Full) None
       else Projection.safeCartouches(cartouches) flatMap (Cartesian.apply0(key, _, this))
   }
-
+/*
   private def initialAggregators(idStatus: IdStatus): Aggregator = idStatus match {
     case IdStatus.IdOnly => Aggregator.project(E.Object(
       uniqueKey -> E.key("_id"),
@@ -149,9 +136,8 @@ class MongoInterpreter(version: Version, uniqueKey: String, pushdownLevel: Pushd
       uniqueKey -> E.Array(E.key("_id"), E.Projection()),
       "_id" -> E.Int(0)))
   }
-
-  val O = Optics.full(birecursiveIso[Fix[Projected], Projected].reverse.asPrism)
-  private def initialProjection(idStatus: IdStatus): Pipeline[Fix[Projected]] = idStatus match {
+ */
+  private def initialProjection(idStatus: IdStatus): Pipe = idStatus match {
     case IdStatus.IdOnly => Pipeline.$project(Map(
       uniqueKey -> O.key("_id"),
       "_id" -> O.int(0)))
@@ -163,11 +149,11 @@ class MongoInterpreter(version: Version, uniqueKey: String, pushdownLevel: Pushd
       "_id" -> O.int(0)))
   }
 
-  def interpret(stages: ScalarStages): Interpretation =
-    refineInterpretation(uniqueKey, Interpretation(stages.stages, List(initialAggregators(stages.idStatus))))
+//  def interpret(stages: ScalarStages): Interpretation =
+//    refineInterpretation(uniqueKey, Interpretation(stages.stages, List(initialAggregators(stages.idStatus))))
 
   def interpret0(stages: ScalarStages): Interpretation0 = {
-    val initialDocs = compilePipe[Fix](version, initialProjection(stages.idStatus)) foldMap (List(_))
+    val initialDocs = compilePipe(version, initialProjection(stages.idStatus)) foldMap (List(_))
     refineInterpretation0(uniqueKey, Interpretation0(stages.stages, initialDocs))
   }
 }

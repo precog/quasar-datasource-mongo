@@ -18,30 +18,10 @@ package quasar.physical.mongo.interpreter
 
 import slamdata.Predef._
 
-import org.bson._
-
-import matryoshka.birecursiveIso
-import matryoshka.data.Fix
-
-import quasar.physical.mongo.{Aggregator, Version, MongoExpression => E}, E.ProjectionStep.Field
+import quasar.physical.mongo.expression._
 
 object Wrap {
-  def apply(
-      uniqueKey: String,
-      version: Version,
-      wrap: Field)
-      : List[Aggregator] = {
-
-    val tmpKey = uniqueKey.concat("_wrap")
-    List(
-      Aggregator.project(E.Object(tmpKey -> E.Object(wrap.name -> E.key(uniqueKey)))),
-      Aggregator.project(E.Object(uniqueKey -> E.key(tmpKey))))
-  }
-
-
-  import quasar.physical.mongo.{Expression, Optics, CustomPipeline, MongoPipeline, Pipeline, Field}, Expression._
-  def apply0(uniqueKey: String, name: Field): List[Pipeline[Fix[Projected]]] = {
-    val O = Optics.full(birecursiveIso[Fix[Projected], Projected].reverse.asPrism)
+  def apply0(uniqueKey: String, name: Field): List[Pipe] = {
     val tmpKey = uniqueKey.concat("_wrap")
     List(
       Pipeline.$project(Map(

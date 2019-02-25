@@ -22,11 +22,7 @@ import cats.syntax.order._
 
 import quasar.common.CPath
 import quasar.physical.mongo.{Aggregator, Version, MongoExpression => E}
-
-import org.bson._
-
-import matryoshka.birecursiveIso
-import matryoshka.data.Fix
+  import quasar.physical.mongo.expression._
 
 import shims._
 
@@ -54,10 +50,9 @@ object Project {
     }
   }
 
-  import quasar.physical.mongo.{Expression, Optics, CustomPipeline, MongoPipeline, Pipeline, Projection}, Expression._
-  def apply0(uniqueKey: String, path: CPath): Option[List[Pipeline[Fix[Projected]]]] = {
-    val O = Optics.full(birecursiveIso[Fix[Projected], Projected].reverse.asPrism)
 
+
+  def apply0(uniqueKey: String, path: CPath): Option[List[Pipe]] = {
     Projection.fromCPath(path) map { (fld: Projection) =>
       val tmpKey = uniqueKey.concat("_project")
       val projection = Projection.key(uniqueKey) + fld

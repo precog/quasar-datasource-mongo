@@ -60,7 +60,7 @@ class Mongo[F[_]: MonadResourceErr : ConcurrentEffect] private[mongo](
           sub.request(queueSize)
         }
 
-        override def onNext(result: A): Unit =
+       override def onNext(result: A): Unit =
           cb(Some(Right(result)))
 
         override def onError(e: Throwable): Unit = cb(Some(Left(e)))

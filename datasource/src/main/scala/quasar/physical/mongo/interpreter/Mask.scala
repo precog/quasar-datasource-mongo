@@ -28,15 +28,14 @@ import quasar.api.table.ColumnType
 
 import quasar.physical.mongo.MongoExpression
 import quasar.physical.mongo.{Aggregator, Version, MongoExpression => E}
+import quasar.physical.mongo.expression._
 
 import shims._
 
 import matryoshka.birecursiveIso
 import matryoshka.data.Fix
-import quasar.physical.mongo.{Expression, Optics, CustomPipeline, MongoPipeline, Pipeline, Projection, Step, Field, Index}, Expression._
 
 object Mask {
-  val O = Optics.full(birecursiveIso[Fix[Projected], Projected].reverse.asPrism)
   final case class TypeTree(types: Set[ColumnType], obj: Map[String, TypeTree], list: Map[Int, TypeTree])
 
   val emptyTree: TypeTree = TypeTree(Set.empty, Map.empty, Map.empty)
@@ -133,15 +132,15 @@ object Mask {
   }
 
   @SuppressWarnings(Array("org.wartremover.warts.Recursion"))
-  private def typeTreeFilters0(undefined: Projection, proj: Projection, tree: TypeTree): Fix[Projected] = {
-    val typeStrings: List[Fix[Projected]] = tree.types.toList flatMap parseTypeStrings map (O.string(_))
-    val eqExprs: List[Fix[Projected]] = typeStrings map (x => O.$eq(List(O.$type(O.projection(proj)), x)))
-    val listExprs: List[Fix[Projected]] =
+  private def typeTreeFilters0(undefined: Projection, proj: Projection, tree: TypeTree): Expr = {
+    val typeStrings: List[Expr] = tree.types.toList flatMap parseTypeStrings map (O.string(_))
+    val eqExprs: List[Expr] = typeStrings map (x => O.$eq(List(O.$type(O.projection(proj)), x)))
+    val listExprs: List[Expr] =
       if (tree.types.contains(ColumnType.Array)) List()
       else tree.list.toList.sortBy(_._1) map {
         case (i, child) => typeTreeFilters0(undefined, proj + Projection.index(i), child)
       }
-    val objExprs: List[Fix[Projected]] =
+    val objExprs: List[Expr] =
       if (tree.types.contains(ColumnType.Object)) List()
       else tree.obj.toList map {
         case (key, child) => typeTreeFilters0(undefined, proj + Projection.key(key), child)
@@ -198,16 +197,16 @@ object Mask {
         undefined)
   }
 
-  private def rebuildDoc(undefined: Projection, proj: Projection, tree: TypeTree): Fix[Projected] = {
+  private def rebuildDoc(undefined: Projection, proj: Projection, tree: TypeTree): Expr = {
 
-    lazy val obj: Fix[Projected] = {
+    lazy val obj: Expr = {
       val treeMap = tree.obj map {
         case (key, child) => (key, rebuildDoc(undefined, proj + Projection.key(key), child))
       }
       O.obj(treeMap)
     }
 
-    lazy val array: Fix[Projected] = {
+    lazy val array: Expr = {
       val treeList =
         tree.list.toList.sortBy(_._1) map {
           case (i: Int, child: TypeTree) => rebuildDoc(undefined, proj + Projection.index(i), child)
@@ -215,34 +214,35 @@ object Mask {
       O.array(treeList)
     }
 
-    def isArray(e: Fix[Projected]): Fix[Projected] =
+    def isArray(e: Expr): Expr =
       O.$eq(List(O.$type(e), O.string("array")))
 
-    def isObject(e: Fix[Projected]): Fix[Projected] =
+    def isObject(e: Expr): Expr =
       O.$eq(List(O.$type(e), O.string("object")))
 
-    def arrayOr(e: Fix[Projected]): Fix[Projected] =
+    def arrayOr(e: Expr): Expr =
       if (tree.types.contains(ColumnType.Array) || tree.list.isEmpty) e
       else O.$cond(isArray(O.projection(proj)), array, e)
 
-    def objectOr(e: Fix[Projected]): Fix[Projected] =
+    def objectOr(e: Expr): Expr =
       if (tree.types.contains(ColumnType.Object) || tree.obj.isEmpty) e
       else O.$cond(isObject(O.projection(proj)), obj, e)
 
-    def projectionOr(e: Fix[Projected]): Fix[Projected] =
+    def projectionOr(e: Expr): Expr =
       if (tree.types.isEmpty) e else O.projection(proj)
 
-    // we need double check to exclude empty objects and other redundant stuff
-    O.$cond(
-      // At first we filter that there is anything in this or children
-      typeTreeFilters0(undefined, proj, tree),
-      // and if so, we look if it's nested array
-      arrayOr(
-        // or nested object
-        objectOr(
-          // or at least something
-          projectionOr(O.projection(undefined)))),
-      O.projection(undefined))
+    if (proj === Projection(List())) obj
+    else // we need double check to exclude empty objects and other redundant stuff
+      O.$cond(
+        // At first we filter that there is anything in this or children
+        typeTreeFilters0(undefined, proj, tree),
+        // and if so, we look if it's nested array
+        arrayOr(
+          // or nested object
+          objectOr(
+            // or at least something
+            projectionOr(O.projection(undefined)))),
+        O.projection(undefined))
   }
 
 
@@ -266,13 +266,13 @@ object Mask {
     }
   }
 
-  def apply0(uniqueKey: String, masks: Map[CPath, Set[ColumnType]]): Option[List[Pipeline[Fix[Projected]]]] = {
+  def apply0(uniqueKey: String, masks: Map[CPath, Set[ColumnType]]): Option[List[Pipe]] = {
     val undefinedKey = uniqueKey.concat("_non_existent_field")
     if (masks.isEmpty) Some(List(Pipeline.$match(Map(undefinedKey -> O.bool(true)))))
-    else masksToTypeTree0(uniqueKey, masks) map { tree =>
-      val projected = rebuildDoc(Projection.key(undefinedKey), Projection(List()), tree)
-      val projectMap = Map(uniqueKey -> projected)
-      List(Pipeline.$project(projectMap), CustomPipeline.NotNull(uniqueKey))
-    }
+    else for {
+      tree <- masksToTypeTree0(uniqueKey, masks)
+      projected = rebuildDoc(Projection.key(undefinedKey), Projection(List()), tree)
+      projObj <- O.obj.getOption(projected)
+    } yield List(Pipeline.$project(projObj), Pipeline.NotNull(uniqueKey))
   }
 }

@@ -23,6 +23,7 @@ import cats.syntax.order._
 import quasar.api.table.ColumnType
 import quasar.physical.mongo.MongoExpression
 import quasar.physical.mongo.{Aggregator, Version, MongoExpression => E}
+import quasar.physical.mongo.expression._
 import quasar.IdStatus
 
 import shims._
@@ -86,11 +87,7 @@ object Pivot {
       List(toArray(unwindKey, projection, vectorType), unwind, setProjection, Aggregator.notNull(uniqueKey))
     }
   }
-  import matryoshka.birecursiveIso
-  import matryoshka.data.Fix
-  import quasar.physical.mongo.{Expression, Optics, CustomPipeline, MongoPipeline, Pipeline, Projection}, Expression._
-  def apply0(uniqueKey: String, status: IdStatus, vectorType: ColumnType.Vector): Option[List[Pipeline[Fix[Projected]]]] = {
-    val O = Optics.full(birecursiveIso[Fix[Projected], Projected].reverse.asPrism)
+  def apply0(uniqueKey: String, status: IdStatus, vectorType: ColumnType.Vector): Option[List[Pipe]] = {
     val unwindKey = uniqueKey.concat("_unwind")
     val indexKey = uniqueKey.concat("_unwind_index")
     val unwind = Pipeline.$unwind(unwindKey, indexKey)
@@ -119,6 +116,6 @@ object Pivot {
         case ColumnType.Array => O.key(uniqueKey)
       })))
 
-    Some(List(toArray, unwind, setProjection, CustomPipeline.NotNull(uniqueKey)))
+    Some(List(toArray, unwind, setProjection, Pipeline.NotNull(uniqueKey)))
   }
 }

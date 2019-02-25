@@ -25,11 +25,11 @@ import quasar.{IdStatus, ScalarStageSpec => Spec, JsonSpec, ScalarStage, ScalarS
 
 class MongoScalarStagesInterpreterSpec
     extends JsonSpec
-//    with Spec.WrapSpec
-//    with Spec.ProjectSpec
-//    with Spec.PivotSpec
+    with Spec.WrapSpec
+    with Spec.ProjectSpec
+    with Spec.PivotSpec
     with Spec.MaskSpec
-//    with Spec.CartesianSpec
+    with Spec.CartesianSpec
     with StageInterpreterSpec {
 
   "Id statuses" >> {
