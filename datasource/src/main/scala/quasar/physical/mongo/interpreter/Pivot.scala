@@ -18,80 +18,18 @@ package quasar.physical.mongo.interpreter
 
 import slamdata.Predef._
 
-import cats.syntax.order._
-
 import quasar.api.table.ColumnType
-import quasar.physical.mongo.MongoExpression
-import quasar.physical.mongo.{Aggregator, Version, MongoExpression => E}
 import quasar.physical.mongo.expression._
 import quasar.IdStatus
 
-import shims._
-
 object Pivot {
-  def columnTypeVectorString(p: ColumnType.Vector): String = p match {
-    case ColumnType.Array => "array"
-    case ColumnType.Object => "object"
-  }
-
-  // input to a `Pivot` is guaranteed to be `Mask`ed with the appropriate type. i.e.
-  // there will always be, effectively, `Mask(. -> Object), Pivot(_, Object)`.
-  def toArray(key: String, projection: E.Projection, p: ColumnType.Vector): Aggregator = {
-    val refined: MongoExpression = p match {
-      case ColumnType.Array => projection
-      case ColumnType.Object => E.Object("$objectToArray" -> projection)
-    }
-    Aggregator.project(E.Object(key -> refined))
-  }
-
-  def mkValue(status: IdStatus, p: ColumnType.Vector, unwindedKey: E.Projection, indexKey: String): MongoExpression = p match {
-    case ColumnType.Array => status match {
-      case IdStatus.IdOnly => E.key(indexKey)
-      case IdStatus.ExcludeId => unwindedKey
-      case IdStatus.IncludeId => E.Array(E.key(indexKey), unwindedKey)
-    }
-    case ColumnType.Object => status match {
-      case IdStatus.IdOnly => unwindedKey +/ E.key("k")
-      case IdStatus.ExcludeId => unwindedKey +/ E.key("v")
-      case IdStatus.IncludeId => E.Array(unwindedKey +/ E.key("k"), unwindedKey +/ E.key("v"))
-    }
-  }
-
-  def apply(
-      uniqueKey: String,
-      version: Version,
-      status: IdStatus,
-      vectorType: ColumnType.Vector)
-      : Option[List[Aggregator]] = {
-
-    if ((version < Version.$objectToArray && vectorType === ColumnType.Object) || version < Version.$unwind) None
-    else Some {
-      val projection =
-        E.key(uniqueKey)
-
-      val unwindKey =
-        uniqueKey.concat("_unwind")
-
-      val indexKey =
-        uniqueKey.concat("_unwind_index")
-
-      val unwind =
-        Aggregator.unwind(E.key(unwindKey), indexKey)
-
-      val toSet =
-        mkValue(status, vectorType, E.key(unwindKey), indexKey)
-
-      val setProjection =
-        Aggregator.project(E.Object(projection.toKey -> toSet))
-
-      List(toArray(unwindKey, projection, vectorType), unwind, setProjection, Aggregator.notNull(uniqueKey))
-    }
-  }
   def apply0(uniqueKey: String, status: IdStatus, vectorType: ColumnType.Vector): Option[List[Pipe]] = {
     val unwindKey = uniqueKey.concat("_unwind")
     val indexKey = uniqueKey.concat("_unwind_index")
     val unwind = Pipeline.$unwind(unwindKey, indexKey)
 
+    // input to a `Pivot` is guaranteed to be `Mask`ed with the appropriate type. i.e.
+    // there will always be, effectively, `Mask(. -> Object), Pivot(_, Object)`.
     val valueToSet = vectorType match {
       case ColumnType.Array => status match {
         case IdStatus.IdOnly => O.key(indexKey)

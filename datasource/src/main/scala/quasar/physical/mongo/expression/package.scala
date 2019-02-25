@@ -30,11 +30,11 @@ package object expression {
   type Field = Step.Field
   type Index = Step.Index
 
-  val Step = Projection.Step
-  val Field = Step.Field
-  val Index = Step.Index
+  val Step: Projection.Step.type = Projection.Step
+  val Field: Step.Field.type = Step.Field
+  val Index: Step.Index.type = Step.Index
 
-  val O = Optics.fullT[Fix, Compiler.ExprF]
+  val O: Optics.FullOptics[Fix[Compiler.ExprF], Fix[Compiler.ExprF], Compiler.ExprF] = Optics.fullT[Fix, Compiler.ExprF]
 
   type Pipe = Pipeline[Expr]
 

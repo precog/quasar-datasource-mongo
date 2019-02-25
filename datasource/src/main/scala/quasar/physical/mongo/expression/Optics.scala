@@ -19,15 +19,12 @@ package quasar.physical.mongo.expression
 import slamdata.Predef._
 
 import matryoshka._
-import matryoshka.implicits._
 
 import monocle.{Prism, Iso}
 
 import quasar.fp.PrismNT
 
 import scalaz.{:<:, Const, Functor}
-
-import Projection._, Step._
 
 object Optics {
   class CoreOptics[A, O, F[_]] private[Optics] (basePrism: Prism[O, F[A]])(implicit c: Core :<: F) extends {

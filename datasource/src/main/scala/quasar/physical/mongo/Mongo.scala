@@ -160,9 +160,6 @@ class Mongo[F[_]: MonadResourceErr : ConcurrentEffect] private[mongo](
   def findAll(collection: Collection): F[Stream[F, BsonValue]] =
     withCollectionExists(collection, getCollection(collection).find[BsonValue]())
 
-  def aggregate(collection: Collection, aggs: List[Aggregator]): F[Stream[F, BsonValue]] =
-    withCollectionExists(collection, getCollection(collection).aggregate[BsonValue](aggs map (_.toDocument)))
-
   def aggregate0(collection: Collection, aggs: List[BsonDocument]): F[Stream[F, BsonValue]] =
     withCollectionExists(collection, getCollection(collection).aggregate[BsonValue](aggs))
 

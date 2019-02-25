@@ -49,8 +49,6 @@ import shims._
 trait StageInterpreterSpec extends JsonSpec {
   import MongoSpec.mkMongo
 
-  val E = MongoExpression
-
   import MongoResource._
 
   type JsonElement = BsonValue

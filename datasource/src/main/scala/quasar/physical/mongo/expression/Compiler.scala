@@ -29,9 +29,7 @@ import quasar.physical.mongo.Version
 
 import scalaz.{Const, Coproduct, Scalaz}, Scalaz._
 import scalaz.syntax._
-import scalaz.std._
 
-import Projection._, Step._
 import Pipeline._
 
 object Compiler {
@@ -55,7 +53,7 @@ object Compiler {
         if (version < Op.opMinVersion(op)) None
         else Some(opsToCore[T](op))
 
-      compileProjections(pipelineObjects(pipe))
+      optimize(compileProjections(pipelineObjects(pipe)))
         .transCataM[Option, T[Core], Core](_.run.fold(transformM, Some(_)))
         .map(coreToBson[T](_))
         .flatMap(mbBsonDocument)
@@ -128,10 +126,9 @@ object Compiler {
           O.$arrayElemAt(tl, i)
         case IndexGroup(i) =>
           val level = "level" concat levelIx.toString
-          val varSteps: List[Elem] = (IndexedAccess(i), levelIx) :: tl
           val vars: Map[String, List[Elem]] = Map(level -> tl)
           val expSteps = IndexedAccess(i)
-          val exp = List((expSteps, 0), (FieldGroup(List("$" concat level)), 1))
+          val exp = List[Elem]((expSteps, 0), (FieldGroup(List("$" concat level)), 1))
           O.$let(vars, exp)
         case FieldGroup(steps) =>
           val level = "level".concat(levelIx.toString)
@@ -191,5 +188,45 @@ object Compiler {
         new BsonDocument(elems.asJava)
     }
     inp.cata[BsonValue](ϕ)
+  }
+
+  def optimize[T[_[_]]: BirecursiveT](inp: T[CoreOp]): T[CoreOp] = {
+    orOpt(letOpt(inp))
+  }
+
+  def letOpt[T[_[_]]: BirecursiveT](inp: T[CoreOp]): T[CoreOp] = {
+    val O = Optics.coreOp(Prism.id[CoreOp[T[CoreOp]]])
+    val τ: CoreOp[T[CoreOp]] => CoreOp[T[CoreOp]] = {
+      case O.$let(vars, in) =>
+        if (vars.size /== 1) O.$let(vars, in)
+        else in.project match {
+          case O.string(str) =>
+            vars.get(str.stripPrefix("$$")) map (_.project) match {
+              case Some(O.string(x)) if x.stripPrefix("$") /== x =>
+                O.string(x.concat(x))
+              case _ =>
+                O.$let(vars, in)
+            }
+          case _ => O.$let(vars, in)
+        }
+      case x => x
+    }
+    inp.transCata[T[CoreOp]](τ)
+  }
+
+  def orOpt[T[_[_]]: BirecursiveT](inp: T[CoreOp]): T[CoreOp] = {
+    val O = Optics.coreOp(Prism.id[CoreOp[T[CoreOp]]])
+    val τ: CoreOp[T[CoreOp]] => CoreOp[T[CoreOp]] = {
+      case O.$or(lst) => lst match {
+        case List() => O.bool(false)
+        case List(a) => a.project
+        case _ => O.$or(lst map (_.project) flatMap {
+          case O.$or(as) => as
+          case x => List(x.embed)
+        })
+      }
+      case x => x
+    }
+    inp.transCata[T[CoreOp]](τ)
   }
 }

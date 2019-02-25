@@ -21,69 +21,27 @@ import slamdata.Predef._
 import cats.syntax.order._
 
 import org.specs2.mutable.Specification
-import org.specs2.ScalaCheck
 
-import quasar.common.{CPath, CPathField, CPathIndex}
-import quasar.physical.mongo.{Version, Aggregator, MongoExpression => E}
+import quasar.physical.mongo.expression._
 
-class ProjectSpec extends Specification with ScalaCheck {
-  import org.scalacheck._
-  import Arbitrary._
-  implicit def arbitraryCPath: Arbitrary[CPath] = Arbitrary {
-    Gen.listOfN(6, Gen.oneOf(Gen.alphaStr.map(CPathField(_)), arbitrary[Int].map(CPathIndex(_)))).map(CPath(_))
-  }
-
-  def cpathHasIndices(cpath: CPath): Boolean = cpath.nodes.exists {
-    case CPathIndex(_) => true
-    case _ => false
-  }
-
-  "Project props" >> {
-    "should be interpreted to None when version is too small" >> {
-      prop { (cpath: CPath, version: Version, rootKey: String) =>
-        (cpathHasIndices(cpath) && version < Version.$arrayElemAt) ==> {
-          Project(rootKey, version, cpath) must beNone
-        }
-      }.set(minTestsOk = 1000)
-    }
-    "should emit Some(exists, tmpKeyProject, backProject) otherwise" >> {
-      prop { (cpath: CPath, version: Version, rootKey: String) =>
-        val fld = E.cpathToProjection(cpath) getOrElse (E.Projection())
-        (fld.minVersion <= version) ==> {
-          Project(rootKey, version, cpath) must beLike {
-            case Some(actualMatch :: Aggregator.project(E.Object(tmpPair)) :: Aggregator.project(E.Object(backPair)) :: List()) => {
-              val projection = E.key(rootKey) +/ fld
-              val expectedMatch =
-                Aggregator.filter(E.Object(projection.toKey -> E.Object("$exists" -> E.Bool(true))))
-              (actualMatch === expectedMatch) and
-              (tmpPair._2 === projection) and
-              (backPair._2 === E.key(tmpPair._1)) and
-              (backPair._1 === rootKey)
-            }
-          }
-        }
-      }.set(minTestsOk = 1000)
-    }
-  }
-
+class ProjectSpec extends Specification {
   "Project examples" >> {
-    "too old mongo" >> {
-      Project("foo", Version.zero, CPath.parse("foo[0]")) must beNone
-    }
     "old mongo without indices" >> {
-      val actual = Project("root", Version.zero, CPath.parse("foo.bar"))
-      val expected = Some(List(
-        Aggregator.filter(E.Object("root.foo.bar" -> E.Object("$exists" -> E.Bool(true)))),
-        Aggregator.project(E.Object("root_project" -> (E.key("root") +/ E.key("foo") +/ E.key("bar")))),
-        Aggregator.project(E.Object("root" -> E.key("root_project")))))
+      val actual = Project.apply0("root", Projection.key("foo") + Projection.key("bar"))
+      val expected = List(
+        Pipeline.$match(Map("root.foo.bar" -> O.$exists(O.bool(true)))),
+        Pipeline.$project(Map("root_project" -> O.projection(
+          Projection.key("root") + Projection.key("foo") + Projection.key("bar")))),
+        Pipeline.$project(Map("root" -> O.key("root_project"))))
       actual === expected
     }
     "new mongo with indices" >> {
-      val actual = Project("other", Version.$arrayElemAt, CPath.parse("foo[1]"))
-      val expected = Some(List(
-        Aggregator.filter(E.Object("other.foo.1" -> E.Object("$exists" -> E.Bool(true)))),
-        Aggregator.project(E.Object("other_project" -> (E.key("other") +/ E.key("foo") +/ E.index(1)))),
-        Aggregator.project(E.Object("other" -> E.key("other_project")))))
+      val actual = Project.apply0("other", Projection.key("foo") + Projection.index(1))
+      val expected = List(
+        Pipeline.$match(Map("other.foo.1" -> O.$exists(O.bool(true)))),
+        Pipeline.$project(Map("other_project" -> O.projection(
+          Projection.key("other") + Projection.key("foo") + Projection.index(1)))),
+        Pipeline.$project(Map("other" -> O.key("other_project"))))
       actual === expected
     }
   }

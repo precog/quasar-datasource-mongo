@@ -21,7 +21,7 @@ import slamdata.Predef._
 import org.bson.{Document => _, _}
 
 import quasar.common.CPath
-import quasar.{IdStatus, ScalarStageSpec => Spec, JsonSpec, ScalarStage, ScalarStages}, ScalarStage._
+import quasar.{IdStatus, ScalarStageSpec => Spec, JsonSpec, ScalarStage, ScalarStages}
 
 class MongoScalarStagesInterpreterSpec
     extends JsonSpec
