@@ -34,7 +34,7 @@ class CartesianSpec extends Specification {
   }
   "empty cartesian should erase everything" >> {
     val actual = evalCartesian(Map.empty)
-    val expected = Some(List(Pipeline.$match(Map("root_cartesian_empty" -> O.bool(true)))))
+    val expected = Some(List(Pipeline.$match(Map("root_cartesian_empty" -> O.bool(false)))))
     actual === expected
   }
   "example" >> {

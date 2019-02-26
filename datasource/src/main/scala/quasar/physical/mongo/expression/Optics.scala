@@ -73,6 +73,14 @@ object Optics {
   def coreOp[A, O, F[_]](basePrism: Prism[O, F[A]])(implicit c: Core :<: F, o: Op :<: F): CoreOpOptics[A, O, F] =
     new CoreOpOptics(basePrism)
 
+  def coreOpT[T[_[_]], F[_]](
+      implicit c: Core :<: F,
+      o: Op :<: F,
+      f: Functor[F],
+      t: BirecursiveT[T])
+      : CoreOpOptics[T[F], T[F], F] =
+    new CoreOpOptics(birecursiveIso[T[F], F].reverse.asPrism)
+
   def full[A, O, F[_]](basePrism: Prism[O, F[A]])(
       implicit c: Core :<: F,
       o: Op :<: F,

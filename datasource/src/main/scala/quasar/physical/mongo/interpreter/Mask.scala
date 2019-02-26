@@ -75,8 +75,8 @@ object Mask {
 
   @SuppressWarnings(Array("org.wartremover.warts.Recursion"))
   private def typeTreeFilters(undefined: Projection, proj: Projection, tree: TypeTree): Expr = {
-    val typeStrings: List[Expr] = tree.types.toList flatMap parseTypeStrings map (O.string(_))
-    val eqExprs: List[Expr] = typeStrings map (x => O.$eq(List(O.$type(O.projection(proj)), x)))
+    val typeExprs: List[Expr] = tree.types.toList flatMap parseTypeStrings map (O.string(_))
+    val eqExprs: List[Expr] = typeExprs map (x => O.$eq(List(O.$type(O.projection(proj)), x)))
     val listExprs: List[Expr] =
       if (tree.types.contains(ColumnType.Array)) List()
       else tree.list.toList.sortBy(_._1) map {
@@ -141,7 +141,7 @@ object Mask {
 
   def apply(uniqueKey: String, masks: Map[CPath, Set[ColumnType]]): Option[List[Pipe]] = {
     val undefinedKey = uniqueKey.concat("_non_existent_field")
-    if (masks.isEmpty) Some(List(Pipeline.$match(Map(undefinedKey -> O.bool(true)))))
+    if (masks.isEmpty) Some(List(Pipeline.$match(Map(undefinedKey -> O.bool(false)))))
     else for {
       tree <- masksToTypeTree(uniqueKey, masks)
       projected = rebuildDoc(Projection.key(undefinedKey), Projection(List()), tree)

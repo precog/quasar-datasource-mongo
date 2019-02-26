@@ -21,11 +21,10 @@ import slamdata.Predef._
 import org.specs2.mutable.Specification
 import org.specs2.ScalaCheck
 
-import quasar.physical.mongo.Version
 import quasar.physical.mongo.expression._
 
 class WrapSpec extends Specification with ScalaCheck {
-  "wrap interpreter produces two projects" >> prop { (wrapString: String, version: Version, rootKey: String) =>
+  "wrap interpreter produces two projects" >> prop { (wrapString: String, rootKey: String) =>
     ((wrapString.length > 0) && (wrapString != "\u0000")) ==> {
       val interpretation = Wrap(rootKey, Field(wrapString))
       interpretation must beLike {

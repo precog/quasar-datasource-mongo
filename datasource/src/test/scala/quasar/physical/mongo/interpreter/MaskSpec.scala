@@ -18,24 +18,26 @@ package quasar.physical.mongo.interpreter
 
 import slamdata.Predef._
 
-import org.bson._
+import matryoshka.data.Fix
+
 import org.specs2.mutable.Specification
 
 import quasar.api.table.ColumnType
 import quasar.common.CPath
-import quasar.physical.mongo.Version
-import quasar.physical.mongo.expression._
+import quasar.physical.mongo.expression.{O => _, Expr => _, _}
 
-class MaskSpec extends Specification {
+import Compiler._
+
+class MaskSpec extends Specification with quasar.TreeMatchers {
   "examples" >> {
     def evalMask(masks: Map[CPath, Set[ColumnType]]): Option[List[Pipe]] =  Mask("root", masks)
 
-    val rootKey = O.key("root")
+    val O = Optics.coreOpT[Fix, CoreOp]
+    type Expr = Fix[CoreOp]
 
-    val undefined = O.key("root_non_existent_field")
+    val rootKey = O.string("$root")
 
-    def mkExpected(e: Map[String, Expr]) =
-      Some(List(Pipeline.$project(e), Pipeline.NotNull("root")))
+    val undefined = O.string("$root_non_existent_field")
 
     def typeEq(prj: Expr, s: String): Expr =
       O.$eq(List(O.$type(prj), O.string(s)))
@@ -43,23 +45,28 @@ class MaskSpec extends Specification {
     def isObjectFilter(x: Expr, y: Expr): Expr =
       O.$cond(typeEq(x, "object"), y, undefined)
 
-    def pipeEqual(a: Option[List[Pipe]], b: Option[List[Pipe]]) = {
-      val compile: List[Pipe] => Option[List[BsonDocument]] = x => compilePipeline(Version.$objectToArray, x)
-      val aExpr = a flatMap compile
-      val bExpr = b flatMap compile
-      aExpr === bExpr
+    def pipeEqual(a: Option[List[Pipe]], b: Expr) = {
+      a must beLike {
+        case Some(x :: Pipeline.NotNull("root") :: List()) =>
+          toCoreOp(eraseCustomPipeline(x)) must beTree(b)
+      }
     }
 
+    def wrapWithProject(e: Expr) = O.obj(Map("$project" -> e))
+    def wrapWithMatch(e: Expr) = O.obj(Map("$match" -> e))
+
     "drop everything when empty" >> {
-      val actual = evalMask(Map.empty)
-      val expected = Some(List(Pipeline.$match(Map("root_non_existent_field" -> O.bool(true)))))
-      pipeEqual(actual, expected)
+      evalMask(Map.empty) must beLike {
+        case Some(List(x)) =>
+          val expected = wrapWithMatch(O.obj(Map("root_non_existent_field" -> O.bool(false))))
+          toCoreOp(eraseCustomPipeline(x)) must beTree(expected)
+      }
     }
 
     "numbers and booleans types at identity" >> {
       val actual = evalMask(Map(CPath.Identity -> Set(ColumnType.Number, ColumnType.Boolean)))
 
-      val expected = mkExpected(Map("root" -> O.$cond(
+      val expected = wrapWithProject(O.obj(Map("root" -> O.$cond(
         O.$or(List(
             typeEq(rootKey, "double"),
             typeEq(rootKey, "long"),
@@ -67,30 +74,28 @@ class MaskSpec extends Specification {
             typeEq(rootKey, "decimal"),
             typeEq(rootKey, "bool"))),
           rootKey,
-          undefined)))
+          undefined))))
       pipeEqual(actual, expected)
     }
 
     "objects at identity" >> {
       val actual = evalMask(Map(CPath.Identity -> Set(ColumnType.Object)))
-      val expected = mkExpected(Map("root" -> O.$cond(typeEq(rootKey, "object"), rootKey, undefined)))
+      val expected = wrapWithProject(O.obj(Map("root" -> O.$cond(typeEq(rootKey, "object"), rootKey, undefined))))
       pipeEqual(actual, expected)
     }
 
     "mask at path" >> {
       val actual = evalMask(Map(CPath.parse(".a.b") -> Set(ColumnType.String)))
-      val aKey = Projection.key("root") + Projection.key("a")
-      val abKey = aKey + Projection.key("b")
 
       def abFilter(x: Expr): Expr =
-        O.$cond(typeEq(O.projection(abKey), "string"), x, undefined)
+        O.$cond(typeEq(O.string("$root.a.b"), "string"), x, undefined)
 
       val expected =
-        mkExpected(Map(
+        wrapWithProject(O.obj(Map(
           "root" -> abFilter(
             isObjectFilter(rootKey, O.obj(Map("a" ->
-              abFilter(isObjectFilter(O.projection(aKey), O.obj(Map("b" ->
-                abFilter(O.projection(abKey))))))))))))
+              abFilter(isObjectFilter(O.string("$root.a"), O.obj(Map("b" ->
+                abFilter(O.string("$root.a.b")))))))))))))
       pipeEqual(actual, expected)
     }
 
@@ -99,24 +104,20 @@ class MaskSpec extends Specification {
         CPath.parse(".a.c") -> Set(ColumnType.Boolean),
         CPath.parse(".a") -> Set(ColumnType.Array)))
 
-      // To me having the keys duplicated here is just coincidence, since they're defined for this very test
-      val aKey = Projection.key("root") + Projection.key("a")
-      val acKey = aKey + Projection.key("c")
-
       def acFilter(x: Expr) =
-        O.$cond(typeEq(O.projection(acKey), "bool"), x, undefined)
+        O.$cond(typeEq(O.string("$root.a.c"), "bool"), x, undefined)
 
       def bothFilters(x: Expr) =
-        O.$cond(O.$or(List(typeEq(O.projection(aKey), "array"), typeEq(O.projection(acKey), "bool"))), x, undefined)
+        O.$cond(O.$or(List(typeEq(O.string("$root.a"), "array"), typeEq(O.string("$root.a.c"), "bool"))), x, undefined)
 
-      val expected = mkExpected(Map(
+      val expected = wrapWithProject(O.obj(Map(
         "root" -> bothFilters(
           isObjectFilter(rootKey, O.obj(Map("a" ->
             bothFilters(
               O.$cond(
-                typeEq(O.projection(aKey), "object"),
-                O.obj(Map("c" -> acFilter(O.projection(acKey)))),
-                O.projection(aKey)))))))))
+                typeEq(O.string("$root.a"), "object"),
+                O.obj(Map("c" -> acFilter(O.string("$root.a.c")))),
+                O.string("$root.a"))))))))))
 
       pipeEqual(actual, expected)
     }
@@ -129,43 +130,42 @@ class MaskSpec extends Specification {
         CPath.parse(".c[1]") -> Set(ColumnType.Number, ColumnType.String),
         CPath.parse(".d[1]") -> Set(ColumnType.Boolean)))
 
-      val aKey = Projection.key("root") + Projection.key("a")
-      val cKey = Projection.key("root") + Projection.key("c")
-      val dKey = Projection.key("root") + Projection.key("d")
-      val d1Key = dKey + Projection.index(1)
-      val expected = mkExpected(Map(
+      def indexed(e: Expr, ix: Int): Expr =
+        O.$let(Map("level1" -> e), O.$arrayElemAt(O.string("$$level1"), ix))
+
+      val expected = wrapWithProject(O.obj(Map(
         "root" -> O.$cond(
           O.$or(List(
-            typeEq(O.projection(cKey), "array"),
-            typeEq(O.projection(d1Key), "bool"),
-            typeEq(O.projection(aKey), "object"))),
+            typeEq(O.string("$root.c"), "array"),
+            typeEq(indexed(O.string("$root.d"), 1), "bool"),
+            typeEq(O.string("$root.a"), "object"))),
           O.$cond(
             typeEq(rootKey, "object"),
             O.obj(Map(
               "c" ->
                 O.$cond(
-                  typeEq(O.projection(cKey), "array"),
-                  O.projection(cKey),
+                  typeEq(O.string("$root.c"), "array"),
+                  O.string("$root.c"),
                   undefined),
               "d" ->
                 O.$cond(
-                  typeEq(O.projection(d1Key), "bool"),
+                  typeEq(indexed(O.string("$root.d"), 1), "bool"),
                   O.$cond(
-                    typeEq(O.projection(dKey), "array"),
+                    typeEq(O.string("$root.d"), "array"),
                     O.array(List(
                       O.$cond(
-                        typeEq(O.projection(d1Key), "bool"),
-                        O.projection(d1Key),
+                        typeEq(indexed(O.string("$root.d"), 1), "bool"),
+                        indexed(O.string("$root.d"), 1),
                         undefined))),
                     undefined),
                   undefined),
               "a" ->
                 O.$cond(
-                  typeEq(O.projection(aKey), "object"),
-                  O.projection(aKey),
+                  typeEq(O.string("$root.a"), "object"),
+                  O.string("$root.a"),
                   undefined))),
             undefined),
-          undefined)))
+          undefined))))
 
       pipeEqual(actual, expected)
     }

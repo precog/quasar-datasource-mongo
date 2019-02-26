@@ -72,7 +72,7 @@ object Projection {
   }
 
   def safeField(str: String): Option[Field] =
-    if (str contains ".") None
+    if ((str contains ".") || (str contains "$")) None
     else Some(Field(str))
 
   def safeCartouches[A](inp: Map[CPathField, (CPathField, A)]): Option[Map[Field, (Field, A)]] =

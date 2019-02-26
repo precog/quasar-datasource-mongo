@@ -42,6 +42,9 @@ object Compiler {
       : Option[List[BsonDocument]] =
     pipes.foldMapM { x => compilePipe(version, x) map (List(_)) }
 
+  def toCoreOp[T[_[_]]: BirecursiveT](pipe: MongoPipeline[T[ExprF]]): T[CoreOp] =
+    optimize(compileProjections(pipelineObjects(pipe)))
+
   def compilePipe[T[_[_]]: BirecursiveT](
       version: Version,
       customPipe: Pipeline[T[ExprF]])
@@ -53,7 +56,7 @@ object Compiler {
         if (version < Op.opMinVersion(op)) None
         else Some(opsToCore[T](op))
 
-      optimize(compileProjections(pipelineObjects(pipe)))
+      toCoreOp(pipe)
         .transCataM[Option, T[Core], Core](_.run.fold(transformM, Some(_)))
         .map(coreToBson[T](_))
         .flatMap(mbBsonDocument)
@@ -95,13 +98,13 @@ object Compiler {
   }
 
   def unfoldProjection[T[_[_]]: BirecursiveT](prj: Projection): T[CoreOp] = {
-    trait GrouppedSteps
-    final case class IndexGroup(i: Int) extends GrouppedSteps
-    final case class FieldGroup(s: List[String]) extends GrouppedSteps
-    final case class IndexedAccess(i: Int) extends GrouppedSteps
+    trait GroupedSteps
+    final case class IndexGroup(i: Int) extends GroupedSteps
+    final case class FieldGroup(s: List[String]) extends GroupedSteps
+    final case class IndexedAccess(i: Int) extends GroupedSteps
 
-    def groupSteps(prj: Projection): List[GrouppedSteps] = {
-      val accum = prj.steps.foldl ((List[String](), List[GrouppedSteps]())) {
+    def groupSteps(prj: Projection): List[GroupedSteps] = {
+      val accum = prj.steps.foldl ((List[String](), List[GroupedSteps]())) {
         case (fldAccum, accum) => {
           case Field(s) => (s :: fldAccum, accum)
           case Index(i) => (List(), IndexGroup(i) :: FieldGroup(fldAccum.reverse) :: accum)
@@ -112,7 +115,7 @@ object Compiler {
         case x => (FieldGroup(x.reverse) :: accum._2).reverse
       }
     }
-    type Elem = (GrouppedSteps, Int)
+    type Elem = (GroupedSteps, Int)
 
     val O = Optics.coreOp(Prism.id[CoreOp[List[Elem]]])
 
@@ -133,7 +136,7 @@ object Compiler {
         case FieldGroup(steps) =>
           val level = "level".concat(levelIx.toString)
           val vars = Map(level -> tl)
-          val expSteps: GrouppedSteps = FieldGroup("$".concat(level) :: steps)
+          val expSteps: GroupedSteps = FieldGroup("$".concat(level) :: steps)
           val exp = List((expSteps, 0))
           O.$let(vars, exp)
       }

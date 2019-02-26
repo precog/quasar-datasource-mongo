@@ -93,9 +93,9 @@ object Core {
   implicit val delayRenderTreeCore: Delay[RenderTree, Core] = new Delay[RenderTree, Core] {
     def apply[A](fa: RenderTree[A]): RenderTree[Core[A]] = RenderTree.make {
       case Array(a) => NonTerminal(List("Array"), None, a map fa.render)
-        case Object(a) => NonTerminal(List("Object"), None, a.toList map {
-          case (k, v) => NonTerminal(List(), Some(k), List(fa.render(v)))
-        })
+      case Object(a) => NonTerminal(List("Object"), None, a.toList map {
+        case (k, v) => NonTerminal(List(), Some(k), List(fa.render(v)))
+      })
       case Bool(a) => Terminal(List("Boolean"), Some(a.toString))
       case Int(a) => Terminal(List("Int"), Some(a.toString))
       case String(a) => Terminal(List("String"), Some(a))

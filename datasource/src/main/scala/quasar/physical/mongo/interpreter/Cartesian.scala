@@ -34,7 +34,7 @@ object Cartesian {
       : Option[List[Pipe]] = {
 
     val undefinedKey = uniqueKey.concat("_cartesian_empty")
-    if (cartouches.isEmpty) Some(List(Pipeline.$match(Map(undefinedKey -> O.bool(true)))))
+    if (cartouches.isEmpty) Some(List(Pipeline.$match(Map(undefinedKey -> O.bool(false)))))
     else {
       val cartoucheList = cartouches.toList
 

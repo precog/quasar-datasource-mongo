@@ -24,9 +24,6 @@ import cats.instances.int._
 
 import scalaz.{Order => Zorder, Ordering}
 
-import org.scalacheck._
-import Arbitrary._
-
 final case class Version(major: Int, minor: Int, patch: Int)
 
 object Version {
@@ -49,13 +46,6 @@ object Version {
       Ordering.fromInt(orderVersion.compare(a, b))
     }
   }
-
-  implicit def arbitraryVersion: Arbitrary[Version] = Arbitrary (for {
-    a <- arbitrary[Int]
-    b <- arbitrary[Int]
-    c <- arbitrary[Int]
-  } yield Version(a, b, c))
-
 
   val zero: Version = Version(0, 0, 0)
   val $type: Version = Version(3, 4, 0)
