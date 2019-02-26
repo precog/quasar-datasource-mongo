@@ -128,9 +128,14 @@ class MongoDataSourceSpec extends EffectfulQSpec[IO] {
         Stream.force(fStream).compile.toList
       }}).attempt.unsafeRunSync() must beLike(connFailed)
 
-    def assertEmpty(datasource: IO[Disposable[IO, MongoDataSource[IO]]], path: ResourcePath) =
+    def assertNone(datasource: IO[Disposable[IO, MongoDataSource[IO]]], path: ResourcePath) =
       datasource.flatMap(_ { ds => {
         ds.prefixedChildPaths(path).map(_ must_=== None)
+      }})
+
+    def assertEmptyStream(datasource: IO[Disposable[IO, MongoDataSource[IO]]], path: ResourcePath) =
+      datasource.flatMap(_ { ds => {
+        ds.prefixedChildPaths(path).map(_ must_=== Some(Stream.empty))
       }})
 
     "children of root are databases" >>*
@@ -152,25 +157,25 @@ class MongoDataSourceSpec extends EffectfulQSpec[IO] {
       }
     }
 
-    "children of non-existing database are empty" >>
+    "children of non-existing database are none" >>
       Fragment.foreach(MongoSpec.incorrectDbs)(db =>
-        s"checking ${db.name}" >>* assertEmpty(mkDataSource, db.resourcePath))
+        s"checking ${db.name}" >>* assertNone(mkDataSource, db.resourcePath))
 
     "children of inaccessible database raises connection failed" >>
       Fragment.foreach(MongoSpec.incorrectDbs)(db =>
         s"checking ${db.name}" >> assertConnectionFailed(mkInaccessibleDataSource, db.resourcePath))
 
-    "children of existing collection are empty" >>
+    "children of existing collection are empty stream" >>
       Fragment.foreach (MongoSpec.correctCollections)(col =>
-        s"checking ${col.database.name} :: ${col.name}" >>* assertEmpty(mkDataSource, col.resourcePath))
+        s"checking ${col.database.name} :: ${col.name}" >>* assertEmptyStream(mkDataSource, col.resourcePath))
 
-    "children of non-existing collection are empty" >>
+    "children of non-existing collection are none" >>
       Fragment.foreach (MongoSpec.incorrectCollections)(col =>
-        s"checking ${col.database.name} :: ${col.name}" >>* assertEmpty(mkDataSource, col.resourcePath))
+        s"checking ${col.database.name} :: ${col.name}" >>* assertNone(mkDataSource, col.resourcePath))
 
-    "children of inaccessible collection are empty" >>
+    "children of inaccessible collection raises connection failed" >>
       Fragment.foreach (MongoSpec.incorrectCollections)(col =>
-        s"checking ${col.database.name} :: ${col.name}" >>* assertEmpty(mkInaccessibleDataSource, col.resourcePath))
+        s"checking ${col.database.name} :: ${col.name}" >> assertConnectionFailed(mkInaccessibleDataSource, col.resourcePath))
   }
 
   "pathIsResource" >> {

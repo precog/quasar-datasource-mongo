@@ -20,6 +20,7 @@ import slamdata.Predef._
 
 import cats.effect._
 import cats.syntax.applicative._
+import cats.syntax.flatMap._
 import cats.syntax.functor._
 import cats.syntax.option._
 
@@ -28,11 +29,11 @@ import eu.timepit.refined.auto._
 import fs2.Stream
 
 import quasar.api.datasource.DatasourceType
-import quasar.api.resource.{ResourcePath, ResourceName, ResourcePathType}
+import quasar.api.resource.{ResourceName, ResourcePath, ResourcePathType}
 import quasar.connector.{MonadResourceErr, QueryResult, ResourceError}
 import quasar.connector.datasource.LightweightDatasource
 import quasar.physical.mongo.decoder.qdataDecoder
-import quasar.physical.mongo.MongoResource.{Database, Collection}
+import quasar.physical.mongo.MongoResource.{Collection, Database}
 import quasar.qscript.InterpretedRead
 
 import shims._
@@ -78,18 +79,20 @@ class MongoDataSource[F[_]: ConcurrentEffect: ContextShift: MonadResourceErr: Ti
 
     case ResourcePath.Leaf(file) => MongoResource.ofFile(file) match {
       case None => none.pure[F]
-      case Some(Collection(_, _)) => none.pure[F]
-      case Some(db@Database(_)) => {
+
+      case Some(coll@Collection(_, _)) =>
+        val exists: F[Boolean] = mongo.collectionExists(coll).compile.last.map(_ getOrElse false)
+        exists.ifM(Stream.empty.covary[F].covaryOutput[(ResourceName, ResourcePathType)].some.pure[F], none.pure[F])
+
+      case Some(db@Database(_)) =>
         val dbExists: F[Boolean] = mongo.databaseExists(db).compile.last.map(_.getOrElse(false))
 
-        dbExists.map(exists => {
-          if (exists) {
+        dbExists.map(exists =>
+          if (exists)
             mongo.collections(db).map(x => (ResourceName(x.name), ResourcePathType.leafResource)).some
-          } else {
+          else
             none
-          }
-        })
-      }
+        )
     }
   }
 }
