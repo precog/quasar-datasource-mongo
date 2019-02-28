@@ -18,70 +18,64 @@ package quasar.physical.mongo.interpreter
 
 import slamdata.Predef._
 
+import cats.syntax.foldable._
 import cats.syntax.traverse._
 import cats.instances.option._
 import cats.instances.list._
 
-import quasar.physical.mongo.MongoExpression
-import quasar.physical.mongo.{Interpretation, Interpreter, Aggregator, Version, MongoExpression => E}
+import quasar.physical.mongo.Interpreter
+import quasar.physical.mongo.expression._
 import quasar.ScalarStage
 
 import shims._
 
-import E.ProjectionStep._
-
 object Cartesian {
-  def apply(
-      uniqueKey: String,
-      version: Version,
-      cartouches: Map[Field, (Field, List[ScalarStage.Focused])],
-      interpreter: Interpreter)
-      : Option[List[Aggregator]] = {
+  def apply(uniqueKey: String, cartouches: Map[Field, (Field, List[ScalarStage.Focused])], interpreter: Interpreter)
+      : Option[List[Pipe]] = {
 
     val undefinedKey = uniqueKey.concat("_cartesian_empty")
-    if (cartouches.isEmpty) Some(List(Aggregator.filter(E.Object(undefinedKey -> E.Bool(false)))))
+    if (cartouches.isEmpty) Some(List(Pipeline.$match(Map(undefinedKey -> O.bool(false)))))
     else {
       val cartoucheList = cartouches.toList
 
-      val interpretations: Option[List[List[Aggregator]]] =
+      val interpretations: Option[List[List[Pipe]]] =
         cartoucheList.traverse {
           case (alias, (_, instructions)) =>
-            val interpreted: Interpretation =
-              interpreter.refineInterpretation(alias.name, Interpretation.initial(instructions))
-            if (!interpreted.stages.isEmpty) None
-            else Some(interpreted.aggregators)
+            instructions foldMapM { x => interpreter.interpretStep(alias.name, x) }
         }
 
       interpretations map { is =>
-        val defaultPairs: List[(String, MongoExpression)] =
+        val defaultPairs: List[(String, Expr)] =
           cartoucheList map {
-            case (alias, _) => (alias.name, E.key(alias.name))
+            case (alias, _) => (alias.name, O.key(alias.name))
           }
-        val defaultObject = E.Object(defaultPairs:_*)
+
+        val defaultObject = Map(defaultPairs:_*)
 
         val initialProjectionPairs = cartoucheList map {
-          case (alias, (field, instructions)) => alias.name -> (E.key(uniqueKey) +/ E.key(field.name))
+          case (alias, (field, instructions)) => alias.name -> O.projection(Projection.key(uniqueKey) + Projection.key(field.name))
         }
 
         val initialProjection =
-          Aggregator.project(E.Object(initialProjectionPairs:_*))
+          Pipeline.$project(Map(initialProjectionPairs:_*))
 
         val lastProjectionPairs = cartoucheList map {
-          case (alias, _) => alias.name -> E.key(alias.name)
+          case (alias, _) => alias.name -> O.key(alias.name)
         }
-        val lastProjection = Aggregator.project(E.Object(uniqueKey -> E.Object(lastProjectionPairs:_*)))
+
+        val lastProjection =
+          Pipeline.$project(Map(uniqueKey -> O.obj(Map(lastProjectionPairs:_*))))
 
         val instructions = is flatMap (_ flatMap {
-          case Aggregator.project(a @ E.Object(_*)) =>
-            List(Aggregator.project(defaultObject + a))
-          case Aggregator.notNull(_) =>
+          case Pipeline.$project(mp) =>
+            List(Pipeline.$project(defaultObject ++ mp))
+          case Pipeline.NotNull(_) =>
             List()
           case x => List(x)
         })
 
-        List(initialProjection) ++ instructions ++ List(lastProjection, Aggregator.notNull(uniqueKey))
+        List(initialProjection) ++ instructions ++ List(lastProjection, Pipeline.NotNull(uniqueKey))
       }
     }
   }
-
 }

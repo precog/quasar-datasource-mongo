@@ -22,24 +22,19 @@ import org.specs2.mutable.Specification
 
 import quasar.api.table.ColumnType
 import quasar.common.{CPath, CPathField}
-import quasar.physical.mongo.{
-  MongoInterpreter,
-  Version,
-  Aggregator,
-  MongoExpression => E,
-  PushdownLevel }
+import quasar.physical.mongo.{MongoInterpreter, Version, PushdownLevel}
 import quasar.{ScalarStage, IdStatus}
+import quasar.physical.mongo.expression._
 
 class CartesianSpec extends Specification {
-  import E.helpers._
-  def evalCartesian(cartouches: Map[CPathField, (CPathField, List[ScalarStage.Focused])]): Option[List[Aggregator]] = {
+  def evalCartesian(cartouches: Map[CPathField, (CPathField, List[ScalarStage.Focused])]): Option[List[Pipe]] = {
     val interpreter = new MongoInterpreter(Version.$objectToArray, "root", PushdownLevel.Full)
-    E.safeCartouches(cartouches) flatMap { x => Cartesian("root", Version.$objectToArray, x, interpreter) }
+    Projection.safeCartouches(cartouches) flatMap { x => Cartesian("root", x, interpreter) }
 
   }
   "empty cartesian should erase everything" >> {
     val actual = evalCartesian(Map.empty)
-    val expected = Some(List(Aggregator.filter(E.Object("root_cartesian_empty" -> E.Bool(false)))))
+    val expected = Some(List(Pipeline.$match(Map("root_cartesian_empty" -> O.bool(false)))))
     actual === expected
   }
   "example" >> {
@@ -57,53 +52,51 @@ class CartesianSpec extends Specification {
     val actual = evalCartesian(cartouches)
 
     val expected = Some(List(
-      Aggregator.project(E.Object(
-        "a" -> (E.key("root") +/ E.key("a")),
-        "ba" -> (E.key("root") +/ E.key("b")),
-        "bm" -> (E.key("root") +/ E.key("b")))),
-      Aggregator.project(E.Object(
-        "a" -> E.key("a"),
-        "ba" -> cond(
-          equal(typeExpr(E.key("ba")), E.String("array")),
-          E.key("ba"),
-          E.key("ba_non_existent_field")),
-        "bm" -> E.key("bm"))),
-      Aggregator.project(E.Object(
-        "a" -> E.key("a"),
-        "ba" -> E.key("ba"),
-        "bm" -> E.key("bm"),
-        "ba_unwind" -> E.key("ba"))),
-      Aggregator.unwind(E.key("ba_unwind"), "ba_unwind_index"),
-      Aggregator.project(E.Object(
-        "a" -> E.key("a"),
-        "ba" -> E.key("ba_unwind"),
-        "bm" -> E.key("bm"))),
-      Aggregator.project(E.Object(
-        "a" -> E.key("a"),
-        "ba" -> E.key("ba"),
-        "bm" -> cond(
-          equal(typeExpr(E.key("bm")), E.String("object")),
-          E.key("bm"),
-          E.key("bm_non_existent_field")))),
-      Aggregator.project(E.Object(
-        "a" -> E.key("a"),
-        "ba" -> E.key("ba"),
-        "bm" -> E.key("bm"),
-        "bm_unwind" -> E.Object("$objectToArray" -> E.key("bm")))),
-      Aggregator.unwind(E.key("bm_unwind"), "bm_unwind_index"),
-      Aggregator.project(E.Object(
-        "a" -> E.key("a"),
-        "ba" -> E.key("ba"),
-        "bm" -> (E.key("bm_unwind") +/ E.key("v")))),
-      Aggregator.project(E.Object(
-        "root" -> E.Object(
-          "a" -> E.key("a"),
-          "ba" -> E.key("ba"),
-          "bm" -> E.key("bm")))),
-      Aggregator.notNull("root")))
+      Pipeline.$project(Map(
+        "a" -> O.projection(Projection.key("root") + Projection.key("a")),
+        "ba" -> O.projection(Projection.key("root") + Projection.key("b")),
+        "bm" -> O.projection(Projection.key("root") + Projection.key("b")))),
+      Pipeline.$project(Map(
+        "a" -> O.key("a"),
+        "ba" -> O.$cond(
+          O.$or(List(O.$eq(List(O.$type(O.key("ba")), O.string("array"))))),
+          O.key("ba"),
+          O.key("ba_non_existent_field")),
+        "bm" -> O.key("bm"))),
+      Pipeline.$project(Map(
+        "a" -> O.key("a"),
+        "ba" -> O.key("ba"),
+        "bm" -> O.key("bm"),
+        "ba_unwind" -> O.key("ba"))),
+      Pipeline.$unwind("ba_unwind", "ba_unwind_index"),
+      Pipeline.$project(Map(
+        "a" -> O.key("a"),
+        "ba" -> O.key("ba_unwind"),
+        "bm" -> O.key("bm"))),
+      Pipeline.$project(Map(
+        "a" -> O.key("a"),
+        "ba" -> O.key("ba"),
+        "bm" -> O.$cond(
+          O.$or(List(O.$eq(List(O.$type(O.key("bm")), O.string("object"))))),
+          O.key("bm"),
+          O.key("bm_non_existent_field")))),
+      Pipeline.$project(Map(
+        "a" -> O.key("a"),
+        "ba" -> O.key("ba"),
+        "bm" -> O.key("bm"),
+        "bm_unwind" -> O.$objectToArray(O.key("bm")))),
+      Pipeline.$unwind("bm_unwind", "bm_unwind_index"),
+      Pipeline.$project(Map(
+        "a" -> O.key("a"),
+        "ba" -> O.key("ba"),
+        "bm" -> O.projection(Projection.key("bm_unwind") + Projection.key("v")))),
+      Pipeline.$project(Map(
+        "root" -> O.obj(Map(
+          "a" -> O.key("a"),
+          "ba" -> O.key("ba"),
+          "bm" -> O.key("bm"))))),
+      Pipeline.NotNull("root")))
 
-    val expectedDocs = expected map (_ map (_.toDocument))
-    val actualDocs = actual map (_ map (_.toDocument))
-    expectedDocs === actualDocs
+    actual === expected
   }
 }

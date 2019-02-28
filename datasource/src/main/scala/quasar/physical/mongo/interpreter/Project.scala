@@ -18,36 +18,15 @@ package quasar.physical.mongo.interpreter
 
 import slamdata.Predef._
 
-import cats.syntax.order._
-
-import quasar.common.CPath
-
-import quasar.physical.mongo.{Aggregator, Version, MongoExpression => E}
-
-import shims._
+import quasar.physical.mongo.expression._
 
 object Project {
-  def apply(
-      uniqueKey: String,
-      version: Version,
-      path: CPath)
-      : Option[List[Aggregator]] = {
-
-    E.cpathToProjection(path) flatMap { (fld: E.Projection) =>
-      if (fld.minVersion > version) None else Some {
-        val tmpKey =
-          uniqueKey.concat("_project")
-        val projection =
-          E.key(uniqueKey) +/ fld
-        val match_ =
-          Aggregator.filter(E.Object(projection.toKey -> E.Object("$exists" -> E.Bool(true))))
-        val move =
-          Aggregator.project(E.Object(tmpKey -> projection))
-        val project =
-          Aggregator.project(E.Object(uniqueKey -> E.key(tmpKey)))
-        List(match_, move, project)
-      }
-    }
-
+  def apply(uniqueKey: String, fld: Projection): List[Pipe] = {
+    val tmpKey = uniqueKey.concat("_project")
+    val projection = Projection.key(uniqueKey) + fld
+    val match_ = Pipeline.$match(Map(projection.toKey -> O.$exists(O.bool(true))))
+    val move = Pipeline.$project(Map(tmpKey -> O.projection(projection)))
+    val project = Pipeline.$project(Map(uniqueKey -> O.key(tmpKey)))
+    List(match_, move, project)
   }
 }

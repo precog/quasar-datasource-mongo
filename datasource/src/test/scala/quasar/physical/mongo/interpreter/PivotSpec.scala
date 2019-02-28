@@ -21,69 +21,57 @@ import slamdata.Predef._
 import org.specs2.mutable.Specification
 
 import quasar.api.table.ColumnType
-import quasar.physical.mongo.MongoExpression
-import quasar.physical.mongo.{Version, Aggregator, MongoExpression => E}
+import quasar.physical.mongo.expression._
 import quasar.IdStatus
 
 class PivotSpec extends Specification {
-  "Min versions" >> {
-    "Array and too old mongo" >> {
-      Pivot("root", Version.zero, IdStatus.IdOnly, ColumnType.Array) must beNone
-    }
-    "Array and mongo with unwind.includeArrayIndices" >> {
-      Pivot("root", Version.$unwind, IdStatus.IdOnly, ColumnType.Array) must beSome
-    }
-    "Object and too old mongo" >> {
-      Pivot("root", Version.$unwind, IdStatus.IdOnly, ColumnType.Object) must beNone
-    }
-    "Object and mongo with $objectToArray" >> {
-      Pivot("root", Version.$objectToArray, IdStatus.IdOnly, ColumnType.Object) must beSome
-    }
-  }
   "Array examples" >> {
-    def mkExpected(e: MongoExpression): Option[List[Aggregator]] = Some(List(
-      Aggregator.project(E.Object("root_unwind" -> E.key("root"))),
-      Aggregator.unwind(E.key("root_unwind"), "root_unwind_index"),
-      Aggregator.project(E.Object("root" -> e)),
-      Aggregator.notNull("root")))
+    def mkExpected(e: Expr): Option[List[Pipe]] = Some(List(
+      Pipeline.$project(Map("root_unwind" -> O.key("root"))),
+      Pipeline.$unwind("root_unwind", "root_unwind_index"),
+      Pipeline.$project(Map("root" -> e)),
+      Pipeline.NotNull("root")))
 
     "id only" >> {
-      val actual = Pivot("root", Version.$objectToArray, IdStatus.IdOnly, ColumnType.Array)
-      val expected = mkExpected(E.key("root_unwind_index"))
+      val actual = Pivot("root", IdStatus.IdOnly, ColumnType.Array)
+      val expected = mkExpected(O.key("root_unwind_index"))
       actual === expected
     }
     "values only" >> {
-      val actual = Pivot("root", Version.$objectToArray, IdStatus.ExcludeId, ColumnType.Array)
-      val expected = mkExpected(E.key("root_unwind"))
+      val actual = Pivot("root", IdStatus.ExcludeId, ColumnType.Array)
+      val expected = mkExpected(O.key("root_unwind"))
       actual === expected
     }
     "both" >> {
-      val actual = Pivot("root", Version.$objectToArray, IdStatus.IncludeId, ColumnType.Array)
-      val expected = mkExpected(E.Array(E.key("root_unwind_index"), E.key("root_unwind")))
+      val actual = Pivot("root", IdStatus.IncludeId, ColumnType.Array)
+      val expected = mkExpected(O.array(List(O.key("root_unwind_index"), O.key("root_unwind"))))
       actual === expected
     }
   }
 
   "Object examples" >> {
-    def mkExpected(e: MongoExpression): Option[List[Aggregator]] = Some(List(
-      Aggregator.project(E.Object("root_unwind" -> E.Object("$objectToArray" -> E.key("root")))),
-      Aggregator.unwind(E.key("root_unwind"), "root_unwind_index"),
-      Aggregator.project(E.Object("root" -> e)),
-      Aggregator.notNull("root")))
+    def mkExpected(e: Expr): Option[List[Pipe]] = Some(List(
+      Pipeline.$project(Map("root_unwind" -> O.$objectToArray(O.key("root")))),
+      Pipeline.$unwind("root_unwind", "root_unwind_index"),
+      Pipeline.$project(Map("root" -> e)),
+      Pipeline.NotNull("root")))
 
     "id only" >> {
-      val actual = Pivot("root", Version.$objectToArray, IdStatus.IdOnly, ColumnType.Object)
-      val expected = mkExpected(E.key("root_unwind") +/ E.key("k"))
+      val actual = Pivot("root", IdStatus.IdOnly, ColumnType.Object)
+      val expected = mkExpected(O.projection(Projection.key("root_unwind") + Projection.key("k")))
       actual === expected
     }
     "values only" >> {
-      val actual = Pivot("root", Version.$objectToArray, IdStatus.ExcludeId, ColumnType.Object)
-      val expected = mkExpected(E.key("root_unwind") +/ E.key("v"))
+      val actual = Pivot("root", IdStatus.ExcludeId, ColumnType.Object)
+      val expected = mkExpected(O.projection(Projection.key("root_unwind") + Projection.key("v")))
       actual === expected
     }
     "both" >> {
-      val actual = Pivot("root", Version.$objectToArray, IdStatus.IncludeId, ColumnType.Object)
-      val expected = mkExpected(E.Array(E.key("root_unwind") +/ E.key("k"), E.key("root_unwind") +/ E.key("v")))
+      val actual = Pivot("root", IdStatus.IncludeId, ColumnType.Object)
+      val expected = mkExpected(O.array(List(
+        O.projection(Projection.key("root_unwind") + Projection.key("k")),
+        O.projection(Projection.key("root_unwind") + Projection.key("v")))))
+
       actual === expected
     }
   }

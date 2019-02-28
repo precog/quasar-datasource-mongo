@@ -18,18 +18,17 @@ package quasar.physical.mongo.interpreter
 
 import slamdata.Predef._
 
-import quasar.physical.mongo.{Aggregator, Version, MongoExpression => E}, E.ProjectionStep.Field
+import quasar.physical.mongo.expression._
 
 object Wrap {
-  def apply(
-      uniqueKey: String,
-      version: Version,
-      wrap: Field)
-      : List[Aggregator] = {
-
+  def apply(uniqueKey: String, name: Field): List[Pipe] = {
     val tmpKey = uniqueKey.concat("_wrap")
     List(
-      Aggregator.project(E.Object(tmpKey -> E.Object(wrap.name -> E.key(uniqueKey)))),
-      Aggregator.project(E.Object(uniqueKey -> E.key(tmpKey))))
-    }
+      Pipeline.$project(Map(
+        tmpKey -> O.obj(Map(name.name -> O.key(uniqueKey))))),
+      Pipeline.$project(Map(
+        uniqueKey -> O.key(tmpKey)))
+    )
+  }
+
 }

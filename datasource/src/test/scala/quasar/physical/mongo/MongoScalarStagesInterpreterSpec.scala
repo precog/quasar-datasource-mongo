@@ -20,7 +20,8 @@ import slamdata.Predef._
 
 import org.bson.{Document => _, _}
 
-import quasar.common.CPath
+import quasar.api.table.ColumnType
+import quasar.common.{CPath, CPathField}
 import quasar.{IdStatus, ScalarStageSpec => Spec, JsonSpec, ScalarStage, ScalarStages}
 
 class MongoScalarStagesInterpreterSpec
@@ -56,6 +57,54 @@ class MongoScalarStagesInterpreterSpec
         ["2", {"_id": "2", "value": "baz"}]""")
       val actual = interpret(ScalarStages(IdStatus.IncludeId, List()), input, (x => x))
       actual must bestSemanticEqual(expected)
+    }
+  }
+
+  "Cartesian special" >> {
+    "cross fields when some are undefined" in {
+      val input = ldjson("""
+          { "a0": 1 }
+          { "a0": 2, "b0": "foo" }
+          { "b0": "bar" }
+          """)
+      val expected = ldjson("""
+          { "a1": 1 }
+          { "a1": 2, "b1": "foo" }
+          { "b1": "bar" }
+          """)
+      val targets = Map(
+        (CPathField("a1"), (CPathField("a0"), Nil)),
+        (CPathField("b1"), (CPathField("b0"), Nil)))
+
+      input must cartesianInto(targets)(expected)
+    }
+
+    "nested pivoting doesn't produce unnecessary empty fields" in {
+      val input = ldjson("""
+          { "a": 1, "b": [[ "two", "three" ], 12, ["four"]] }
+          { "a": 2, "b": [{ "x": "four", "y": "five" }] }
+          { "a": 3, "b": 42 }
+          """)
+
+      val expected = ldjson("""
+          { "a": 1, "ba": "two" }
+          { "a": 1, "ba": "three" }
+          { "a": 1 }
+          { "a": 1, "ba": "four" }
+          { "a": 2 }
+          { "a": 3 }
+          """)
+
+      val targets = Map(
+        (CPathField("a"), (CPathField("a"), Nil)),
+
+        (CPathField("ba"), (CPathField("b"), List(
+          Mask(Map(CPath.Identity -> Set(ColumnType.Array))),
+          Pivot(IdStatus.ExcludeId, ColumnType.Array),
+          Mask(Map(CPath.Identity -> Set(ColumnType.Array))),
+          Pivot(IdStatus.ExcludeId, ColumnType.Array)))))
+
+      input must cartesianInto(targets)(expected)
     }
   }
 
