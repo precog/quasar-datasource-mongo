@@ -25,6 +25,7 @@ import quasar.physical.mongo.expression._
 import quasar.IdStatus
 
 class PivotSpec extends Specification {
+/*
   "Array examples" >> {
     def mkExpected(e: Expr): Option[List[Pipe]] = Some(List(
       Pipeline.$project(Map("root_unwind" -> O.key("root"))),
@@ -75,4 +76,5 @@ class PivotSpec extends Specification {
       actual === expected
     }
   }
+ */
 }

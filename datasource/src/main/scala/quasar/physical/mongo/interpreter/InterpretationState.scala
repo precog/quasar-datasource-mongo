@@ -18,16 +18,6 @@ package quasar.physical.mongo.interpreter
 
 import slamdata.Predef._
 
-import quasar.physical.mongo.expression._
+import quasar.physical.mongo.expression.Mapper
 
-import scalaz.{MonadState, Scalaz}, Scalaz._
-
-object Wrap {
-  def apply[F[_]: MonadInState](name: Field): F[List[Pipe]] = for {
-    state <- MonadState[F, InterpretationState].get
-    res = List(Pipeline.$project(Map(
-      name.name -> O.steps(List()),
-      "_id" -> O.int(0)))) map mapProjection(Mapper.projection(state.mapper))
-    _ <- identity[F]
-  } yield res
-}
+final case class InterpretationState(uniqueKey: String, mapper: Mapper) extends Product with Serializable

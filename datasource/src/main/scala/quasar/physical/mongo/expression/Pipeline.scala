@@ -18,39 +18,52 @@ package quasar.physical.mongo.expression
 
 import slamdata.Predef._
 
+import cats.Bifunctor
+
 import matryoshka.Delay
 
 import quasar.{RenderTree, NonTerminal}, RenderTree.ops._
 import quasar.physical.mongo.Version
 
-trait Pipeline[+A] extends Product with Serializable
+trait Pipeline[+A, +B] extends Product with Serializable
 
-trait MongoPipeline[+A] extends Pipeline[A]
+trait MongoPipeline[+A, +B] extends Pipeline[A, B]
 
-trait CustomPipeline extends Pipeline[Nothing]
+trait CustomPipeline[+B] extends Pipeline[Nothing, B]
 
 object Pipeline {
-  final case class $project[A](obj: Map[String, A]) extends MongoPipeline[A]
-  final case class $match[A](obj: Map[String, A]) extends MongoPipeline[A]
-  final case class $unwind[A](path: String, arrayIndex: String) extends MongoPipeline[A]
+  final case class $project[A, B](obj: Map[String, A]) extends MongoPipeline[A, B]
+  final case class $match[A, B](obj: Map[String, A]) extends MongoPipeline[A, B]
+  final case class $unwind[A, B](path: B, arrayIndex: String) extends MongoPipeline[A, B]
 
-  implicit val delayRenderTreeMongoPipeline: Delay[RenderTree, MongoPipeline] = new Delay[RenderTree, MongoPipeline] {
-    def apply[A](fa: RenderTree[A]): RenderTree[MongoPipeline[A]] = RenderTree.make {
-      case $project(obj) => NonTerminal(List("$project"), None, obj.toList map {
-        case (k, v) => NonTerminal(List(), Some(k), List(fa.render(v)))
-      })
-      case $match(obj) => NonTerminal(List("$match"), None, obj.toList map {
-        case (k, v) => NonTerminal(List(), Some(k), List(fa.render(v)))
-      })
-      case $unwind(p, a) => NonTerminal(List("$unwind"), None, List(p.render, a.render))
-    }
+  implicit def delayRenderTreeMongoPipeline[B: RenderTree]: Delay[RenderTree, MongoPipeline[?, B]] =
+    new Delay[RenderTree, MongoPipeline[?, B]] {
+      def apply[A](fa: RenderTree[A]): RenderTree[MongoPipeline[A, B]] = RenderTree.make {
+        case $project(obj) => NonTerminal(List("$project"), None, obj.toList map {
+          case (k, v) => NonTerminal(List(), Some(k), List(fa.render(v)))
+        })
+        case $match(obj) => NonTerminal(List("$match"), None, obj.toList map {
+          case (k, v) => NonTerminal(List(), Some(k), List(fa.render(v)))
+        })
+        case $unwind(p, a) =>
+          NonTerminal(List("$unwind"), None, List(p.render, a.render))
+      }
   }
 
-  final case class NotNull(field: String) extends CustomPipeline
+  final case class NotNull[B](field: B) extends CustomPipeline[B]
 
-  def pipeMinVersion[A](pipe: MongoPipeline[A]): Version = pipe match {
+  def pipeMinVersion(pipe: MongoPipeline[_, _]): Version = pipe match {
     case $project(_) => Version.zero
     case $match(_) => Version.zero
     case $unwind(_, _) => Version.$unwind
+  }
+
+  implicit val bifunctorMongoPipeline: Bifunctor[Pipeline] = new Bifunctor[Pipeline] {
+    def bimap[A, B, C, D](fab: Pipeline[A, B])(f: A => C, g: B => D): Pipeline[C, D] = fab match {
+      case $project(mp) => $project(mp map { case (a, b) => (a, f(b)) })
+      case $match(mp) => $match(mp map { case (a, b) => (a, f(b)) })
+      case $unwind(prj, arrayIndex) => $unwind(g(prj), arrayIndex)
+      case NotNull(prj) => NotNull(g(prj))
+    }
   }
 }

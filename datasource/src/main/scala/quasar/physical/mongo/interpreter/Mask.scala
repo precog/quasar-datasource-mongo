@@ -18,15 +18,13 @@ package quasar.physical.mongo.interpreter
 
 import slamdata.Predef._
 
-import cats.syntax.order._
-import cats.syntax.foldable._
-import cats.instances.option._
-import cats.instances.list._
-
 import quasar.common.CPath
 import quasar.api.table.ColumnType
 
 import quasar.physical.mongo.expression._
+import quasar.physical.mongo.utils.optToAlternative
+
+import scalaz.{MonadState, Scalaz, PlusEmpty}, Scalaz._
 
 import shims._
 
@@ -55,7 +53,7 @@ object Mask {
   }
 
   private def masksToTypeTree(uniqueKey: String, masks: Map[CPath, Set[ColumnType]]): Option[TypeTree] = {
-    masks.toList.foldM(emptyTree) {
+    masks.toList.foldLeftM(emptyTree) {
       case (acc, (cpath, types)) => Projection.fromCPath(cpath) map { p =>
         insert(Field(uniqueKey) :: p.steps, TypeTree(types, Map.empty, Map.empty), acc)
       }
@@ -139,13 +137,14 @@ object Mask {
         O.projection(undefined))
   }
 
-  def apply(uniqueKey: String, masks: Map[CPath, Set[ColumnType]]): Option[List[Pipe]] = {
-    val undefinedKey = uniqueKey.concat("_non_existent_field")
-    if (masks.isEmpty) Some(List(Pipeline.$match(Map(undefinedKey -> O.bool(false)))))
-    else for {
-      tree <- masksToTypeTree(uniqueKey, masks)
-      projected = rebuildDoc(Projection.key(undefinedKey), Projection(List()), tree)
-      projObj <- O.obj.getOption(projected)
-    } yield List(Pipeline.$project(projObj), Pipeline.NotNull(uniqueKey))
-  }
+  def apply[F[_]: MonadInState: PlusEmpty](masks: Map[CPath, Set[ColumnType]]): F[List[Pipe]] =
+    MonadState[F, InterpretationState].gets(_.uniqueKey) flatMap { uniqueKey =>
+      val undefinedKey = uniqueKey.concat("_non_existent_field")
+      if (masks.isEmpty) List(Pipeline.$match(Map(undefinedKey -> O.bool(false))): Pipe).point[F]
+      else optToAlternative[F].apply (for {
+        tree <- masksToTypeTree(uniqueKey, masks)
+        projected = rebuildDoc(Projection.key(undefinedKey), Projection(List()), tree)
+        projObj <- O.obj.getOption(projected)
+      } yield List(Pipeline.$project(projObj), Pipeline.NotNull(Projection.key(uniqueKey))))
+    }
 }

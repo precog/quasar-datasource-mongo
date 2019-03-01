@@ -18,9 +18,14 @@ package quasar.physical.mongo
 
 import slamdata.Predef._
 
+import cats.syntax.bifunctor._
+
 import matryoshka.data.Fix
 
 import org.bson._
+
+import scalaz.{Const, Coproduct, Scalaz, MonadPlus}, Scalaz._
+import scalaz.syntax._
 
 package object expression {
   type ExprF[A] = Compiler.ExprF[A]
@@ -36,12 +41,14 @@ package object expression {
 
   val O: Optics.FullOptics[Fix[Compiler.ExprF], Fix[Compiler.ExprF], Compiler.ExprF] = Optics.fullT[Fix, Compiler.ExprF]
 
-  type Pipe = Pipeline[Expr]
+  type Pipe = Pipeline[Expr, Projection]
 
-  def compilePipeline(version: Version, pipes: List[Pipe]): Option[List[BsonDocument]] =
-    Compiler.compilePipeline[Fix](version, pipes)
+  def compilePipeline[F[_]: MonadPlus](version: Version, pipes: List[Pipe]): F[List[BsonDocument]] =
+    Compiler.compilePipeline[Fix, F](version, pipes)
 
-  def compilePipe(version: Version, pipe: Pipe): Option[BsonDocument] =
-    Compiler.compilePipe[Fix](version, pipe)
+  def compilePipe[F[_]: MonadPlus](version: Version, pipe: Pipe): F[BsonDocument] =
+    Compiler.compilePipe[Fix, F](version, pipe)
 
+  def mapProjection(f: Projection => Projection)(pipe: Pipe): Pipe =
+    pipe.bimap(Compiler.mapProjection(f), f)
 }

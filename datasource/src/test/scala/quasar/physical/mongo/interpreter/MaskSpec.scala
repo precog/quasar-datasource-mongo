@@ -29,6 +29,7 @@ import quasar.physical.mongo.expression.{O => _, Expr => _, _}
 import Compiler._
 
 class MaskSpec extends Specification with quasar.TreeMatchers {
+/*
   "examples" >> {
     def evalMask(masks: Map[CPath, Set[ColumnType]]): Option[List[Pipe]] =  Mask("root", masks)
 
@@ -170,6 +171,6 @@ class MaskSpec extends Specification with quasar.TreeMatchers {
       pipeEqual(actual, expected)
     }
   }
-
+ */
 
 }

@@ -27,7 +27,7 @@ import org.bson._
 
 import quasar.physical.mongo.Version
 
-import scalaz.{Const, Coproduct, Scalaz}, Scalaz._
+import scalaz.{Const, Coproduct, Scalaz, MonadPlus, ApplicativePlus}, Scalaz._
 import scalaz.syntax._
 
 import Pipeline._
@@ -36,53 +36,54 @@ object Compiler {
   type CoreOp[A] = Coproduct[Op, Core, A]
   type ExprF[A] = Coproduct[Const[Projection, ?], CoreOp, A]
 
-  def compilePipeline[T[_[_]]: BirecursiveT](
+  def compilePipeline[T[_[_]]: BirecursiveT, F[_]: MonadPlus](
       version: Version,
-      pipes: List[Pipeline[T[ExprF]]])
-      : Option[List[BsonDocument]] =
-    pipes.foldMapM { x => compilePipe(version, x) map (List(_)) }
+      pipes: List[Pipeline[T[ExprF], Projection]])
+      : F[List[BsonDocument]] =
+    pipes.foldMapM { x => compilePipe[T, F](version, x) map (List(_)) }
 
-  def toCoreOp[T[_[_]]: BirecursiveT](pipe: MongoPipeline[T[ExprF]]): T[CoreOp] =
+  def toCoreOp[T[_[_]]: BirecursiveT](pipe: MongoPipeline[T[ExprF], Projection]): T[CoreOp] =
     optimize(compileProjections(pipelineObjects(pipe)))
 
-  def compilePipe[T[_[_]]: BirecursiveT](
+  def compilePipe[T[_[_]]: BirecursiveT, F[_]: MonadPlus](
       version: Version,
-      customPipe: Pipeline[T[ExprF]])
-      : Option[BsonDocument] = {
+      customPipe: Pipeline[T[ExprF], Projection])
+      : F[BsonDocument] = {
     val pipe = eraseCustomPipeline(customPipe)
-    if (version < pipeMinVersion(pipe)) None
+    if (version < pipeMinVersion(pipe)) MonadPlus[F].empty
     else {
-      def transformM(op: Op[T[Core]]): Option[Core[T[Core]]] =
-        if (version < Op.opMinVersion(op)) None
-        else Some(opsToCore[T](op))
+      def transformM(op: Op[T[Core]]): F[Core[T[Core]]] =
+        if (version < Op.opMinVersion(op)) MonadPlus[F].empty
+        else opsToCore[T](op).point[F]
 
       toCoreOp(pipe)
-        .transCataM[Option, T[Core], Core](_.run.fold(transformM, Some(_)))
+        .transCataM[F, T[Core], Core](_.run.fold(transformM, MonadPlus[F].point(_)))
         .map(coreToBson[T](_))
-        .flatMap(mbBsonDocument)
+        .flatMap(mbBsonDocument[F])
     }
   }
 
-  val mbBsonDocument: BsonValue => Option[BsonDocument] = {
-    case x: BsonDocument => Some(x)
-    case _ => None
+  def mbBsonDocument[F[_]: ApplicativePlus](inp: BsonValue): F[BsonDocument] = inp match {
+    case x: BsonDocument => x.point[F]
+    case _ => ApplicativePlus[F].empty
   }
 
   def eraseCustomPipeline[T[_[_]]: BirecursiveT](
-      pipeline: Pipeline[T[ExprF]])
-      : MongoPipeline[T[ExprF]] = {
+      pipeline: Pipeline[T[ExprF], Projection])
+      : MongoPipeline[T[ExprF], Projection] = {
 
     val O = Optics.fullT[T, ExprF]
 
     pipeline match {
-      case NotNull(fld) => $match(Map(fld -> O.$ne(O.nil())))
+      case NotNull(fld) => $match(Map(fld.toKey -> O.$ne(O.nil())))
       case $project(obj) => $project(obj)
       case $match(obj) => $match(obj)
       case $unwind(a, i) => $unwind(a, i)
     }
   }
 
-  def pipelineObjects[T[_[_]]: BirecursiveT](pipe: MongoPipeline[T[ExprF]]): T[ExprF] = {
+
+  def pipelineObjects[T[_[_]]: BirecursiveT](pipe: MongoPipeline[T[ExprF], Projection]): T[ExprF] = {
     val O = Optics.fullT[T, ExprF]
     pipe match {
       case $match(mp) =>
@@ -91,7 +92,7 @@ object Compiler {
         O.obj(Map("$project" -> O.obj(mp)))
       case $unwind(path, arrayIndex) =>
         O.obj(Map("$unwind" -> O.obj(Map(
-          "path" -> O.key(path),
+          "path" -> O.projection(path),
           "includeArrayIndex" -> O.string(arrayIndex),
           "preserveNullAndEmptyArrays" -> O.bool(true)))))
     }
@@ -232,4 +233,16 @@ object Compiler {
     }
     inp.transCata[T[CoreOp]](τ)
   }
+
+  def mapProjection[T[_[_]]: BirecursiveT](f: Projection => Projection)(inp: T[ExprF]): T[ExprF] = {
+    val O = Optics.full(Prism.id[ExprF[T[ExprF]]])
+    val τ: ExprF[T[ExprF]] => ExprF[T[ExprF]] = {
+      case O.projection(prj) => O.projection(f(prj))
+      case x => x
+    }
+    inp.transCata[T[ExprF]](τ)
+  }
+
+
+
 }

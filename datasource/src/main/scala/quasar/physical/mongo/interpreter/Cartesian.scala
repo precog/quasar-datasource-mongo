@@ -18,30 +18,32 @@ package quasar.physical.mongo.interpreter
 
 import slamdata.Predef._
 
-import cats.syntax.foldable._
-import cats.syntax.traverse._
-import cats.instances.option._
-import cats.instances.list._
-
-import quasar.physical.mongo.Interpreter
 import quasar.physical.mongo.expression._
 import quasar.ScalarStage
+
+import scalaz.{MonadState, Scalaz, PlusEmpty}, Scalaz._
 
 import shims._
 
 object Cartesian {
-  def apply(uniqueKey: String, cartouches: Map[Field, (Field, List[ScalarStage.Focused])], interpreter: Interpreter)
-      : Option[List[Pipe]] = {
+  def apply[F[_]: MonadInState: PlusEmpty](
+      cartouches: Map[Field, (Field, List[ScalarStage.Focused])],
+      interpretStep: ScalarStage => F[List[Pipe]])
+      : F[List[Pipe]] = MonadState[F, InterpretationState].gets(_.uniqueKey) flatMap { uniqueKey =>
 
     val undefinedKey = uniqueKey.concat("_cartesian_empty")
-    if (cartouches.isEmpty) Some(List(Pipeline.$match(Map(undefinedKey -> O.bool(false)))))
+    if (cartouches.isEmpty)
+      MonadState[F, InterpretationState].point(List(Pipeline.$match(Map(undefinedKey -> O.bool(false))): Pipe))
     else {
       val cartoucheList = cartouches.toList
 
-      val interpretations: Option[List[List[Pipe]]] =
+      val interpretations: F[List[List[Pipe]]] =
         cartoucheList.traverse {
           case (alias, (_, instructions)) =>
-            instructions foldMapM { x => interpreter.interpretStep(alias.name, x) }
+            instructions foldMapM { x => for {
+              _ <- MonadState[F, InterpretationState].put(InterpretationState(alias.name, Mapper.Identity))
+              res <- interpretStep(x)
+            } yield res }
         }
 
       interpretations map { is =>
@@ -74,7 +76,7 @@ object Cartesian {
           case x => List(x)
         })
 
-        List(initialProjection) ++ instructions ++ List(lastProjection, Pipeline.NotNull(uniqueKey))
+        List(initialProjection) ++ instructions ++ List(lastProjection, Pipeline.NotNull(Projection.key(uniqueKey)))
       }
     }
   }

@@ -25,6 +25,7 @@ import org.specs2.mutable.Specification
 import quasar.physical.mongo.expression._
 
 class ProjectSpec extends Specification {
+/*
   "Project examples" >> {
     "old mongo without indices" >> {
       val actual = Project("root", Projection.key("foo") + Projection.key("bar"))
@@ -45,5 +46,5 @@ class ProjectSpec extends Specification {
       actual === expected
     }
   }
-
+ */
 }

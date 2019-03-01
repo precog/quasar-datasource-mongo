@@ -31,6 +31,7 @@ import fs2.Stream
 import quasar.api.resource.ResourcePath
 import quasar.connector.{MonadResourceErr, ResourceError}
 import quasar.physical.mongo.MongoResource.{Collection, Database}
+import quasar.physical.mongo.expression.Mapper
 import quasar.{Disposable, IdStatus, ScalarStages}
 
 import org.bson.{Document => _, _}
@@ -173,11 +174,13 @@ class Mongo[F[_]: MonadResourceErr : ConcurrentEffect] private[mongo](
     if (ScalarStages.Id === stages || pushdownLevel === PushdownLevel.Disabled) fallback
     else {
       val result = interpreter.interpret(stages)
-      if (result.docs.isEmpty) fallback
+      println(result._1.docs)
+
+      if (result._1.docs.isEmpty) fallback
       else {
-        val aggregated = aggregate(collection, result.docs)
-        val newStages = ScalarStages(IdStatus.ExcludeId, result.stages)
-        val parsed = aggregated map (x => (newStages, x map interpreter.mapper))
+        val aggregated = aggregate(collection, result._1.docs)
+        val newStages = ScalarStages(IdStatus.ExcludeId, result._1.stages)
+        val parsed = aggregated map (x => (newStages, x map Mapper.bson(result._2)))
         // versioning last stand
         F.handleErrorWith(parsed)(_ => fallback)
       }
@@ -294,7 +297,7 @@ object Mongo {
     for {
       client <- mkClient(config)
       version <- getVersion(client)
-      interpreter <- MongoInterpreter(version, pushdownLevel)
+      interpreter <- Interpreter(version, pushdownLevel)
     } yield Disposable(
       new Mongo[F](
         client,
