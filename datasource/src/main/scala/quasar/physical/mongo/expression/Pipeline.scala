@@ -33,7 +33,7 @@ import scalaz.Functor
 
 object Pipeline {
   final case class $project[A](obj: Map[String, A]) extends MongoPipeline[A]
-  final case class $match[A](obj: Map[String, A]) extends MongoPipeline[A]
+  final case class $match[A](a: A) extends MongoPipeline[A]
   final case class $unwind[A](path: String, arrayIndex: String) extends MongoPipeline[A]
 
   implicit val delayRenderTreeMongoPipeline: Delay[RenderTree, Pipeline] =
@@ -42,9 +42,7 @@ object Pipeline {
         case $project(obj) => NonTerminal(List("$project"), None, obj.toList map {
           case (k, v) => NonTerminal(List(), Some(k), List(fa.render(v)))
         })
-        case $match(obj) => NonTerminal(List("$match"), None, obj.toList map {
-          case (k, v) => NonTerminal(List(), Some(k), List(fa.render(v)))
-        })
+        case $match(a) => NonTerminal(List("$match"), None, List(fa.render(a)))
         case $unwind(p, a) =>
           NonTerminal(List("$unwind"), None, List(p.render, a.render))
         case NotNull(fld) =>
@@ -64,7 +62,7 @@ object Pipeline {
     def map[A, B](fa: Pipeline[A])(f: A => B): Pipeline[B] = fa match {
       case NotNull(fld) => NotNull(fld)
       case $project(obj) => $project(obj map { case (k, v) => (k, f(v)) })
-      case $match(obj) => $match(obj map { case (k, v) => (k, f(v)) })
+      case $match(a) => $match(f(a))
       case $unwind(p, i) => $unwind(p, i)
     }
   }

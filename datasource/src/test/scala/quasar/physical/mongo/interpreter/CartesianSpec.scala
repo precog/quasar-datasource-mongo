@@ -41,7 +41,7 @@ class CartesianSpec extends Specification with quasar.TreeMatchers {
   }
   "empty cartesian should erase everything" >> {
     val actual = evalCartesian(Map.empty)
-    val expected = List(Pipeline.$match(Map("root_cartesian_empty" -> O.bool(false))))
+    val expected = List(Pipeline.$match(O.obj(Map("root_cartesian_empty" -> O.bool(false)))))
     actual must beLike {
       case Some((mapper, pipes)) =>
         (pipes must beTree(expected)) and (mapper === Mapper.Unfocus)

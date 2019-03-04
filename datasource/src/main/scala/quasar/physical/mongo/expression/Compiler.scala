@@ -75,7 +75,7 @@ object Compiler {
     val O = Optics.fullT[T, ExprF]
 
     pipeline match {
-      case NotNull(fld) => $match(Map(fld -> O.$ne(O.nil())))
+      case NotNull(fld) => $match(O.obj(Map(fld -> O.$ne(O.nil()))))
       case $project(obj) => $project(obj)
       case $match(obj) => $match(obj)
       case $unwind(a, i) => $unwind(a, i)
@@ -87,7 +87,7 @@ object Compiler {
     val O = Optics.fullT[T, ExprF]
     pipe match {
       case $match(mp) =>
-        O.obj(Map("$match" -> O.obj(mp)))
+        O.obj(Map("$match" -> mp))
       case $project(mp) =>
         O.obj(Map("$project" -> O.obj(mp)))
       case $unwind(path, arrayIndex) =>

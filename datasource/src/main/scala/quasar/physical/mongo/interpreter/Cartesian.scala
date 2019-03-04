@@ -35,7 +35,7 @@ object Cartesian {
     val undefinedKey = state.uniqueKey concat "_cartesian_empty"
 
     if (cartouches.isEmpty)
-      unfocus[F] as List(Pipeline.$match(Map(undefinedKey -> O.bool(false))): Pipe)
+      unfocus[F] as List(Pipeline.$match(O.obj(Map(undefinedKey -> O.bool(false)))): Pipe)
     else {
       val interpretations: F[List[List[Pipe]]] =
         cartouches.toList.traverse {
@@ -68,7 +68,11 @@ object Cartesian {
           case x => List(x)
         })
 
-        List(initialProjection) ++ instructions
+        val removeEmpty =
+          Pipeline.$match(O.$or(cartouches.toList map {
+            case (k, v) => O.obj(Map(k.name -> O.$exists(O.bool(true))))
+          }))
+        initialProjection :: instructions ++ List(removeEmpty)
       } flatMap { pipes =>
         unfocus[F] as pipes
       }

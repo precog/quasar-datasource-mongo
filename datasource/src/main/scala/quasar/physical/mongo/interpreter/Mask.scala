@@ -146,7 +146,7 @@ object Mask {
     MonadState[F, InterpretationState].get flatMap { state =>
       val undefinedKey = state.uniqueKey concat "_non_existent_field"
       if (masks.isEmpty)
-        List(Pipeline.$match(Map(undefinedKey -> O.bool(false))): Pipe).point[F]
+        List(Pipeline.$match(O.obj(Map(undefinedKey -> O.bool(false)))): Pipe).point[F]
       else for {
         projObj <- optToAlternative[F].apply(for {
           tree <- masksToTypeTree(state.mapper, masks)

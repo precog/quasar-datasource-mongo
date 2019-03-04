@@ -66,6 +66,7 @@ class MongoScalarStagesInterpreterSpec
           { "a0": 1 }
           { "a0": 2, "b0": "foo" }
           { "b0": "bar" }
+          { "c": 12 }
           """)
       val expected = ldjson("""
           { "a1": 1 }
@@ -76,7 +77,8 @@ class MongoScalarStagesInterpreterSpec
         (CPathField("a1"), (CPathField("a0"), Nil)),
         (CPathField("b1"), (CPathField("b0"), Nil)))
 
-      input must cartesianInto(targets)(expected)
+      val actual = interpret(ScalarStages(IdStatus.ExcludeId, List(ScalarStage.Cartesian(targets))), input, (x => x))
+      actual must bestSemanticEqual(expected)
     }
 
     "nested pivoting doesn't produce unnecessary empty fields" in {
@@ -104,7 +106,8 @@ class MongoScalarStagesInterpreterSpec
           Mask(Map(CPath.Identity -> Set(ColumnType.Array))),
           Pivot(IdStatus.ExcludeId, ColumnType.Array)))))
 
-      input must cartesianInto(targets)(expected)
+      val actual = interpret(ScalarStages(IdStatus.ExcludeId, List(ScalarStage.Cartesian(targets))), input, (x => x))
+      actual must bestSemanticEqual(expected)
     }
   }
 
