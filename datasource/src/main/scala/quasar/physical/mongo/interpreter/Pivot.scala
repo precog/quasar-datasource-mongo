@@ -61,8 +61,8 @@ object Pivot {
 
     List(
       ensureArray(vectorType, unwindKey),
-      Pipeline.$unwind(Projection(List()), indexKey),
-      Pipeline.$project(Map(unwindKey -> mkValue(status, vectorType, unwindKey, indexKey))),
+      Pipeline.$unwind(unwindKey, indexKey),
+      Pipeline.$project(Map(state.uniqueKey -> mkValue(status, vectorType, unwindKey, indexKey))),
       Pipeline.NotNull(state.uniqueKey)
     )
   }

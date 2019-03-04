@@ -18,13 +18,11 @@ package quasar.physical.mongo.interpreter
 
 import slamdata.Predef._
 
-import cats.syntax.order._
-
 import org.specs2.mutable.Specification
 
 import quasar.physical.mongo.expression._
 
-import scalaz.{State, BindRec, \/, Scalaz, PlusEmpty, Applicative}, Scalaz._
+import scalaz.{State, Scalaz}, Scalaz._
 
 class ProjectSpec extends Specification {
   "unfocused" >> {

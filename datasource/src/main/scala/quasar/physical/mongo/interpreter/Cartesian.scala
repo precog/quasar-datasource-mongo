@@ -52,10 +52,11 @@ object Cartesian {
         val defaultObject = cartouches map {
           case (alias, _) => alias.name -> O.string("$" concat alias.name)
         }
-
+        // We don't need to map any projections except initial since they're mapped already
         val initialProjection =
           Pipeline.$project(cartouches map {
-            case (alias, (field, instructions)) => alias.name -> O.key(field.name)
+            case (alias, (field, instructions)) =>
+              alias.name -> O.projection(Mapper.projection(state.mapper)(Projection.key(field.name)))
           })
 
         val instructions = is flatMap (_ flatMap {
@@ -68,7 +69,7 @@ object Cartesian {
 
         List(initialProjection) ++ instructions ++ List(Pipeline.NotNull(state.uniqueKey))
       } flatMap { pipes =>
-        focus[F] as (pipes map mapProjection(state.mapper))
+        focus[F] as pipes
       }
     }
   }

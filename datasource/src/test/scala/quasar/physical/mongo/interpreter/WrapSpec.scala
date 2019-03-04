@@ -23,7 +23,7 @@ import org.specs2.ScalaCheck
 
 import quasar.physical.mongo.expression._
 
-import scalaz.{State, BindRec, \/, Scalaz, PlusEmpty, Applicative}, Scalaz._
+import scalaz.{State, Scalaz}, Scalaz._
 
 class WrapSpec extends Specification with ScalaCheck {
   "unfocused" >> {

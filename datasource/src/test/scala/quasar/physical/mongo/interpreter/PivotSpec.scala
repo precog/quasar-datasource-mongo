@@ -24,57 +24,91 @@ import quasar.api.table.ColumnType
 import quasar.physical.mongo.expression._
 import quasar.IdStatus
 
+import scalaz.{State, Scalaz}, Scalaz._
+
 class PivotSpec extends Specification {
-/*
+  private def evalPivot(
+      state: InterpretationState,
+      idStatus: IdStatus,
+      columnType: ColumnType.Vector)
+      : (Mapper, List[Pipe]) =
+    Pivot[State[InterpretationState, ?]](idStatus, columnType) run state leftMap (_.mapper)
+
+
   "Array examples" >> {
-    def mkExpected(e: Expr): Option[List[Pipe]] = Some(List(
-      Pipeline.$project(Map("root_unwind" -> O.key("root"))),
+    val initialState = InterpretationState("root", Mapper.Unfocus)
+    def mkExpected(e: Expr): List[Pipe] = List(
+      Pipeline.$project(Map("root_unwind" -> O.steps(List()))),
       Pipeline.$unwind("root_unwind", "root_unwind_index"),
       Pipeline.$project(Map("root" -> e)),
-      Pipeline.NotNull("root")))
+      Pipeline.NotNull("root"))
 
     "id only" >> {
-      val actual = Pivot("root", IdStatus.IdOnly, ColumnType.Array)
-      val expected = mkExpected(O.key("root_unwind_index"))
-      actual === expected
+      val actual = evalPivot(initialState, IdStatus.IdOnly, ColumnType.Array)
+      val expected = mkExpected(O.string("$root_unwind_index"))
+      (actual._2 === expected) and (actual._1 === Mapper.Focus("root"))
     }
     "values only" >> {
-      val actual = Pivot("root", IdStatus.ExcludeId, ColumnType.Array)
-      val expected = mkExpected(O.key("root_unwind"))
-      actual === expected
+      val actual = evalPivot(initialState, IdStatus.ExcludeId, ColumnType.Array)
+      val expected = mkExpected(O.string("$root_unwind"))
+      (actual._2 === expected) and (actual._1 === Mapper.Focus("root"))
     }
     "both" >> {
-      val actual = Pivot("root", IdStatus.IncludeId, ColumnType.Array)
-      val expected = mkExpected(O.array(List(O.key("root_unwind_index"), O.key("root_unwind"))))
-      actual === expected
+      val actual = evalPivot(initialState, IdStatus.IncludeId, ColumnType.Array)
+      val expected = mkExpected(O.array(List(O.string("$root_unwind_index"), O.string("$root_unwind"))))
+      (actual._2 === expected) and (actual._1 === Mapper.Focus("root"))
     }
   }
 
   "Object examples" >> {
-    def mkExpected(e: Expr): Option[List[Pipe]] = Some(List(
-      Pipeline.$project(Map("root_unwind" -> O.$objectToArray(O.key("root")))),
+    val initialState = InterpretationState("root", Mapper.Unfocus)
+
+    def mkExpected(e: Expr): List[Pipe] = List(
+      Pipeline.$project(Map("root_unwind" -> O.$objectToArray(O.steps(List())))),
       Pipeline.$unwind("root_unwind", "root_unwind_index"),
       Pipeline.$project(Map("root" -> e)),
-      Pipeline.NotNull("root")))
+      Pipeline.NotNull("root"))
 
     "id only" >> {
-      val actual = Pivot("root", IdStatus.IdOnly, ColumnType.Object)
-      val expected = mkExpected(O.projection(Projection.key("root_unwind") + Projection.key("k")))
-      actual === expected
+      val actual = evalPivot(initialState, IdStatus.IdOnly, ColumnType.Object)
+      val expected = mkExpected(O.string("$root_unwind.k"))
+      (actual._2 === expected) and (actual._1 === Mapper.Focus("root"))
     }
     "values only" >> {
-      val actual = Pivot("root", IdStatus.ExcludeId, ColumnType.Object)
-      val expected = mkExpected(O.projection(Projection.key("root_unwind") + Projection.key("v")))
-      actual === expected
+      val actual = evalPivot(initialState, IdStatus.ExcludeId, ColumnType.Object)
+      val expected = mkExpected(O.string("$root_unwind.v"))
+      (actual._2 === expected) and (actual._1 === Mapper.Focus("root"))
     }
     "both" >> {
-      val actual = Pivot("root", IdStatus.IncludeId, ColumnType.Object)
+      val actual = evalPivot(initialState, IdStatus.IncludeId, ColumnType.Object)
       val expected = mkExpected(O.array(List(
-        O.projection(Projection.key("root_unwind") + Projection.key("k")),
-        O.projection(Projection.key("root_unwind") + Projection.key("v")))))
-
-      actual === expected
+        O.string("$root_unwind.k"),
+        O.string("$root_unwind.v"))))
+      (actual._2 === expected) and (actual._1 === Mapper.Focus("root"))
     }
   }
- */
+
+  "Pivot in contexts" >> {
+    val initialState = InterpretationState("unique", Mapper.Focus("focused"))
+    "array" >> {
+      val actual = evalPivot(initialState, IdStatus.ExcludeId, ColumnType.Array)
+      val expected = List(
+        Pipeline.$project(Map("unique_unwind" -> O.key("focused"))),
+        Pipeline.$unwind("unique_unwind", "unique_unwind_index"),
+        Pipeline.$project(Map("unique" -> O.string("$unique_unwind"))),
+        Pipeline.NotNull("unique")
+      )
+      (actual._2 === expected) and (actual._1 === Mapper.Focus("unique"))
+    }
+    "object" >> {
+      val actual = evalPivot(initialState, IdStatus.ExcludeId, ColumnType.Object)
+      val expected = List(
+        Pipeline.$project(Map("unique_unwind" -> O.$objectToArray(O.key("focused")))),
+        Pipeline.$unwind("unique_unwind", "unique_unwind_index"),
+        Pipeline.$project(Map("unique" -> O.string("$unique_unwind.v"))),
+        Pipeline.NotNull("unique")
+      )
+      (actual._2 === expected) and (actual._1 === Mapper.Focus("unique"))
+    }
+  }
 }

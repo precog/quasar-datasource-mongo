@@ -26,35 +26,63 @@ import quasar.api.table.ColumnType
 import quasar.common.CPath
 import quasar.physical.mongo.expression.{O => _, Expr => _, _}
 
+import scalaz.Scalaz._
+
 import Compiler._
 
 class MaskSpec extends Specification with quasar.TreeMatchers {
-/*
+  val O = Optics.coreOpT[Fix, CoreOp]
+  type Expr = Fix[CoreOp]
+
+  def typeEq(prj: Expr, s: String): Expr =
+    O.$eq(List(O.$type(prj), O.string(s)))
+
+  def pipeEqualWithKey(key: String, a: Option[List[Pipe]], b: Expr) = {
+    a must beLike {
+      case Some(x :: Pipeline.NotNull(k) :: List()) if k === key =>
+        toCoreOp(eraseCustomPipeline(x)) must beTree(b)
+    }
+  }
+
+  def wrapWithProject(e: Expr) = O.obj(Map("$project" -> e))
+  def wrapWithMatch(e: Expr) = O.obj(Map("$match" -> e))
+
+  def eval(state: InterpretationState, masks: Map[CPath, Set[ColumnType]]): Option[(Mapper, List[Pipe])] =
+    Mask[InState](masks) run state map (_ leftMap (_.mapper))
+
+  "state modifications" >> {
+    "unfocused" >> {
+      val state = InterpretationState("unique", Mapper.Unfocus)
+      val result = eval(state, Map(CPath.Identity -> Set(ColumnType.Object)))
+      val expected = wrapWithProject(O.obj(Map("unique" -> O.string("$$ROOT"))))
+      pipeEqualWithKey("unique", result map (_._2), expected) and (
+        (result map (_._1)) === Some(Mapper.Focus("unique")))
+    }
+
+    "focused" >> {
+      val state = InterpretationState("other", Mapper.Focus("other"))
+      val result = eval(state, Map(CPath.Identity -> Set(ColumnType.Object)))
+      val expected = wrapWithProject(O.obj(Map(
+        "other" -> O.$cond(
+          typeEq(O.string("$other"), "object"),
+          O.string("$other"),
+          O.string("$other_non_existent_field")))))
+      pipeEqualWithKey("other", result map (_._2), expected) and (
+        (result map (_._1)) === Some(Mapper.Focus("other")))
+    }
+  }
+
   "examples" >> {
-    def evalMask(masks: Map[CPath, Set[ColumnType]]): Option[List[Pipe]] =  Mask("root", masks)
-
-    val O = Optics.coreOpT[Fix, CoreOp]
-    type Expr = Fix[CoreOp]
-
     val rootKey = O.string("$root")
-
     val undefined = O.string("$root_non_existent_field")
 
-    def typeEq(prj: Expr, s: String): Expr =
-      O.$eq(List(O.$type(prj), O.string(s)))
+    def pipeEqual(a: Option[List[Pipe]], b: Expr) = pipeEqualWithKey("root", a, b)
+
+    def evalMask(masks: Map[CPath, Set[ColumnType]]): Option[List[Pipe]] =
+      eval(InterpretationState("root", Mapper.Focus("root")), masks) map (_._2)
 
     def isObjectFilter(x: Expr, y: Expr): Expr =
       O.$cond(typeEq(x, "object"), y, undefined)
-
-    def pipeEqual(a: Option[List[Pipe]], b: Expr) = {
-      a must beLike {
-        case Some(x :: Pipeline.NotNull("root") :: List()) =>
-          toCoreOp(eraseCustomPipeline(x)) must beTree(b)
-      }
-    }
-
-    def wrapWithProject(e: Expr) = O.obj(Map("$project" -> e))
-    def wrapWithMatch(e: Expr) = O.obj(Map("$match" -> e))
 
     "drop everything when empty" >> {
       evalMask(Map.empty) must beLike {
@@ -171,6 +199,4 @@ class MaskSpec extends Specification with quasar.TreeMatchers {
       pipeEqual(actual, expected)
     }
   }
- */
-
 }

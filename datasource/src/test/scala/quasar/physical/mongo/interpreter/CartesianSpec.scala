@@ -25,20 +25,27 @@ import quasar.common.{CPath, CPathField}
 import quasar.physical.mongo.{Interpreter, Version, PushdownLevel}
 import quasar.{ScalarStage, IdStatus}
 import quasar.physical.mongo.expression._
+import quasar.physical.mongo.utils._
 
-class CartesianSpec extends Specification {
-  def evalCartesian(cartouches: Map[CPathField, (CPathField, List[ScalarStage.Focused])]): Option[List[Pipe]] = {
+import scalaz.Scalaz._
+
+class CartesianSpec extends Specification with quasar.TreeMatchers {
+  def evalCartesian(
+      cartouches: Map[CPathField, (CPathField, List[ScalarStage.Focused])])
+      : Option[(Mapper, List[Pipe])] = {
     val interpreter = new Interpreter(Version.$objectToArray, "root", PushdownLevel.Full)
-    ???
-//    val result = interpreter.interpret(List(Cartesian(cartouches)))
-//    if (result.stages.isEmpty)
-//    Projection.safeCartouches(cartouches) flatMap { x => Cartesian(x, interpreter.interpretStep[InState]) }
-
+    optToAlternative[InState].apply(Projection.safeCartouches(cartouches))
+      .flatMap((Cartesian[InState](_, interpreter.interpretStep[InState])))
+      .run(InterpretationState("root", Mapper.Focus("root")))
+      .map(_ leftMap (_.mapper))
   }
   "empty cartesian should erase everything" >> {
     val actual = evalCartesian(Map.empty)
-    val expected = Some(List(Pipeline.$match(Map("root_cartesian_empty" -> O.bool(false)))))
-    actual === expected
+    val expected = List(Pipeline.$match(Map("root_cartesian_empty" -> O.bool(false))))
+    actual must beLike {
+      case Some((mapper, pipes)) =>
+        (pipes must beTree(expected)) and (mapper === Mapper.Unfocus)
+    }
   }
   "example" >> {
     val cartouches = Map(
@@ -52,54 +59,50 @@ class CartesianSpec extends Specification {
         ScalarStage.Mask(Map(CPath.Identity -> Set(ColumnType.Object))),
         ScalarStage.Pivot(IdStatus.ExcludeId, ColumnType.Object)))))
 
-    val actual = evalCartesian(cartouches)
-
-    val expected = Some(List(
+    val expected = List(
       Pipeline.$project(Map(
         "a" -> O.projection(Projection.key("root") + Projection.key("a")),
         "ba" -> O.projection(Projection.key("root") + Projection.key("b")),
         "bm" -> O.projection(Projection.key("root") + Projection.key("b")))),
       Pipeline.$project(Map(
-        "a" -> O.key("a"),
+        "a" -> O.string("$a"),
         "ba" -> O.$cond(
           O.$or(List(O.$eq(List(O.$type(O.key("ba")), O.string("array"))))),
           O.key("ba"),
           O.key("ba_non_existent_field")),
-        "bm" -> O.key("bm"))),
+        "bm" -> O.string("$bm"))),
       Pipeline.$project(Map(
-        "a" -> O.key("a"),
-        "ba" -> O.key("ba"),
-        "bm" -> O.key("bm"),
+        "a" -> O.string("$a"),
+        "ba" -> O.string("$ba"),
+        "bm" -> O.string("$bm"),
         "ba_unwind" -> O.key("ba"))),
       Pipeline.$unwind("ba_unwind", "ba_unwind_index"),
       Pipeline.$project(Map(
-        "a" -> O.key("a"),
-        "ba" -> O.key("ba_unwind"),
-        "bm" -> O.key("bm"))),
+        "a" -> O.string("$a"),
+        "ba" -> O.string("$ba_unwind"),
+        "bm" -> O.string("$bm"))),
       Pipeline.$project(Map(
-        "a" -> O.key("a"),
-        "ba" -> O.key("ba"),
+        "a" -> O.string("$a"),
+        "ba" -> O.string("$ba"),
         "bm" -> O.$cond(
           O.$or(List(O.$eq(List(O.$type(O.key("bm")), O.string("object"))))),
           O.key("bm"),
           O.key("bm_non_existent_field")))),
       Pipeline.$project(Map(
-        "a" -> O.key("a"),
-        "ba" -> O.key("ba"),
-        "bm" -> O.key("bm"),
+        "a" -> O.string("$a"),
+        "ba" -> O.string("$ba"),
+        "bm" -> O.string("$bm"),
         "bm_unwind" -> O.$objectToArray(O.key("bm")))),
       Pipeline.$unwind("bm_unwind", "bm_unwind_index"),
       Pipeline.$project(Map(
-        "a" -> O.key("a"),
-        "ba" -> O.key("ba"),
-        "bm" -> O.projection(Projection.key("bm_unwind") + Projection.key("v")))),
-      Pipeline.$project(Map(
-        "root" -> O.obj(Map(
-          "a" -> O.key("a"),
-          "ba" -> O.key("ba"),
-          "bm" -> O.key("bm"))))),
-      Pipeline.NotNull("root")))
+        "a" -> O.string("$a"),
+        "ba" -> O.string("$ba"),
+        "bm" -> O.string("$bm_unwind.v"))),
+      Pipeline.NotNull("root"))
 
-    actual === expected
+    evalCartesian(cartouches) must beLike {
+      case Some((mapper, pipes)) =>
+        (pipes must beTree(expected)) and (mapper === Mapper.Unfocus)
+    }
   }
 }

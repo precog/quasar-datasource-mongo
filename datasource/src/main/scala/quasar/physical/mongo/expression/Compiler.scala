@@ -38,16 +38,16 @@ object Compiler {
 
   def compilePipeline[T[_[_]]: BirecursiveT, F[_]: MonadPlus](
       version: Version,
-      pipes: List[Pipeline[T[ExprF], Projection]])
+      pipes: List[Pipeline[T[ExprF]]])
       : F[List[BsonDocument]] =
     pipes.foldMapM { x => compilePipe[T, F](version, x) map (List(_)) }
 
-  def toCoreOp[T[_[_]]: BirecursiveT](pipe: MongoPipeline[T[ExprF], Projection]): T[CoreOp] =
+  def toCoreOp[T[_[_]]: BirecursiveT](pipe: MongoPipeline[T[ExprF]]): T[CoreOp] =
     optimize(compileProjections(pipelineObjects(pipe)))
 
   def compilePipe[T[_[_]]: BirecursiveT, F[_]: MonadPlus](
       version: Version,
-      customPipe: Pipeline[T[ExprF], Projection])
+      customPipe: Pipeline[T[ExprF]])
       : F[BsonDocument] = {
     val pipe = eraseCustomPipeline(customPipe)
     if (version < pipeMinVersion(pipe)) MonadPlus[F].empty
@@ -69,8 +69,8 @@ object Compiler {
   }
 
   def eraseCustomPipeline[T[_[_]]: BirecursiveT](
-      pipeline: Pipeline[T[ExprF], Projection])
-      : MongoPipeline[T[ExprF], Projection] = {
+      pipeline: Pipeline[T[ExprF]])
+      : MongoPipeline[T[ExprF]] = {
 
     val O = Optics.fullT[T, ExprF]
 
@@ -83,7 +83,7 @@ object Compiler {
   }
 
 
-  def pipelineObjects[T[_[_]]: BirecursiveT](pipe: MongoPipeline[T[ExprF], Projection]): T[ExprF] = {
+  def pipelineObjects[T[_[_]]: BirecursiveT](pipe: MongoPipeline[T[ExprF]]): T[ExprF] = {
     val O = Optics.fullT[T, ExprF]
     pipe match {
       case $match(mp) =>
@@ -92,7 +92,7 @@ object Compiler {
         O.obj(Map("$project" -> O.obj(mp)))
       case $unwind(path, arrayIndex) =>
         O.obj(Map("$unwind" -> O.obj(Map(
-          "path" -> O.projection(path),
+          "path" -> O.string(path),
           "includeArrayIndex" -> O.string(arrayIndex),
           "preserveNullAndEmptyArrays" -> O.bool(true)))))
     }
