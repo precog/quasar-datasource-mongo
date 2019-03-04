@@ -22,14 +22,14 @@ import org.bson.{Document => _, _}
 
 import quasar.api.table.ColumnType
 import quasar.common.{CPath, CPathField}
-import quasar.{IdStatus, ScalarStageSpec => Spec, JsonSpec, ScalarStage, ScalarStages}, ScalarStage._
+import quasar.{IdStatus, ScalarStageSpec => Spec, JsonSpec, ScalarStage, ScalarStages}
 
 class MongoScalarStagesInterpreterSpec
     extends JsonSpec
-//    with Spec.WrapSpec
-//    with Spec.ProjectSpec
-//    with Spec.PivotSpec
-//    with Spec.MaskSpec
+    with Spec.WrapSpec
+    with Spec.ProjectSpec
+    with Spec.PivotSpec
+    with Spec.MaskSpec
     with Spec.CartesianSpec
     with StageInterpreterSpec {
 
