@@ -24,7 +24,7 @@ import matryoshka.data.Fix
 
 import org.bson._
 
-import scalaz.{Const, Coproduct, Scalaz, MonadPlus}, Scalaz._
+import scalaz.{Scalaz, MonadPlus}, Scalaz._
 import scalaz.syntax._
 
 package object expression {
@@ -49,6 +49,8 @@ package object expression {
   def compilePipe[F[_]: MonadPlus](version: Version, pipe: Pipe): F[BsonDocument] =
     Compiler.compilePipe[Fix, F](version, pipe)
 
-  def mapProjection(f: Projection => Projection)(pipe: Pipe): Pipe =
+  def mapProjection(mp: Mapper)(pipe: Pipe): Pipe = {
+    val f = x => Mapper.projection(mp)(x)
     pipe.bimap(Compiler.mapProjection(f), f)
+  }
 }

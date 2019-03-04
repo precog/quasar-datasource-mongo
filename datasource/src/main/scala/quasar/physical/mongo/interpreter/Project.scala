@@ -20,16 +20,15 @@ import slamdata.Predef._
 
 import quasar.physical.mongo.expression._
 
-import scalaz.{MonadState, Scalaz, ApplicativePlus}, Scalaz._
+import scalaz.{MonadState, Scalaz}, Scalaz._
 
 object Project {
-  def apply[F[_]: MonadInState](fld: Projection): F[List[Pipe]] =
-    MonadState[F, InterpretationState].gets(_.uniqueKey) flatMap { uniqueKey =>
-      val tmpKey = uniqueKey.concat("_project")
-      val projection = Projection.key(uniqueKey) + fld
-      val matcher: Pipe = Pipeline.$match(Map(projection.toKey -> O.$exists(O.bool(true))))
-      val move: Pipe = Pipeline.$project(Map(tmpKey -> O.projection(projection)))
-      val project: Pipe = Pipeline.$project(Map(uniqueKey -> O.key(tmpKey)))
-      List(matcher, move, project).point[F]
-    }
+  def apply[F[_]: MonadInState](fld: Projection): F[List[Pipe]] = for {
+    state <- MonadState[F, InterpretationState].get
+    tmpKey = state.uniqueKey concat "_project"
+    res = List(
+      Pipeline.$project(Map(tmpKey -> O.projection(fld))),
+      Pipeline.$project(Map(state.uniqueKey -> O.string("$" concat tmpKey))))
+    _ <- focus[F]
+  } yield res map mapProjection(state.mapper)
 }

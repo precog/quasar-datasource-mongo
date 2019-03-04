@@ -18,7 +18,7 @@ package quasar.physical.mongo
 
 import slamdata.Predef._
 
-import scalaz.{Const, Coproduct, Scalaz, Applicative, PlusEmpty, ~>}, Scalaz._
+import scalaz.{Scalaz, Applicative, PlusEmpty, ~>}, Scalaz._
 
 object utils {
   def optToAlternative[F[_]: Applicative: PlusEmpty]: (Option ~> F) = new (Option ~> F) {

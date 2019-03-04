@@ -28,7 +28,7 @@ import quasar.physical.mongo.interpreter.{InterpretationState, _}
 import quasar.physical.mongo.expression._
 import quasar.physical.mongo.utils._
 
-import scalaz.{StateT, BindRec, \/, Scalaz, PlusEmpty, Applicative}, Scalaz._
+import scalaz.{BindRec, \/, Scalaz, PlusEmpty}, Scalaz._
 
 import shims._
 
@@ -51,6 +51,7 @@ class Interpreter(version: Version, uniqueKey: String, pushdownLevel: PushdownLe
       nextStep <+> inp.right[Interpretation].point[InState]
   }
 
+  @SuppressWarnings(Array("org.wartremover.warts.Recursion"))
   def interpretStep[F[_]: MonadInState: PlusEmpty](instruction: ScalarStage): F[List[Pipe]] = instruction match {
     case ScalarStage.Wrap(name) =>
       optToAlternative[F].apply(Projection.safeField(name)) flatMap (Wrap[F](_))
@@ -67,13 +68,13 @@ class Interpreter(version: Version, uniqueKey: String, pushdownLevel: PushdownLe
 
   private def initial[F[_]: MonadInState](idStatus: IdStatus): F[List[Pipe]] = idStatus match {
     case IdStatus.IdOnly =>
-      nest[F] as List(Pipeline.$project(Map(
+      focus[F] as List(Pipeline.$project(Map(
         uniqueKey -> O.key("_id"),
         "_id" -> O.int(0))))
     case IdStatus.ExcludeId =>
       List[Pipe]().point[F]
     case IdStatus.IncludeId =>
-      nest[F] as List(Pipeline.$project(Map(
+      focus[F] as List(Pipeline.$project(Map(
         uniqueKey -> O.array(List(O.key("_id"), O.steps(List()))),
         "_id" -> O.int(0))))
   }
@@ -84,9 +85,9 @@ class Interpreter(version: Version, uniqueKey: String, pushdownLevel: PushdownLe
       firstDocs <- firstPipes.traverse (compilePipe[InState](version, _))
       result <- BindRec[InState].tailrecM(refine)(Interpretation(stages.stages, firstDocs))
     } yield result
-    interpreted.run(InterpretationState(uniqueKey, Mapper.Identity)) match {
+    interpreted.run(InterpretationState(uniqueKey, Mapper.Unfocus)) match {
       case None =>
-        (Interpretation(stages.stages, List()), Mapper.Identity)
+        (Interpretation(stages.stages, List()), Mapper.Unfocus)
       case Some((state, a)) => (a, state.mapper)
     }
   }

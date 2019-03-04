@@ -22,40 +22,56 @@ import quasar.api.table.ColumnType
 import quasar.physical.mongo.expression._
 import quasar.IdStatus
 
-import scalaz.{MonadState, Scalaz, ApplicativePlus}, Scalaz._
+import scalaz.{MonadState, Scalaz}, Scalaz._
 
 object Pivot {
-  def apply[F[_]: MonadInState](status: IdStatus, vectorType: ColumnType.Vector): F[List[Pipe]] =
-    MonadState[F, InterpretationState].gets(_.uniqueKey) flatMap { uniqueKey =>
-      val unwindKey = uniqueKey.concat("_unwind")
-      val indexKey = uniqueKey.concat("_unwind_index")
-      val unwind = Pipeline.$unwind(Projection.key(unwindKey), indexKey)
+  def ensureArray(vectorType: ColumnType.Vector, key: String): Pipe =
+    Pipeline.$project(Map(key -> (vectorType match {
+      case ColumnType.Object => O.$objectToArray(O.steps(List()))
+      case ColumnType.Array => O.steps(List())
+    })))
 
-      // input to a `Pivot` is guaranteed to be `Mask`ed with the appropriate type. i.e.
-      // there will always be, effectively, `Mask(. -> Object), Pivot(_, Object)`.
-      val valueToSet = vectorType match {
-        case ColumnType.Array => status match {
-          case IdStatus.IdOnly => O.key(indexKey)
-          case IdStatus.ExcludeId => O.key(unwindKey)
-          case IdStatus.IncludeId => O.array(List(O.key(indexKey), O.key(unwindKey)))
-        }
-        case ColumnType.Object => status match {
-          case IdStatus.IdOnly => O.projection(Projection.key(unwindKey) + Projection.key("k"))
-          case IdStatus.ExcludeId => O.projection(Projection.key(unwindKey) + Projection.key("v"))
-          case IdStatus.IncludeId =>
-            O.array(List(
-              O.projection(Projection.key(unwindKey) + Projection.key("k")),
-              O.projection(Projection.key(unwindKey) + Projection.key("v"))))
-        }
+
+  def mkValue(status: IdStatus, vectorType: ColumnType.Vector, unwinded: String, index: String): Expr = {
+    val indexString = O.string("$" concat index)
+    val unwindString = O.string("$" concat unwinded)
+    val kString = O.string("$" concat unwinded concat ".k")
+    val vString = O.string("$" concat unwinded concat ".v")
+    vectorType match {
+      case ColumnType.Array => status match {
+        case IdStatus.IdOnly => indexString
+        case IdStatus.ExcludeId => unwindString
+        case IdStatus.IncludeId => O.array(List(indexString, unwindString))
       }
-
-      val setProjection = Pipeline.$project(Map(uniqueKey -> valueToSet))
-
-      val toArray =
-        Pipeline.$project(Map(unwindKey -> (vectorType match {
-          case ColumnType.Object => O.$objectToArray(O.key(uniqueKey))
-          case ColumnType.Array => O.key(uniqueKey)
-        })))
-      (List(toArray, unwind, setProjection, Pipeline.NotNull(Projection.key(uniqueKey)))).point[F]
+      case ColumnType.Object => status match {
+        case IdStatus.IdOnly => kString
+        case IdStatus.ExcludeId => vString
+        case IdStatus.IncludeId => O.array(List(kString, vString))
+      }
     }
+  }
+
+  def mkPipes(
+      status: IdStatus,
+      vectorType: ColumnType.Vector,
+      state: InterpretationState)
+      : List[Pipe] = {
+    val unwindKey = state.uniqueKey concat "_unwind"
+    val indexKey = state.uniqueKey concat "_unwind_index"
+
+    List(
+      ensureArray(vectorType, unwindKey),
+      Pipeline.$unwind(Projection(List()), indexKey),
+      Pipeline.$project(Map(unwindKey -> mkValue(status, vectorType, unwindKey, indexKey))),
+      Pipeline.NotNull(state.uniqueKey)
+    )
+  }
+
+
+  def apply[F[_]: MonadInState](status: IdStatus, vectorType: ColumnType.Vector): F[List[Pipe]] =
+    for {
+      state <- MonadState[F, InterpretationState].get
+      res = mkPipes(status, vectorType, state)
+      _ <- focus[F]
+    } yield res map mapProjection(state.mapper)
 }

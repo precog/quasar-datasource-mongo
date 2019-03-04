@@ -52,13 +52,14 @@ object Mask {
     }
   }
 
-  private def masksToTypeTree(uniqueKey: String, masks: Map[CPath, Set[ColumnType]]): Option[TypeTree] = {
+  private def masksToTypeTree(mapper: Mapper, masks: Map[CPath, Set[ColumnType]]): Option[TypeTree] = {
     masks.toList.foldLeftM(emptyTree) {
-      case (acc, (cpath, types)) => Projection.fromCPath(cpath) map { p =>
-        insert(Field(uniqueKey) :: p.steps, TypeTree(types, Map.empty, Map.empty), acc)
+      case (acc, (cpath, types)) =>
+        Projection.fromCPath(cpath)
+          .map(Mapper.projection(mapper))
+          .map(p => insert(p.steps, TypeTree(types, Map.empty, Map.empty), acc))
       }
     }
-  }
 
   private def parseTypeStrings(parseType: ColumnType): List[String] = parseType match {
     case ColumnType.Boolean => List("bool")
@@ -137,14 +138,15 @@ object Mask {
         O.projection(undefined))
   }
 
-  def apply[F[_]: MonadInState: PlusEmpty](masks: Map[CPath, Set[ColumnType]]): F[List[Pipe]] =
-    MonadState[F, InterpretationState].gets(_.uniqueKey) flatMap { uniqueKey =>
-      val undefinedKey = uniqueKey.concat("_non_existent_field")
-      if (masks.isEmpty) List(Pipeline.$match(Map(undefinedKey -> O.bool(false))): Pipe).point[F]
-      else optToAlternative[F].apply (for {
-        tree <- masksToTypeTree(uniqueKey, masks)
-        projected = rebuildDoc(Projection.key(undefinedKey), Projection(List()), tree)
-        projObj <- O.obj.getOption(projected)
-      } yield List(Pipeline.$project(projObj), Pipeline.NotNull(Projection.key(uniqueKey))))
-    }
+  def apply[F[_]: MonadInState: PlusEmpty](masks: Map[CPath, Set[ColumnType]]): F[List[Pipe]] = for {
+    state <- MonadState[F, InterpretationState].get
+    undefinedKey = state.uniqueKey concat "_non_existent_field"
+    projObj <- optToAlternative[F].apply (for {
+      // No mapping here, we construct different tree instead
+      tree <- masksToTypeTree(state.mapper, masks)
+      projected = rebuildDoc(Projection.key(undefinedKey), Projection(List()), tree)
+      pObj <- O.obj.getOption(projected)
+    } yield pObj)
+    _ <- focus[F]
+  } yield List(Pipeline.$project(projObj), Pipeline.NotNull(state.uniqueKey))
 }

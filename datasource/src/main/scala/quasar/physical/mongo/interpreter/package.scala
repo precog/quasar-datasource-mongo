@@ -20,16 +20,16 @@ import slamdata.Predef._
 
 import quasar.physical.mongo.expression.Mapper
 
-import scalaz.{StateT, BindRec, \/, Scalaz, PlusEmpty, MonadState}, Scalaz._
+import scalaz.{StateT, MonadState}
 
 package object interpreter {
   type InState[A] = StateT[Option, InterpretationState, A]
 
   type MonadInState[F[_]] = MonadState[F, InterpretationState]
 
-  def nest[F[_]: MonadInState]: F[Unit] =
-    MonadState[F, InterpretationState].modify { x => x.copy(mapper = Mapper.Nest(x.uniqueKey)) }
+  def focus[F[_]: MonadInState]: F[Unit] =
+    MonadState[F, InterpretationState].modify { x => x.copy(mapper = Mapper.Focus(x.uniqueKey)) }
 
-  def identity[F[_]: MonadInState]: F[Unit] =
-    MonadState[F, InterpretationState].modify { x => x.copy(mapper = Mapper.Identity) }
+  def unfocus[F[_]: MonadInState]: F[Unit] =
+    MonadState[F, InterpretationState].modify { x => x.copy(mapper = Mapper.Unfocus) }
 }

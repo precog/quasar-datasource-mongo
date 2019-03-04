@@ -29,7 +29,7 @@ trait Pipeline[+A, +B] extends Product with Serializable
 
 trait MongoPipeline[+A, +B] extends Pipeline[A, B]
 
-trait CustomPipeline[+B] extends Pipeline[Nothing, B]
+trait CustomPipeline extends Pipeline[Nothing, Nothing]
 
 object Pipeline {
   final case class $project[A, B](obj: Map[String, A]) extends MongoPipeline[A, B]
@@ -50,7 +50,7 @@ object Pipeline {
       }
   }
 
-  final case class NotNull[B](field: B) extends CustomPipeline[B]
+  final case class NotNull(field: String) extends CustomPipeline
 
   def pipeMinVersion(pipe: MongoPipeline[_, _]): Version = pipe match {
     case $project(_) => Version.zero
@@ -63,7 +63,7 @@ object Pipeline {
       case $project(mp) => $project(mp map { case (a, b) => (a, f(b)) })
       case $match(mp) => $match(mp map { case (a, b) => (a, f(b)) })
       case $unwind(prj, arrayIndex) => $unwind(g(prj), arrayIndex)
-      case NotNull(prj) => NotNull(g(prj))
+      case NotNull(fld) => NotNull(fld)
     }
   }
 }

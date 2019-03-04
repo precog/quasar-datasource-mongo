@@ -27,10 +27,8 @@ import scalaz.{State, BindRec, \/, Scalaz, PlusEmpty, Applicative}, Scalaz._
 
 class WrapSpec extends Specification with ScalaCheck {
   "wrap example" >> {
-    val actual = Wrap[State[InterpretationState, ?]](Field("wrapper")).eval(InterpretationState("root"))
-    val expected = List(
-      Pipeline.$project(Map("root_wrap" -> O.obj(Map("wrapper" -> O.key("root"))))),
-      Pipeline.$project(Map("root" -> O.key("root_wrap"))))
+    val actual = Wrap[State[InterpretationState, ?]](Field("wrapper")).eval(InterpretationState("root", Mapper.Unfocus))
+    val expected = List(Pipeline.$project(Map("wrapper" -> O.steps(List()))))
     actual === expected
   }
 }

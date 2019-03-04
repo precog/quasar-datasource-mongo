@@ -75,7 +75,7 @@ object Compiler {
     val O = Optics.fullT[T, ExprF]
 
     pipeline match {
-      case NotNull(fld) => $match(Map(fld.toKey -> O.$ne(O.nil())))
+      case NotNull(fld) => $match(Map(fld -> O.$ne(O.nil())))
       case $project(obj) => $project(obj)
       case $match(obj) => $match(obj)
       case $unwind(a, i) => $unwind(a, i)

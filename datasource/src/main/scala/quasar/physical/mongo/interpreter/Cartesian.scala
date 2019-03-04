@@ -29,44 +29,34 @@ object Cartesian {
   def apply[F[_]: MonadInState: PlusEmpty](
       cartouches: Map[Field, (Field, List[ScalarStage.Focused])],
       interpretStep: ScalarStage => F[List[Pipe]])
-      : F[List[Pipe]] = MonadState[F, InterpretationState].gets(_.uniqueKey) flatMap { uniqueKey =>
+      : F[List[Pipe]] =
 
-    val undefinedKey = uniqueKey.concat("_cartesian_empty")
+  MonadState[F, InterpretationState].get flatMap { state =>
+    val undefinedKey = state.uniqueKey concat "_cartesian_empty"
+
     if (cartouches.isEmpty)
       MonadState[F, InterpretationState].point(List(Pipeline.$match(Map(undefinedKey -> O.bool(false))): Pipe))
     else {
-      val cartoucheList = cartouches.toList
-
       val interpretations: F[List[List[Pipe]]] =
-        cartoucheList.traverse {
-          case (alias, (_, instructions)) =>
-            instructions foldMapM { x => for {
-              _ <- MonadState[F, InterpretationState].put(InterpretationState(alias.name, Mapper.Identity))
-              res <- interpretStep(x)
-            } yield res }
+        cartouches.toList.traverse {
+          case (alias, (_, instructions)) => for {
+            _ <- MonadState[F, InterpretationState].put(InterpretationState(alias.name, Mapper.Focus(alias.name)))
+            res <- instructions foldMapM { x => for {
+              a <- interpretStep(x)
+              _ <- focus[F]
+            } yield a }
+          } yield res
         }
 
       interpretations map { is =>
-        val defaultPairs: List[(String, Expr)] =
-          cartoucheList map {
-            case (alias, _) => (alias.name, O.key(alias.name))
-          }
-
-        val defaultObject = Map(defaultPairs:_*)
-
-        val initialProjectionPairs = cartoucheList map {
-          case (alias, (field, instructions)) => alias.name -> O.projection(Projection.key(uniqueKey) + Projection.key(field.name))
+        val defaultObject = cartouches map {
+          case (alias, _) => alias.name -> O.string("$" concat alias.name)
         }
 
         val initialProjection =
-          Pipeline.$project(Map(initialProjectionPairs:_*))
-
-        val lastProjectionPairs = cartoucheList map {
-          case (alias, _) => alias.name -> O.key(alias.name)
-        }
-
-        val lastProjection =
-          Pipeline.$project(Map(uniqueKey -> O.obj(Map(lastProjectionPairs:_*))))
+          Pipeline.$project(cartouches map {
+            case (alias, (field, instructions)) => alias.name -> O.key(field.name)
+          })
 
         val instructions = is flatMap (_ flatMap {
           case Pipeline.$project(mp) =>
@@ -76,7 +66,9 @@ object Cartesian {
           case x => List(x)
         })
 
-        List(initialProjection) ++ instructions ++ List(lastProjection, Pipeline.NotNull(Projection.key(uniqueKey)))
+        List(initialProjection) ++ instructions ++ List(Pipeline.NotNull(state.uniqueKey))
+      } flatMap { pipes =>
+        focus[F] as (pipes map mapProjection(state.mapper))
       }
     }
   }

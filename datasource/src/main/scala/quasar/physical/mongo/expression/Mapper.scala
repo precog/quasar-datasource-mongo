@@ -23,16 +23,16 @@ import org.bson._
 trait Mapper extends Product with Serializable
 
 object Mapper {
-  final case class Nest(str: String) extends Mapper
-  final case object Identity extends Mapper
+  final case class Focus(str: String) extends Mapper
+  final case object Unfocus extends Mapper
 
   def bson(mapper: Mapper)(inp: BsonValue): BsonValue = mapper match {
-    case Nest(str) => inp.asDocument().get(str)
-    case Identity => inp
+    case Focus(str) => inp.asDocument().get(str)
+    case Unfocus => inp
   }
 
   def projection(mapper: Mapper)(inp: Projection): Projection = mapper match {
-    case Nest(str) => Projection.key(str) + inp
-    case Identity => inp
+    case Focus(str) => Projection.key(str) + inp
+    case Unfocus => inp
   }
 }

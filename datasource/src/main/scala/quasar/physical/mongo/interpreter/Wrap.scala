@@ -27,7 +27,7 @@ object Wrap {
     state <- MonadState[F, InterpretationState].get
     res = List(Pipeline.$project(Map(
       name.name -> O.steps(List()),
-      "_id" -> O.int(0)))) map mapProjection(Mapper.projection(state.mapper))
-    _ <- identity[F]
-  } yield res
+      "_id" -> O.int(0))))
+    _ <- unfocus[F]
+  } yield res map mapProjection(state.mapper)
 }
