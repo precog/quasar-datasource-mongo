@@ -26,11 +26,11 @@ import quasar.{IdStatus, ScalarStageSpec => Spec, JsonSpec, ScalarStage, ScalarS
 
 class MongoScalarStagesInterpreterSpec
     extends JsonSpec
-    with Spec.WrapSpec
+//    with Spec.WrapSpec
 //    with Spec.ProjectSpec
 //    with Spec.PivotSpec
 //    with Spec.MaskSpec
-//    with Spec.CartesianSpec
+    with Spec.CartesianSpec
     with StageInterpreterSpec {
 
   "Id statuses" >> {
@@ -59,7 +59,7 @@ class MongoScalarStagesInterpreterSpec
       actual must bestSemanticEqual(expected)
     }
   }
-/*
+
   "Cartesian special" >> {
     "cross fields when some are undefined" in {
       val input = ldjson("""
@@ -107,7 +107,7 @@ class MongoScalarStagesInterpreterSpec
       input must cartesianInto(targets)(expected)
     }
   }
- */
+
   val RootKey: String = "rootKey"
 
   val RootProjection = Project(CPath.parse(".rootKey"))
@@ -115,20 +115,20 @@ class MongoScalarStagesInterpreterSpec
   def rootWrapper(b: JsonElement): JsonElement = new BsonDocument(RootKey, b)
 
   def evalOneStage(stage: ScalarStage, stream: JsonStream): JsonStream =
-    interpret(ScalarStages(IdStatus.ExcludeId, List(/*RootProjection, */stage)), stream, (x => x))
+    interpret(ScalarStages(IdStatus.ExcludeId, List(RootProjection, stage)), stream, rootWrapper)
 
   def evalWrap(wrap: Wrap, stream: JsonStream): JsonStream =
     evalOneStage(wrap, stream)
 
-//  def evalProject(project: Project, stream: JsonStream): JsonStream =
-//    evalOneStage(project, stream)
+  def evalProject(project: Project, stream: JsonStream): JsonStream =
+    evalOneStage(project, stream)
 
-//  def evalPivot(pivot: Pivot, stream: JsonStream): JsonStream =
-//    evalOneStage(pivot, stream)
+  def evalPivot(pivot: Pivot, stream: JsonStream): JsonStream =
+    evalOneStage(pivot, stream)
 
-//  def evalMask(mask: Mask, stream: JsonStream): JsonStream =
-//    evalOneStage(mask, stream)
+  def evalMask(mask: Mask, stream: JsonStream): JsonStream =
+    evalOneStage(mask, stream)
 
-//  def evalCartesian(cartesian: Cartesian, stream: JsonStream): JsonStream =
-//    evalOneStage(cartesian, stream)
+  def evalCartesian(cartesian: Cartesian, stream: JsonStream): JsonStream =
+    evalOneStage(cartesian, stream)
 }

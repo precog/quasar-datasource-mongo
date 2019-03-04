@@ -92,7 +92,7 @@ object Compiler {
         O.obj(Map("$project" -> O.obj(mp)))
       case $unwind(path, arrayIndex) =>
         O.obj(Map("$unwind" -> O.obj(Map(
-          "path" -> O.string(path),
+          "path" -> O.string("$" concat path),
           "includeArrayIndex" -> O.string(arrayIndex),
           "preserveNullAndEmptyArrays" -> O.bool(true)))))
     }

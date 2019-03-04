@@ -23,13 +23,14 @@ import quasar.physical.mongo.expression._
 import scalaz.{MonadState, Scalaz}, Scalaz._
 
 object Project {
-  def apply[F[_]: MonadInState](fld: Projection): F[List[Pipe]] = for {
+  def apply[F[_]: MonadInState](prj: Projection): F[List[Pipe]] = for {
     state <- MonadState[F, InterpretationState].get
     tmpKey = state.uniqueKey concat "_project"
+    fld = Mapper.projection(state.mapper)(prj)
     res = List(
+      Pipeline.$match(Map(fld.toKey -> O.$exists(O.bool(true)))),
       Pipeline.$project(Map(tmpKey -> O.projection(fld))),
-      Pipeline.$match(Map(tmpKey -> O.$exists(O.bool(true)))),
       Pipeline.$project(Map(state.uniqueKey -> O.string("$" concat tmpKey))))
     _ <- focus[F]
-  } yield res map mapProjection(state.mapper)
+  } yield res
 }

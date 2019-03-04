@@ -35,7 +35,7 @@ object Cartesian {
     val undefinedKey = state.uniqueKey concat "_cartesian_empty"
 
     if (cartouches.isEmpty)
-      MonadState[F, InterpretationState].point(List(Pipeline.$match(Map(undefinedKey -> O.bool(false))): Pipe))
+      unfocus[F] as List(Pipeline.$match(Map(undefinedKey -> O.bool(false))): Pipe)
     else {
       val interpretations: F[List[List[Pipe]]] =
         cartouches.toList.traverse {
@@ -54,10 +54,11 @@ object Cartesian {
         }
         // We don't need to map any projections except initial since they're mapped already
         val initialProjection =
-          Pipeline.$project(cartouches map {
-            case (alias, (field, instructions)) =>
-              alias.name -> O.projection(Mapper.projection(state.mapper)(Projection.key(field.name)))
-          })
+          Pipeline.$project(
+            Map("_id" -> O.int(0)) ++ (cartouches map {
+              case (alias, (field, instructions)) =>
+                alias.name -> O.projection(Mapper.projection(state.mapper)(Projection.key(field.name)))
+            }))
 
         val instructions = is flatMap (_ flatMap {
           case Pipeline.$project(mp) =>
@@ -67,9 +68,9 @@ object Cartesian {
           case x => List(x)
         })
 
-        List(initialProjection) ++ instructions ++ List(Pipeline.NotNull(state.uniqueKey))
+        List(initialProjection) ++ instructions
       } flatMap { pipes =>
-        focus[F] as pipes
+        unfocus[F] as pipes
       }
     }
   }

@@ -174,7 +174,6 @@ class Mongo[F[_]: MonadResourceErr : ConcurrentEffect] private[mongo](
     if (ScalarStages.Id === stages || pushdownLevel === PushdownLevel.Disabled) fallback
     else {
       val result = interpreter.interpret(stages)
-      println(result._1.docs)
 
       if (result._1.docs.isEmpty) fallback
       else {

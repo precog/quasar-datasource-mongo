@@ -61,6 +61,7 @@ class CartesianSpec extends Specification with quasar.TreeMatchers {
 
     val expected = List(
       Pipeline.$project(Map(
+        "_id" -> O.int(0),
         "a" -> O.projection(Projection.key("root") + Projection.key("a")),
         "ba" -> O.projection(Projection.key("root") + Projection.key("b")),
         "bm" -> O.projection(Projection.key("root") + Projection.key("b")))),
@@ -97,8 +98,7 @@ class CartesianSpec extends Specification with quasar.TreeMatchers {
       Pipeline.$project(Map(
         "a" -> O.string("$a"),
         "ba" -> O.string("$ba"),
-        "bm" -> O.string("$bm_unwind.v"))),
-      Pipeline.NotNull("root"))
+        "bm" -> O.string("$bm_unwind.v"))))
 
     evalCartesian(cartouches) must beLike {
       case Some((mapper, pipes)) =>
