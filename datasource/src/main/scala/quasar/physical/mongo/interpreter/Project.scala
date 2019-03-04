@@ -28,6 +28,7 @@ object Project {
     tmpKey = state.uniqueKey concat "_project"
     res = List(
       Pipeline.$project(Map(tmpKey -> O.projection(fld))),
+      Pipeline.$match(Map(tmpKey -> O.$exists(O.bool(true)))),
       Pipeline.$project(Map(state.uniqueKey -> O.string("$" concat tmpKey))))
     _ <- focus[F]
   } yield res map mapProjection(state.mapper)

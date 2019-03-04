@@ -26,9 +26,14 @@ import quasar.physical.mongo.expression._
 import scalaz.{State, BindRec, \/, Scalaz, PlusEmpty, Applicative}, Scalaz._
 
 class WrapSpec extends Specification with ScalaCheck {
-  "wrap example" >> {
-    val actual = Wrap[State[InterpretationState, ?]](Field("wrapper")).eval(InterpretationState("root", Mapper.Unfocus))
-    val expected = List(Pipeline.$project(Map("wrapper" -> O.steps(List()))))
-    actual === expected
+  "unfocused" >> {
+    val actual = Wrap[State[InterpretationState, ?]](Field("wrapper")) run InterpretationState("root", Mapper.Unfocus)
+    val expected = List(Pipeline.$project(Map("wrapper" -> O.steps(List()), "_id" -> O.int(0))))
+    (actual._2 === expected) and (actual._1.mapper === Mapper.Unfocus)
+  }
+  "focused" >> {
+    val actual = Wrap[State[InterpretationState, ?]](Field("wrapper")) run InterpretationState("root", Mapper.Focus("root"))
+    val expected = List(Pipeline.$project(Map("wrapper" -> O.key("root"), "_id" -> O.int(0))))
+    (actual._2 === expected) and (actual._1.mapper === Mapper.Unfocus)
   }
 }
