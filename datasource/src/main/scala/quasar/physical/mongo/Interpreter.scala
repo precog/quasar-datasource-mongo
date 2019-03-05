@@ -20,7 +20,7 @@ import slamdata.Predef._
 
 import cats.effect.Sync
 
-import org.bson.{BsonValue, BsonDocument}
+import org.bson.BsonDocument
 
 import quasar.{ScalarStage, ScalarStages}
 import quasar.IdStatus
@@ -37,9 +37,6 @@ final case class Interpretation(
   docs: List[BsonDocument])
 
 class Interpreter(version: Version, uniqueKey: String, pushdownLevel: PushdownLevel) {
-  def mapper(x: BsonValue): BsonValue =
-    x.asDocument().get(uniqueKey)
-
   private def refine(inp: Interpretation)
       : InState[Interpretation \/ Interpretation] = inp.stages match {
     case List() => inp.right[Interpretation].point[InState]
