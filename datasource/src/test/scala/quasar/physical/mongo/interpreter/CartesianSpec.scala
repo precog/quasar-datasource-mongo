@@ -98,7 +98,12 @@ class CartesianSpec extends Specification with quasar.TreeMatchers {
       Pipeline.$project(Map(
         "a" -> O.string("$a"),
         "ba" -> O.string("$ba"),
-        "bm" -> O.string("$bm_unwind.v"))))
+        "bm" -> O.string("$bm_unwind.v"))),
+      Pipeline.$match(O.$or(List(
+        O.obj(Map("a" -> O.$exists(O.bool(true)))),
+        O.obj(Map("ba" -> O.$exists(O.bool(true)))),
+        O.obj(Map("bm" -> O.$exists(O.bool(true))))))))
+
 
     evalCartesian(cartouches) must beLike {
       case Some((mapper, pipes)) =>
