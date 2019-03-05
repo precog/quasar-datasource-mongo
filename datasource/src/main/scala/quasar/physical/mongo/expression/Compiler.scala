@@ -242,7 +242,4 @@ object Compiler {
     }
     inp.transCata[T[ExprF]](τ)
   }
-
-
-
 }
