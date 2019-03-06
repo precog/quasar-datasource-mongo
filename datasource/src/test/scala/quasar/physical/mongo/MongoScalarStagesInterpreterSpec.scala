@@ -32,19 +32,11 @@ class MongoScalarStagesInterpreterSpec
     with Spec.FocusedSpec
     with Spec.CartesianSpec
     with StageInterpreterSpec {
-  val idsPendingExamples: Set[Int] = Set(1, 2, 3, 4, 5, 6)
   val wrapPendingExamples: Set[Int] = Set()
   val projectPendingExamples: Set[Int] = Set()
   val maskPendingExamples: Set[Int] = Set()
   val pivotPendingExamples: Set[Int] = Set()
   val focusedPendingExamples: Set[Int] = Set()
-  val cartesianPendingExamples: Set[Int] = Set()
-
-  val idsPendingExamples: Set[Int] = Set()
-  val wrapPendingExamples: Set[Int] = Set()
-  val projectPendingExamples: Set[Int] = Set()
-  val maskPendingExamples: Set[Int] = Set()
-  val pivotPendingExamples: Set[Int] = Set(9, 10, 11)
   val cartesianPendingExamples: Set[Int] = Set()
 
   "Id statuses" >> {
