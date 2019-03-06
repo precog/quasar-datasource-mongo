@@ -65,7 +65,7 @@ object MongoDataSourceModule extends LightweightDatasourceModule {
         Mongo(mongoConfig).attempt.map {
           case Left(e) => mkError(config, e)
           case Right(disposableClient) =>
-            disposableClient.map(client => (new MongoDataSource(client): DS[F])).right[Error]
+            disposableClient.map(client => new MongoDataSource(client): DS[F]).right[Error]
         }
     }}
 
