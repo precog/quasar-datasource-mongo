@@ -25,12 +25,22 @@ import quasar.IdStatus
 import scalaz.{MonadState, Scalaz}, Scalaz._
 
 object Pivot {
-  def ensureArray(vectorType: ColumnType.Vector, key: String): Pipe =
+  def ensureArray(vectorType: ColumnType.Vector, key: String, undefined: Expr): Pipe = {
+    val proj = O.steps(List())
     Pipeline.$project(Map(key -> (vectorType match {
-      case ColumnType.Object => O.$objectToArray(O.steps(List()))
-      case ColumnType.Array => O.steps(List())
-    })))
+      case ColumnType.Object =>
+        O.$cond(
+          O.$eq(List(O.$type(proj), O.string("object"))),
+          O.$objectToArray(O.steps(List())),
+          O.array(List(O.obj(Map("k" -> undefined, "v" -> undefined)))))
+      case ColumnType.Array =>
+        O.$cond(
+          O.$eq(List(O.$type(proj), O.string("array"))),
+          proj,
+          O.array(List(undefined)))
 
+    })))
+  }
 
   def mkValue(status: IdStatus, vectorType: ColumnType.Vector, unwinded: String, index: String): Expr = {
     val indexString = O.string("$" concat index)
@@ -60,11 +70,10 @@ object Pivot {
     val indexKey = state.uniqueKey concat "_unwind_index"
 
     List(
-      ensureArray(vectorType, unwindKey),
+      ensureArray(vectorType, unwindKey, pivotUndefined(state.uniqueKey)),
       Pipeline.$unwind(unwindKey, indexKey),
       Pipeline.$project(Map(state.uniqueKey -> mkValue(status, vectorType, unwindKey, indexKey))),
-      Pipeline.NotNull(state.uniqueKey)
-    )
+      Pipeline.PivotFilter(state.uniqueKey))
   }
 
 

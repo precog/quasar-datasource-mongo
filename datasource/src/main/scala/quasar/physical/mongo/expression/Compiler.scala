@@ -27,7 +27,7 @@ import org.bson._
 
 import quasar.physical.mongo.Version
 
-import scalaz.{Const, Coproduct, Scalaz, MonadPlus, ApplicativePlus}, Scalaz._
+import scalaz.{:<:, Const, Coproduct, Functor, Scalaz, MonadPlus, ApplicativePlus}, Scalaz._
 import scalaz.syntax._
 
 import Pipeline._
@@ -40,16 +40,15 @@ object Compiler {
       version: Version,
       pipes: List[Pipeline[T[ExprF]]])
       : F[List[BsonDocument]] =
-    pipes.foldMapM { x => compilePipe[T, F](version, x) map (List(_)) }
+    pipes flatMap (eraseCustomPipeline(_)) foldMapM { x => compilePipe[T, F](version, x) map (List(_)) }
 
   def toCoreOp[T[_[_]]: BirecursiveT](pipe: MongoPipeline[T[ExprF]]): T[CoreOp] =
     optimize(compileProjections(pipelineObjects(pipe)))
 
   def compilePipe[T[_[_]]: BirecursiveT, F[_]: MonadPlus](
       version: Version,
-      customPipe: Pipeline[T[ExprF]])
+      pipe: MongoPipeline[T[ExprF]])
       : F[BsonDocument] = {
-    val pipe = eraseCustomPipeline(customPipe)
     if (version < pipeMinVersion(pipe)) MonadPlus[F].empty
     else {
       def transformM(op: Op[T[Core]]): F[Core[T[Core]]] =
@@ -68,17 +67,31 @@ object Compiler {
     case _ => ApplicativePlus[F].empty
   }
 
+  def pivotUndefined[T[_[_]]: BirecursiveT, F[_]: Functor](key: String)(implicit F: Core :<: F): T[F] = {
+    val O = Optics.core(birecursiveIso[T[F], F].reverse.asPrism)
+    O.string(key concat "_pivot_undefined")
+  }
+
   def eraseCustomPipeline[T[_[_]]: BirecursiveT](
       pipeline: Pipeline[T[ExprF]])
-      : MongoPipeline[T[ExprF]] = {
+      : List[MongoPipeline[T[ExprF]]] = {
 
     val O = Optics.fullT[T, ExprF]
 
     pipeline match {
-      case NotNull(fld) => $match(O.obj(Map(fld -> O.$ne(O.nil()))))
-      case $project(obj) => $project(obj)
-      case $match(obj) => $match(obj)
-      case $unwind(a, i) => $unwind(a, i)
+      case MaskFilter(fld) =>
+        List($match(O.obj(Map(fld -> O.$ne(O.nil())))))
+      case PivotFilter(fld) =>
+        val undefined: T[ExprF] = pivotUndefined(fld)
+        List(
+          $match(O.obj(Map(fld -> O.$ne(undefined)))),
+          $match(O.obj(Map(fld -> O.$ne(O.array(List(undefined, undefined)))))))
+      case $project(obj) =>
+        List($project(obj))
+      case $match(obj) =>
+        List($match(obj))
+      case $unwind(a, i) =>
+        List($unwind(a, i))
     }
   }
 
@@ -94,7 +107,7 @@ object Compiler {
         O.obj(Map("$unwind" -> O.obj(Map(
           "path" -> O.string("$" concat path),
           "includeArrayIndex" -> O.string(arrayIndex),
-          "preserveNullAndEmptyArrays" -> O.bool(true)))))
+          "preserveNullAndEmptyArrays" -> O.bool(false)))))
     }
   }
 

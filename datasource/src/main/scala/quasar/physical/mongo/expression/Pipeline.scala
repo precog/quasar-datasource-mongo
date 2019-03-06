@@ -45,12 +45,15 @@ object Pipeline {
         case $match(a) => NonTerminal(List("$match"), None, List(fa.render(a)))
         case $unwind(p, a) =>
           NonTerminal(List("$unwind"), None, List(p.render, a.render))
-        case NotNull(fld) =>
-          NonTerminal(List("NotNull"), None, List(fld.render))
+        case PivotFilter(fld) =>
+          NonTerminal(List("PivotFilter"), None, List(fld.render))
+        case MaskFilter(fld) =>
+          NonTerminal(List("MaskFilter"), None, List(fld.render))
       }
   }
 
-  final case class NotNull(field: String) extends CustomPipeline
+  final case class MaskFilter(field: String) extends CustomPipeline
+  final case class PivotFilter(field: String) extends CustomPipeline
 
   def pipeMinVersion(pipe: MongoPipeline[_]): Version = pipe match {
     case $project(_) => Version.zero
@@ -60,7 +63,8 @@ object Pipeline {
 
   implicit val functorPipeline: Functor[Pipeline] = new Functor[Pipeline] {
     def map[A, B](fa: Pipeline[A])(f: A => B): Pipeline[B] = fa match {
-      case NotNull(fld) => NotNull(fld)
+      case MaskFilter(fld) => MaskFilter(fld)
+      case PivotFilter(fld) => PivotFilter(fld)
       case $project(obj) => $project(obj map { case (k, v) => (k, f(v)) })
       case $match(a) => $match(f(a))
       case $unwind(p, i) => $unwind(p, i)

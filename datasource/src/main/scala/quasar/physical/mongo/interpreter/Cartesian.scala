@@ -63,16 +63,27 @@ object Cartesian {
         val instructions = is flatMap (_ flatMap {
           case Pipeline.$project(mp) =>
             List(Pipeline.$project(defaultObject ++ mp))
-          case Pipeline.NotNull(_) =>
+          case Pipeline.MaskFilter(_) =>
+            List()
+          case Pipeline.PivotFilter(_) =>
             List()
           case x => List(x)
         })
 
-        val removeEmpty =
+        val removeEmptyFields =
+          Pipeline.$project(cartouches map {
+            case (alias, _) => alias.name -> O.$cond(
+              O.$eq(List(O.string("$" concat alias.name), pivotUndefined(alias.name))),
+              O.string("$" concat alias.name concat "_non_existent_field"),
+              O.string("$" concat alias.name))
+          })
+
+
+        val removeEmptyObjects =
           Pipeline.$match(O.$or(cartouches.toList map {
             case (k, v) => O.obj(Map(k.name -> O.$exists(O.bool(true))))
           }))
-        initialProjection :: instructions ++ List(removeEmpty)
+        initialProjection :: instructions ++ List(removeEmptyFields, removeEmptyObjects)
       } flatMap { pipes =>
         unfocus[F] as pipes
       }

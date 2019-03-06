@@ -44,9 +44,11 @@ package object expression {
   def compilePipeline[F[_]: MonadPlus](version: Version, pipes: List[Pipe]): F[List[BsonDocument]] =
     Compiler.compilePipeline[Fix, F](version, pipes)
 
-  def compilePipe[F[_]: MonadPlus](version: Version, pipe: Pipe): F[BsonDocument] =
-    Compiler.compilePipe[Fix, F](version, pipe)
+  def compilePipe[F[_]: MonadPlus](version: Version, pipe: Pipe): F[List[BsonDocument]] =
+    Compiler.eraseCustomPipeline(pipe) foldMapM { x => Compiler.compilePipe[Fix, F](version, x) map (List(_)) }
 
   def mapProjection(mp: Mapper)(pipe: Pipe): Pipe =
     pipe map Compiler.mapProjection(Mapper.projection(mp))
+
+  def pivotUndefined(key: String): Expr = Compiler.pivotUndefined[Fix, ExprF](key)
 }

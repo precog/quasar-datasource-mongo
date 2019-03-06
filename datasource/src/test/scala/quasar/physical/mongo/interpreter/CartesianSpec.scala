@@ -76,7 +76,11 @@ class CartesianSpec extends Specification with quasar.TreeMatchers {
         "a" -> O.string("$a"),
         "ba" -> O.string("$ba"),
         "bm" -> O.string("$bm"),
-        "ba_unwind" -> O.key("ba"))),
+        "ba_unwind" ->
+          O.$cond(
+            O.$eq(List(O.$type(O.key("ba")), O.string("array"))),
+            O.key("ba"),
+            O.array(List(O.string("ba_pivot_undefined")))))),
       Pipeline.$unwind("ba_unwind", "ba_unwind_index"),
       Pipeline.$project(Map(
         "a" -> O.string("$a"),
@@ -93,12 +97,32 @@ class CartesianSpec extends Specification with quasar.TreeMatchers {
         "a" -> O.string("$a"),
         "ba" -> O.string("$ba"),
         "bm" -> O.string("$bm"),
-        "bm_unwind" -> O.$objectToArray(O.key("bm")))),
+        "bm_unwind" ->
+          O.$cond(
+            O.$eq(List(O.$type(O.key("bm")), O.string("object"))),
+            O.$objectToArray(O.key("bm")),
+            O.array(List(O.obj(Map(
+              "k" -> O.string("bm_pivot_undefined"),
+              "v" -> O.string("bm_pivot_undefined")))))))),
       Pipeline.$unwind("bm_unwind", "bm_unwind_index"),
       Pipeline.$project(Map(
         "a" -> O.string("$a"),
         "ba" -> O.string("$ba"),
         "bm" -> O.string("$bm_unwind.v"))),
+      Pipeline.$project(Map(
+        "a" -> O.$cond(
+          O.$eq(List(O.string("$a"), O.string("a_pivot_undefined"))),
+          O.string("$a_non_existent_field"),
+          O.string("$a")),
+        "ba" -> O.$cond(
+          O.$eq(List(O.string("$ba"), O.string("ba_pivot_undefined"))),
+          O.string("$ba_non_existent_field"),
+          O.string("$ba")),
+        "bm" -> O.$cond(
+          O.$eq(List(O.string("$bm"), O.string("bm_pivot_undefined"))),
+          O.string("$bm_non_existent_field"),
+          O.string("$bm")),
+      )),
       Pipeline.$match(O.$or(List(
         O.obj(Map("a" -> O.$exists(O.bool(true)))),
         O.obj(Map("ba" -> O.$exists(O.bool(true)))),

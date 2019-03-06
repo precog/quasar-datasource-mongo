@@ -22,16 +22,23 @@ import org.bson.{Document => _, _}
 
 import quasar.api.table.ColumnType
 import quasar.common.{CPath, CPathField}
-import quasar.{IdStatus, ScalarStageSpec => Spec, JsonSpec, ScalarStage, ScalarStages}
+import quasar.{IdStatus, ScalarStageSpec => Spec, ScalarStage, ScalarStages}
 
 class MongoScalarStagesInterpreterSpec
-    extends JsonSpec
-    with Spec.WrapSpec
+    extends Spec.WrapSpec
     with Spec.ProjectSpec
-    with Spec.PivotSpec
     with Spec.MaskSpec
+    with Spec.PivotSpec
+    with Spec.FocusedSpec
     with Spec.CartesianSpec
     with StageInterpreterSpec {
+  val idsPendingExamples: Set[Int] = Set(1, 2, 3, 4, 5, 6)
+  val wrapPendingExamples: Set[Int] = Set()
+  val projectPendingExamples: Set[Int] = Set()
+  val maskPendingExamples: Set[Int] = Set()
+  val pivotPendingExamples: Set[Int] = Set()
+  val focusedPendingExamples: Set[Int] = Set()
+  val cartesianPendingExamples: Set[Int] = Set()
 
   "Id statuses" >> {
     val input = ldjson("""
@@ -57,6 +64,22 @@ class MongoScalarStagesInterpreterSpec
         ["2", {"_id": "2", "value": "baz"}]""")
       val actual = interpret(ScalarStages(IdStatus.IncludeId, List()), input, (x => x))
       actual must bestSemanticEqual(expected)
+    }
+  }
+
+  "Pivot special" >> {
+    "no unnecessary undefined pairs" in {
+      val input = ldjson("""
+        { "a": 1 }
+        12
+        { "b": 2 }
+        """)
+      val expected = ldjson("""
+        ["a", 1]
+        ["b", 2]
+        """)
+      val targets = Pivot(IdStatus.IncludeId, ColumnType.Object)
+      evalPivot(targets, input) must bestSemanticEqual(expected)
     }
   }
 
@@ -116,6 +139,9 @@ class MongoScalarStagesInterpreterSpec
   val RootProjection = Project(CPath.parse(".rootKey"))
 
   def rootWrapper(b: JsonElement): JsonElement = new BsonDocument(RootKey, b)
+
+  def evalFocused(focused: List[ScalarStage.Focused], stream: JsonStream): JsonStream =
+    interpret(ScalarStages(IdStatus.ExcludeId, RootProjection :: focused), stream, rootWrapper)
 
   def evalOneStage(stage: ScalarStage, stream: JsonStream): JsonStream =
     interpret(ScalarStages(IdStatus.ExcludeId, List(RootProjection, stage)), stream, rootWrapper)
