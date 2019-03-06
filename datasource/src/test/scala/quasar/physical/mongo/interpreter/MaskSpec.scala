@@ -100,8 +100,9 @@ class MaskSpec extends Specification with quasar.TreeMatchers {
     "numbers and booleans types at identity" >> {
       val actual = evalMask(Map(CPath.Identity -> Set(ColumnType.Number, ColumnType.Boolean)))
 
-      val expected = wrapWithProject(O.obj(Map("root" -> O.$cond(
-        O.$or(List(
+      val expected = wrapWithProject(O.obj(Map(
+        "root" -> O.$cond(
+          O.$or(List(
             typeEq(rootKey, "double"),
             typeEq(rootKey, "long"),
             typeEq(rootKey, "int"),

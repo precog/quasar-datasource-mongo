@@ -69,11 +69,15 @@ class Interpreter(version: Version, uniqueKey: String, pushdownLevel: PushdownLe
         uniqueKey -> O.key("_id"),
         "_id" -> O.int(0))))
     case IdStatus.ExcludeId =>
-      List[Pipe]().point[F]
-    case IdStatus.IncludeId =>
-      focus[F] as List(Pipeline.$project(Map(
-        uniqueKey -> O.array(List(O.key("_id"), O.steps(List()))),
+      unfocus[F] as List(Pipeline.$project(Map(
         "_id" -> O.int(0))))
+    case IdStatus.IncludeId =>
+      focus[F] as List(
+        Pipeline.$project(Map(
+          uniqueKey -> O.array(List(O.key("_id"), O.steps(List()))),
+          "_id" -> O.int(0))),
+        Pipeline.$project(Map(
+          (uniqueKey concat "._id") -> O.int(0))))
   }
 
   def interpret(stages: ScalarStages): (Interpretation, Mapper) = {

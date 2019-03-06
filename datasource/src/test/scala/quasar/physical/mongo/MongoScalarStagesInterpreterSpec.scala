@@ -58,9 +58,9 @@ class MongoScalarStagesInterpreterSpec
     }
     "IncludeId" >> {
       val expected = ldjson("""
-        ["0", {"_id": "0", "value": "foo"}]
-        ["1", {"_id": "1", "value": "bar"}]
-        ["2", {"_id": "2", "value": "baz"}]""")
+        ["0", {"value": "foo"}]
+        ["1", {"value": "bar"}]
+        ["2", {"value": "baz"}]""")
       val actual = interpret(ScalarStages(IdStatus.IncludeId, List()), input, (x => x))
       actual must bestSemanticEqual(expected)
     }
