@@ -22,16 +22,22 @@ import org.bson.{Document => _, _}
 
 import quasar.api.table.ColumnType
 import quasar.common.{CPath, CPathField}
-import quasar.{IdStatus, ScalarStageSpec => Spec, JsonSpec, ScalarStage, ScalarStages}
+import quasar.{IdStatus, ScalarStageSpec => Spec, ScalarStage, ScalarStages}
 
 class MongoScalarStagesInterpreterSpec
-    extends JsonSpec
-    with Spec.WrapSpec
+    extends Spec.WrapSpec
     with Spec.ProjectSpec
     with Spec.PivotSpec
     with Spec.MaskSpec
     with Spec.CartesianSpec
     with StageInterpreterSpec {
+
+  val idsPendingExamples: Set[Int] = Set()
+  val wrapPendingExamples: Set[Int] = Set()
+  val projectPendingExamples: Set[Int] = Set()
+  val maskPendingExamples: Set[Int] = Set()
+  val pivotPendingExamples: Set[Int] = Set(9, 10, 11)
+  val cartesianPendingExamples: Set[Int] = Set()
 
   "Id statuses" >> {
     val input = ldjson("""
