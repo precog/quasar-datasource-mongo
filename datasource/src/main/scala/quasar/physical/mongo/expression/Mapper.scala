@@ -14,20 +14,25 @@
  * limitations under the License.
  */
 
-package quasar.physical.mongo.interpreter
+package quasar.physical.mongo.expression
 
 import slamdata.Predef._
 
-import quasar.physical.mongo.expression._
+import org.bson._
 
-import scalaz.{MonadState, Scalaz}, Scalaz._
+trait Mapper extends Product with Serializable
 
-object Wrap {
-  def apply[F[_]: MonadInState](name: Field): F[List[Pipe]] = for {
-    state <- MonadState[F, InterpretationState].get
-    res = List(Pipeline.$project(Map(
-      name.name -> O.steps(List()),
-      "_id" -> O.int(0))))
-    _ <- unfocus[F]
-  } yield res map mapProjection(state.mapper)
+object Mapper {
+  final case class Focus(str: String) extends Mapper
+  final case object Unfocus extends Mapper
+
+  def bson(mapper: Mapper)(inp: BsonValue): BsonValue = mapper match {
+    case Focus(str) => inp.asDocument().get(str)
+    case Unfocus => inp
+  }
+
+  def projection(mapper: Mapper)(inp: Projection): Projection = mapper match {
+    case Focus(str) => Projection.key(str) + inp
+    case Unfocus => inp
+  }
 }

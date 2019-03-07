@@ -14,20 +14,22 @@
  * limitations under the License.
  */
 
-package quasar.physical.mongo.interpreter
+package quasar.physical.mongo
 
 import slamdata.Predef._
 
-import quasar.physical.mongo.expression._
+import quasar.physical.mongo.expression.Mapper
 
-import scalaz.{MonadState, Scalaz}, Scalaz._
+import scalaz.{StateT, MonadState}
 
-object Wrap {
-  def apply[F[_]: MonadInState](name: Field): F[List[Pipe]] = for {
-    state <- MonadState[F, InterpretationState].get
-    res = List(Pipeline.$project(Map(
-      name.name -> O.steps(List()),
-      "_id" -> O.int(0))))
-    _ <- unfocus[F]
-  } yield res map mapProjection(state.mapper)
+package object interpreter {
+  type InState[A] = StateT[Option, InterpretationState, A]
+
+  type MonadInState[F[_]] = MonadState[F, InterpretationState]
+
+  def focus[F[_]: MonadInState]: F[Unit] =
+    MonadState[F, InterpretationState].modify { x => x.copy(mapper = Mapper.Focus(x.uniqueKey)) }
+
+  def unfocus[F[_]: MonadInState]: F[Unit] =
+    MonadState[F, InterpretationState].modify { x => x.copy(mapper = Mapper.Unfocus) }
 }

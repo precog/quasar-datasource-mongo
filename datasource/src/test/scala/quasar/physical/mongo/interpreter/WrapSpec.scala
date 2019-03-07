@@ -23,22 +23,17 @@ import org.specs2.ScalaCheck
 
 import quasar.physical.mongo.expression._
 
+import scalaz.{State, Scalaz}, Scalaz._
+
 class WrapSpec extends Specification with ScalaCheck {
-  "wrap interpreter produces two projects" >> prop { (wrapString: String, rootKey: String) =>
-    ((wrapString.length > 0) && (wrapString != "\u0000")) ==> {
-      val interpretation = Wrap(rootKey, Field(wrapString))
-      interpretation must beLike {
-        case Pipeline.$project(prj1) :: Pipeline.$project(prj2) :: List() =>
-          (prj1.get(rootKey concat "_wrap") === Some(O.obj(Map(wrapString -> O.key(rootKey))))) and
-          (prj2.get(rootKey) === Some(O.key(rootKey concat "_wrap")))
-      }
-    }
+  "unfocused" >> {
+    val actual = Wrap[State[InterpretationState, ?]](Field("wrapper")) run InterpretationState("root", Mapper.Unfocus)
+    val expected = List(Pipeline.$project(Map("wrapper" -> O.steps(List()), "_id" -> O.int(0))))
+    (actual._2 === expected) and (actual._1.mapper === Mapper.Unfocus)
   }
-  "wrap example" >> {
-    val actual = Wrap("root", Field("wrapper"))
-    val expected = List(
-      Pipeline.$project(Map("root_wrap" -> O.obj(Map("wrapper" -> O.key("root"))))),
-      Pipeline.$project(Map("root" -> O.key("root_wrap"))))
-    actual === expected
+  "focused" >> {
+    val actual = Wrap[State[InterpretationState, ?]](Field("wrapper")) run InterpretationState("root", Mapper.Focus("root"))
+    val expected = List(Pipeline.$project(Map("wrapper" -> O.key("root"), "_id" -> O.int(0))))
+    (actual._2 === expected) and (actual._1.mapper === Mapper.Unfocus)
   }
 }

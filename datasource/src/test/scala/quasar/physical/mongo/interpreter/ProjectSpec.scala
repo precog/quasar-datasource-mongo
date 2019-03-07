@@ -18,32 +18,29 @@ package quasar.physical.mongo.interpreter
 
 import slamdata.Predef._
 
-import cats.syntax.order._
-
 import org.specs2.mutable.Specification
 
 import quasar.physical.mongo.expression._
 
-class ProjectSpec extends Specification {
-  "Project examples" >> {
-    "old mongo without indices" >> {
-      val actual = Project("root", Projection.key("foo") + Projection.key("bar"))
-      val expected = List(
-        Pipeline.$match(Map("root.foo.bar" -> O.$exists(O.bool(true)))),
-        Pipeline.$project(Map("root_project" -> O.projection(
-          Projection.key("root") + Projection.key("foo") + Projection.key("bar")))),
-        Pipeline.$project(Map("root" -> O.key("root_project"))))
-      actual === expected
-    }
-    "new mongo with indices" >> {
-      val actual = Project("other", Projection.key("foo") + Projection.index(1))
-      val expected = List(
-        Pipeline.$match(Map("other.foo.1" -> O.$exists(O.bool(true)))),
-        Pipeline.$project(Map("other_project" -> O.projection(
-          Projection.key("other") + Projection.key("foo") + Projection.index(1)))),
-        Pipeline.$project(Map("other" -> O.key("other_project"))))
-      actual === expected
-    }
-  }
+import scalaz.{State, Scalaz}, Scalaz._
 
+class ProjectSpec extends Specification with quasar.TreeMatchers {
+  "unfocused" >> {
+    val foobarPrj = Projection.key("foo") + Projection.key("bar")
+    val actual = Project[State[InterpretationState, ?]](foobarPrj) run InterpretationState("root", Mapper.Unfocus)
+    val expected = List(
+      Pipeline.$match(O.obj(Map("foo.bar" -> O.$exists(O.bool(true))))),
+      Pipeline.$project(Map("root_project" -> O.projection(foobarPrj))),
+      Pipeline.$project(Map("root" -> O.string("$root_project"))))
+    (actual._2 must beTree(expected)) and (actual._1.mapper === Mapper.Focus("root"))
+  }
+  "focused" >> {
+    val foo1Prj = Projection.key("foo") + Projection.index(1)
+    val actual = Project[State[InterpretationState, ?]](foo1Prj) run InterpretationState("other", Mapper.Focus("other"))
+    val expected = List(
+      Pipeline.$match(O.obj(Map("other.foo.1" -> O.$exists(O.bool(true))))),
+      Pipeline.$project(Map("other_project" -> O.projection(Projection.key("other") + foo1Prj))),
+      Pipeline.$project(Map("other" -> O.string("$other_project"))))
+    (actual._2 must beTree(expected)) and (actual._1.mapper === Mapper.Focus("other"))
+  }
 }

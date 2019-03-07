@@ -29,28 +29,41 @@ trait MongoPipeline[+A] extends Pipeline[A]
 
 trait CustomPipeline extends Pipeline[Nothing]
 
+import scalaz.Functor
+
 object Pipeline {
   final case class $project[A](obj: Map[String, A]) extends MongoPipeline[A]
-  final case class $match[A](obj: Map[String, A]) extends MongoPipeline[A]
+  final case class $match[A](a: A) extends MongoPipeline[A]
   final case class $unwind[A](path: String, arrayIndex: String) extends MongoPipeline[A]
 
-  implicit val delayRenderTreeMongoPipeline: Delay[RenderTree, MongoPipeline] = new Delay[RenderTree, MongoPipeline] {
-    def apply[A](fa: RenderTree[A]): RenderTree[MongoPipeline[A]] = RenderTree.make {
-      case $project(obj) => NonTerminal(List("$project"), None, obj.toList map {
-        case (k, v) => NonTerminal(List(), Some(k), List(fa.render(v)))
-      })
-      case $match(obj) => NonTerminal(List("$match"), None, obj.toList map {
-        case (k, v) => NonTerminal(List(), Some(k), List(fa.render(v)))
-      })
-      case $unwind(p, a) => NonTerminal(List("$unwind"), None, List(p.render, a.render))
-    }
+  implicit val delayRenderTreeMongoPipeline: Delay[RenderTree, Pipeline] =
+    new Delay[RenderTree, Pipeline] {
+      def apply[A](fa: RenderTree[A]): RenderTree[Pipeline[A]] = RenderTree.make {
+        case $project(obj) => NonTerminal(List("$project"), None, obj.toList map {
+          case (k, v) => NonTerminal(List(), Some(k), List(fa.render(v)))
+        })
+        case $match(a) => NonTerminal(List("$match"), None, List(fa.render(a)))
+        case $unwind(p, a) =>
+          NonTerminal(List("$unwind"), None, List(p.render, a.render))
+        case NotNull(fld) =>
+          NonTerminal(List("NotNull"), None, List(fld.render))
+      }
   }
 
   final case class NotNull(field: String) extends CustomPipeline
 
-  def pipeMinVersion[A](pipe: MongoPipeline[A]): Version = pipe match {
+  def pipeMinVersion(pipe: MongoPipeline[_]): Version = pipe match {
     case $project(_) => Version.zero
     case $match(_) => Version.zero
     case $unwind(_, _) => Version.$unwind
+  }
+
+  implicit val functorPipeline: Functor[Pipeline] = new Functor[Pipeline] {
+    def map[A, B](fa: Pipeline[A])(f: A => B): Pipeline[B] = fa match {
+      case NotNull(fld) => NotNull(fld)
+      case $project(obj) => $project(obj map { case (k, v) => (k, f(v)) })
+      case $match(a) => $match(f(a))
+      case $unwind(p, i) => $unwind(p, i)
+    }
   }
 }

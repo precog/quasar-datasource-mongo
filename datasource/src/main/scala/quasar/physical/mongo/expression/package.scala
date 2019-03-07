@@ -22,6 +22,9 @@ import matryoshka.data.Fix
 
 import org.bson._
 
+import scalaz.{Scalaz, MonadPlus}, Scalaz._
+import scalaz.syntax._
+
 package object expression {
   type ExprF[A] = Compiler.ExprF[A]
   type Expr = Fix[ExprF]
@@ -38,10 +41,12 @@ package object expression {
 
   type Pipe = Pipeline[Expr]
 
-  def compilePipeline(version: Version, pipes: List[Pipe]): Option[List[BsonDocument]] =
-    Compiler.compilePipeline[Fix](version, pipes)
+  def compilePipeline[F[_]: MonadPlus](version: Version, pipes: List[Pipe]): F[List[BsonDocument]] =
+    Compiler.compilePipeline[Fix, F](version, pipes)
 
-  def compilePipe(version: Version, pipe: Pipe): Option[BsonDocument] =
-    Compiler.compilePipe[Fix](version, pipe)
+  def compilePipe[F[_]: MonadPlus](version: Version, pipe: Pipe): F[BsonDocument] =
+    Compiler.compilePipe[Fix, F](version, pipe)
 
+  def mapProjection(mp: Mapper)(pipe: Pipe): Pipe =
+    pipe map Compiler.mapProjection(Mapper.projection(mp))
 }

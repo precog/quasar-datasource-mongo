@@ -18,15 +18,13 @@ package quasar.physical.mongo.interpreter
 
 import slamdata.Predef._
 
-import cats.syntax.order._
-import cats.syntax.foldable._
-import cats.instances.option._
-import cats.instances.list._
-
 import quasar.common.CPath
 import quasar.api.table.ColumnType
 
 import quasar.physical.mongo.expression._
+import quasar.physical.mongo.utils.optToAlternative
+
+import scalaz.{MonadState, Scalaz, PlusEmpty}, Scalaz._
 
 import shims._
 
@@ -54,13 +52,14 @@ object Mask {
     }
   }
 
-  private def masksToTypeTree(uniqueKey: String, masks: Map[CPath, Set[ColumnType]]): Option[TypeTree] = {
-    masks.toList.foldM(emptyTree) {
-      case (acc, (cpath, types)) => Projection.fromCPath(cpath) map { p =>
-        insert(Field(uniqueKey) :: p.steps, TypeTree(types, Map.empty, Map.empty), acc)
+  private def masksToTypeTree(mapper: Mapper, masks: Map[CPath, Set[ColumnType]]): Option[TypeTree] = {
+    masks.toList.foldLeftM(emptyTree) {
+      case (acc, (cpath, types)) =>
+        Projection.fromCPath(cpath)
+          .map(Mapper.projection(mapper))
+          .map(p => insert(p.steps, TypeTree(types, Map.empty, Map.empty), acc))
       }
     }
-  }
 
   private def parseTypeStrings(parseType: ColumnType): List[String] = parseType match {
     case ColumnType.Boolean => List("bool")
@@ -91,11 +90,11 @@ object Mask {
   }
 
   @SuppressWarnings(Array("org.wartremover.warts.Recursion"))
-  private def rebuildDoc(undefined: Projection, proj: Projection, tree: TypeTree): Expr = {
+  private def rebuildDoc(uniqueKey: String, undefined: Projection, proj: Projection, tree: TypeTree): Expr = {
 
     lazy val obj: Expr = {
       val treeMap = tree.obj map {
-        case (key, child) => (key, rebuildDoc(undefined, proj + Projection.key(key), child))
+        case (key, child) => (key, rebuildDoc(uniqueKey, undefined, proj + Projection.key(key), child))
       }
       O.obj(treeMap)
     }
@@ -103,7 +102,7 @@ object Mask {
     lazy val array: Expr = {
       val treeList =
         tree.list.toList.sortBy(_._1) map {
-          case (i: Int, child: TypeTree) => rebuildDoc(undefined, proj + Projection.index(i), child)
+          case (i: Int, child: TypeTree) => rebuildDoc(uniqueKey, undefined, proj + Projection.index(i), child)
       }
       O.array(treeList)
     }
@@ -125,7 +124,11 @@ object Mask {
     def projectionOr(e: Expr): Expr =
       if (tree.types.isEmpty) e else O.projection(proj)
 
-    if (proj === Projection(List())) obj
+    if (proj === Projection(List())) {
+      if (!tree.obj.isEmpty) obj
+      else if (!tree.types.contains(ColumnType.Object)) O.projection(undefined)
+      else O.obj(Map(uniqueKey -> O.string("$$ROOT")))
+    }
     else // we need double check to exclude empty objects and other redundant stuff
       O.$cond(
         // At first we filter that there is anything in this or children
@@ -139,13 +142,18 @@ object Mask {
         O.projection(undefined))
   }
 
-  def apply(uniqueKey: String, masks: Map[CPath, Set[ColumnType]]): Option[List[Pipe]] = {
-    val undefinedKey = uniqueKey.concat("_non_existent_field")
-    if (masks.isEmpty) Some(List(Pipeline.$match(Map(undefinedKey -> O.bool(false)))))
-    else for {
-      tree <- masksToTypeTree(uniqueKey, masks)
-      projected = rebuildDoc(Projection.key(undefinedKey), Projection(List()), tree)
-      projObj <- O.obj.getOption(projected)
-    } yield List(Pipeline.$project(projObj), Pipeline.NotNull(uniqueKey))
-  }
+  def apply[F[_]: MonadInState: PlusEmpty](masks: Map[CPath, Set[ColumnType]]): F[List[Pipe]] =
+    MonadState[F, InterpretationState].get flatMap { state =>
+      val undefinedKey = state.uniqueKey concat "_non_existent_field"
+      if (masks.isEmpty)
+        List(Pipeline.$match(O.obj(Map(undefinedKey -> O.bool(false)))): Pipe).point[F]
+      else for {
+        projObj <- optToAlternative[F].apply(for {
+          tree <- masksToTypeTree(state.mapper, masks)
+          rebuilt = rebuildDoc(state.uniqueKey, Projection.key(undefinedKey), Projection(List()), tree)
+          pObj <- O.obj.getOption(rebuilt)
+        } yield pObj)
+        _ <- focus[F]
+      } yield List(Pipeline.$project(projObj), Pipeline.NotNull(state.uniqueKey))
+    }
 }
