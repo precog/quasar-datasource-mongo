@@ -20,8 +20,7 @@ import slamdata.Predef._
 
 import org.bson.{Document => _, _}
 
-import quasar.api.table.ColumnType
-import quasar.common.{CPath, CPathField}
+import quasar.common.CPath
 import quasar.{IdStatus, ScalarStageSpec => Spec, ScalarStage, ScalarStages}
 
 class MongoScalarStagesInterpreterSpec
@@ -62,44 +61,6 @@ class MongoScalarStagesInterpreterSpec
         ["1", {"_id": "1", "value": "bar"}]
         ["2", {"_id": "2", "value": "baz"}]""")
       val actual = interpret(ScalarStages(IdStatus.IncludeId, List()), input, (x => x))
-      actual must bestSemanticEqual(expected)
-    }
-  }
-
-  "Pivot special" >> {
-    "no unnecessary undefined pairs" in {
-      val input = ldjson("""
-        { "a": 1 }
-        12
-        { "b": 2 }
-        """)
-      val expected = ldjson("""
-        ["a", 1]
-        ["b", 2]
-        """)
-      val targets = Pivot(IdStatus.IncludeId, ColumnType.Object)
-      evalPivot(targets, input) must bestSemanticEqual(expected)
-    }
-  }
-
-  "Cartesian special" >> {
-    "cross fields when some are undefined" in {
-      val input = ldjson("""
-          { "a0": 1 }
-          { "a0": 2, "b0": "foo" }
-          { "b0": "bar" }
-          { "c": 12 }
-          """)
-      val expected = ldjson("""
-          { "a1": 1 }
-          { "a1": 2, "b1": "foo" }
-          { "b1": "bar" }
-          """)
-      val targets = Map(
-        (CPathField("a1"), (CPathField("a0"), Nil)),
-        (CPathField("b1"), (CPathField("b0"), Nil)))
-
-      val actual = interpret(ScalarStages(IdStatus.ExcludeId, List(ScalarStage.Cartesian(targets))), input, (x => x))
       actual must bestSemanticEqual(expected)
     }
   }

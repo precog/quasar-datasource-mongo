@@ -29,7 +29,7 @@ object Project {
     fld = Mapper.projection(state.mapper)(prj)
     res = List(
       Pipeline.$match(O.obj(Map(fld.toKey -> O.$exists(O.bool(true))))),
-      Pipeline.$project(Map(tmpKey -> O.projection(fld))),
+      Pipeline.$project(Map("_id" -> O.int(0)) ++ Map(tmpKey -> O.projection(fld))),
       Pipeline.$project(Map(state.uniqueKey -> O.string("$" concat tmpKey))))
     _ <- focus[F]
   } yield res

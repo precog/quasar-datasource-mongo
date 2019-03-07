@@ -40,6 +40,8 @@ object Op {
   final case class Ne[A](exp: A) extends Op[A]
   final case class ObjectToArray[A](exp: A) extends Op[A]
   final case class ArrayElemAt[A](exp: A, ix: Int) extends Op[A]
+  final case class Reduce[A](input: A, initialValue: A, expression: A) extends Op[A]
+  final case class ConcatArrays[A](exps: List[A]) extends Op[A]
 
   implicit def traverse: Traverse[Op] = new Traverse[Op] {
     def traverseImpl[G[_]: Applicative, A, B](op: Op[A])(f: A => G[B])
@@ -54,6 +56,8 @@ object Op {
       case Eq(lst) => lst traverse f map (Eq(_))
       case Type(x) => f(x) map (Type(_))
       case Let(vars, in) => ((vars traverse f) |@| f(in))(Let(_, _))
+      case Reduce(a, b, c) => (f(a) |@| f(b) |@| f(c))(Reduce(_, _, _))
+      case ConcatArrays(lst) => lst traverse f map (ConcatArrays(_))
     }
   }
 
@@ -71,11 +75,15 @@ object Op {
       case Cond(a, b, c) => NonTerminal(List("Cond"), None, List(
         NonTerminal(List(), Some("check"), List(fa.render(a))),
         NonTerminal(List(), Some("ok"), List(fa.render(b))),
-        NonTerminal(List(), Some("fail"), List(fa.render(c)))
-      ))
+        NonTerminal(List(), Some("fail"), List(fa.render(c)))))
       case Ne(a) => NonTerminal(List("Ne"), None, List(fa.render(a)))
       case ObjectToArray(a) => NonTerminal(List("ObjectToArray"), None, List(fa.render(a)))
       case ArrayElemAt(a, i) => NonTerminal(List("ArrayElemAt"), Some(i.toString), List(fa.render(a)))
+      case Reduce(a, b, c) => NonTerminal(List("Reduce"), None, List(
+        NonTerminal(List(), Some("input"), List(fa.render(a))),
+        NonTerminal(List(), Some("initialValue"), List(fa.render(b))),
+        NonTerminal(List(), Some("expression"), List(fa.render(c)))))
+      case ConcatArrays(a) => NonTerminal(List("ConcatArrays"), None, a map fa.render)
     }
   }
 
@@ -117,6 +125,15 @@ object Op {
       Prism.partial[Op[A], A] {
         case Ne(a) => a
       } { a => Ne(a) }
+    val _reduce: Prism[Op[A], (A, A, A)] =
+      Prism.partial[Op[A], (A, A, A)] {
+        case Reduce(a, b, c) => (a, b, c)
+      } { case (a, b, c) => Reduce(a, b, c) }
+    val _concatArrays: Prism[Op[A], List[A]] =
+      Prism.partial[Op[A], List[A]] {
+        case ConcatArrays(a) => a
+      } { a => ConcatArrays(a) }
+
 
     val $let: Prism[O, (Map[String, A], A)] = opPrism composePrism _let
     val $type: Prism[O, A] = opPrism composePrism _type
@@ -127,6 +144,8 @@ object Op {
     val $arrayElemAt: Prism[O, (A, Int)] = opPrism composePrism _arrayElemAt
     val $objectToArray: Prism[O, A] = opPrism composePrism _objectToArray
     val $ne: Prism[O, A] = opPrism composePrism _ne
+    val $reduce: Prism[O, (A, A, A)] = opPrism composePrism _reduce
+    val $concatArrays: Prism[O, List[A]] = opPrism composePrism _concatArrays
   }
 
   def opMinVersion[A](op: Op[A]): Version = op match {
@@ -139,5 +158,7 @@ object Op {
     case ArrayElemAt(_, _) => Version.$arrayElemAt
     case ObjectToArray(_) => Version.$objectToArray
     case Ne(_) => Version.zero
+    case Reduce(_, _, _) => Version.$reduce
+    case ConcatArrays(_) => Version.$concatArrays
   }
 }

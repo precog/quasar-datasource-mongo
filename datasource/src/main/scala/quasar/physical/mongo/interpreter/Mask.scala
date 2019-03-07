@@ -24,9 +24,7 @@ import quasar.api.table.ColumnType
 import quasar.physical.mongo.expression._
 import quasar.physical.mongo.utils.optToAlternative
 
-import scalaz.{MonadState, Scalaz, PlusEmpty}, Scalaz._
-
-import shims._
+import scalaz.{MonadState, Scalaz, PlusEmpty, Reader, MonadReader}, Scalaz._
 
 object Mask {
   final case class TypeTree(types: Set[ColumnType], obj: Map[String, TypeTree], list: Map[Int, TypeTree])
@@ -65,7 +63,7 @@ object Mask {
     case ColumnType.Boolean => List("bool")
     case ColumnType.Null => List("null")
     case ColumnType.Number => List("double", "long", "int", "decimal")
-    case ColumnType.String => List("string")
+    case ColumnType.String => List("string", "objectId")
     case ColumnType.OffsetDateTime => List("date")
     case ColumnType.Array => List("array")
     case ColumnType.Object => List("object")
@@ -73,38 +71,52 @@ object Mask {
   }
 
   @SuppressWarnings(Array("org.wartremover.warts.Recursion"))
-  private def typeTreeFilters(undefined: Projection, proj: Projection, tree: TypeTree): Expr = {
+  private def typeTreeFilters(proj: Projection, tree: TypeTree): Expr = {
     val typeExprs: List[Expr] = tree.types.toList flatMap parseTypeStrings map (O.string(_))
     val eqExprs: List[Expr] = typeExprs map (x => O.$eq(List(O.$type(O.projection(proj)), x)))
     val listExprs: List[Expr] =
       if (tree.types.contains(ColumnType.Array)) List()
       else tree.list.toList.sortBy(_._1) map {
-        case (i, child) => typeTreeFilters(undefined, proj + Projection.index(i), child)
+        case (i, child) => typeTreeFilters(proj + Projection.index(i), child)
       }
     val objExprs: List[Expr] =
       if (tree.types.contains(ColumnType.Object)) List()
       else tree.obj.toList map {
-        case (key, child) => typeTreeFilters(undefined, proj + Projection.key(key), child)
+        case (key, child) => typeTreeFilters(proj + Projection.key(key), child)
       }
     O.$or(eqExprs ++ listExprs ++ objExprs)
   }
 
   @SuppressWarnings(Array("org.wartremover.warts.Recursion"))
-  private def rebuildDoc(uniqueKey: String, undefined: Projection, proj: Projection, tree: TypeTree): Expr = {
+  private def rebuildDoc[F[_]: MonadReader[?[_], Config]](
+      proj: Projection,
+      tree: TypeTree)
+      : F[Expr] = MonadReader[F, Config].ask flatMap { case Config(uniqueKey, undefined) =>
 
-    lazy val obj: Expr = {
-      val treeMap = tree.obj map {
-        case (key, child) => (key, rebuildDoc(uniqueKey, undefined, proj + Projection.key(key), child))
+    val obj: F[Expr] = inObject {
+      val treeMap = tree.obj.toList.foldLeftM(Map[String, Expr]()) {
+        case (m, (key, child)) =>
+          rebuildDoc(proj + Projection.key(key), child) map (m.updated(key, _))
       }
-      O.obj(treeMap)
+      treeMap map (O.obj(_))
     }
 
-    lazy val array: Expr = {
-      val treeList =
-        tree.list.toList.sortBy(_._1) map {
-          case (i: Int, child: TypeTree) => rebuildDoc(uniqueKey, undefined, proj + Projection.index(i), child)
-      }
-      O.array(treeList)
+    val array: F[Expr] = inArray {
+      for {
+        arr <- tree.list.toList.sortBy(_._1) traverse {
+          case (i, child) => rebuildDoc(proj + Projection.index(i), child)
+        }
+        undef <- MonadReader[F, Config].asks(_.undefined)
+      } yield
+        O.$reduce(
+          O.array(arr),
+          O.array(List()),
+          O.$cond(
+            O.$eq(List(O.string("$$this"), undef)),
+            O.string("$$value"),
+            O.$concatArrays(List(
+              O.string("$$value"),
+              O.array(List(O.string("$$this")))))))
     }
 
     def isArray(e: Expr): Expr =
@@ -113,49 +125,61 @@ object Mask {
     def isObject(e: Expr): Expr =
       O.$eq(List(O.$type(e), O.string("object")))
 
-    def arrayOr(e: Expr): Expr =
-      if (tree.types.contains(ColumnType.Array) || tree.list.isEmpty) e
-      else O.$cond(isArray(O.projection(proj)), array, e)
+    def arrayOr(e: Expr): F[Expr] =
+      if (tree.types.contains(ColumnType.Array) || tree.list.isEmpty) e.point[F]
+      else array map (O.$cond(isArray(O.projection(proj)), _, e))
 
-    def objectOr(e: Expr): Expr =
-      if (tree.types.contains(ColumnType.Object) || tree.obj.isEmpty) e
-      else O.$cond(isObject(O.projection(proj)), obj, e)
+    def objectOr(e: Expr): F[Expr] =
+      if (tree.types.contains(ColumnType.Object) || tree.obj.isEmpty) e.point[F]
+      else obj map (O.$cond(isObject(O.projection(proj)), _, e))
 
     def projectionOr(e: Expr): Expr =
       if (tree.types.isEmpty) e else O.projection(proj)
 
     if (proj === Projection(List())) {
       if (tree.obj.isEmpty) {
-        if (tree.types.contains(ColumnType.Object)) O.obj(Map(uniqueKey -> O.string("$$ROOT")))
-        else O.obj(Map(uniqueKey -> O.projection(undefined)))
+        if (tree.types.contains(ColumnType.Object)) O.obj(Map(uniqueKey -> O.string("$$ROOT"))).point[F]
+        else O.obj(Map(uniqueKey -> undefined)).point[F]
       } else obj
     }
-    else // we need double check to exclude empty objects and other redundant stuff
-      O.$cond(
-        // At first we filter that there is anything in this or children
-        typeTreeFilters(undefined, proj, tree),
-        // and if so, we look if it's nested array
-        arrayOr(
-          // or nested object
-          objectOr(
-            // or at least something
-            projectionOr(O.projection(undefined)))),
-        O.projection(undefined))
+    else for {
+      obj <- objectOr(projectionOr(undefined))
+      arr <- arrayOr(obj)
+    } yield O.$cond(typeTreeFilters(proj, tree), arr, undefined)
+  }
+
+  val NonExistentSuffix: String = "_non_existent_field"
+
+  final case class Config(uniqueKey: String, undefined: Expr)
+
+  def inArray[F[_]: MonadReader[?[_], Config], A](action: F[A]): F[A] = {
+    val modify: Config => Config = {
+      case Config(uniqueKey, _) => Config(uniqueKey, O.string(uniqueKey concat NonExistentSuffix))
+    }
+    MonadReader[F, Config].local(modify)(action)
+  }
+  def inObject[F[_]: MonadReader[?[_], Config], A](action: F[A]): F[A] = {
+    val modify: Config => Config = {
+      case Config(uniqueKey, _) => Config(uniqueKey, O.key(uniqueKey concat NonExistentSuffix))
+    }
+    MonadReader[F, Config].local(modify)(action)
   }
 
   def apply[F[_]: MonadInState: PlusEmpty](masks: Map[CPath, Set[ColumnType]]): F[List[Pipe]] =
     MonadState[F, InterpretationState].get flatMap { state =>
-      val undefinedKey = state.uniqueKey concat "_non_existent_field"
+      val undefinedKey = state.uniqueKey concat NonExistentSuffix
+      val initialConfig = Config(state.uniqueKey, O.key(undefinedKey))
+      val eraseId = Map("_id" -> O.int(0))
       if (masks.isEmpty) {
         List(Pipeline.$match(O.obj(Map(undefinedKey -> O.bool(false)))): Pipe).point[F]
       }
       else for {
         projObj <- optToAlternative[F].apply(for {
           tree <- masksToTypeTree(state.mapper, masks)
-          rebuilt = rebuildDoc(state.uniqueKey, Projection.key(undefinedKey), Projection(List()), tree)
+          rebuilt = rebuildDoc[Reader[Config, ?]](Projection(List()), tree).run(initialConfig)
           pObj <- O.obj.getOption(rebuilt)
         } yield pObj)
         _ <- focus[F]
-      } yield List(Pipeline.$project(projObj), Pipeline.MaskFilter(state.uniqueKey))
+      } yield List(Pipeline.$project(eraseId ++ projObj), Pipeline.MaskFilter(state.uniqueKey))
     }
 }

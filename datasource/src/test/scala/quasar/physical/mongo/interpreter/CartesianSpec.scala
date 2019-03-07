@@ -66,6 +66,7 @@ class CartesianSpec extends Specification with quasar.TreeMatchers {
         "ba" -> O.projection(Projection.key("root") + Projection.key("b")),
         "bm" -> O.projection(Projection.key("root") + Projection.key("b")))),
       Pipeline.$project(Map(
+        "_id" -> O.int(0),
         "a" -> O.string("$a"),
         "ba" -> O.$cond(
           O.$or(List(O.$eq(List(O.$type(O.key("ba")), O.string("array"))))),
@@ -83,10 +84,12 @@ class CartesianSpec extends Specification with quasar.TreeMatchers {
             O.array(List(O.string("ba_pivot_undefined")))))),
       Pipeline.$unwind("ba_unwind", "ba_unwind_index"),
       Pipeline.$project(Map(
+        "_id" -> O.int(0),
         "a" -> O.string("$a"),
         "ba" -> O.string("$ba_unwind"),
         "bm" -> O.string("$bm"))),
       Pipeline.$project(Map(
+        "_id" -> O.int(0),
         "a" -> O.string("$a"),
         "ba" -> O.string("$ba"),
         "bm" -> O.$cond(
@@ -106,6 +109,7 @@ class CartesianSpec extends Specification with quasar.TreeMatchers {
               "v" -> O.string("bm_pivot_undefined")))))))),
       Pipeline.$unwind("bm_unwind", "bm_unwind_index"),
       Pipeline.$project(Map(
+        "_id" -> O.int(0),
         "a" -> O.string("$a"),
         "ba" -> O.string("$ba"),
         "bm" -> O.string("$bm_unwind.v"))),

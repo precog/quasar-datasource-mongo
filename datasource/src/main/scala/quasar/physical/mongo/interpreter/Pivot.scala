@@ -42,16 +42,32 @@ object Pivot {
     })))
   }
 
-  def mkValue(status: IdStatus, vectorType: ColumnType.Vector, unwinded: String, index: String): Expr = {
+  def mkValue(
+      status: IdStatus,
+      vectorType: ColumnType.Vector,
+      unwinded: String,
+      index: String,
+      undefined: Expr)
+      : Expr = {
     val indexString = O.string("$" concat index)
     val unwindString = O.string("$" concat unwinded)
     val kString = O.string("$" concat unwinded concat ".k")
     val vString = O.string("$" concat unwinded concat ".v")
     vectorType match {
       case ColumnType.Array => status match {
-        case IdStatus.IdOnly => indexString
-        case IdStatus.ExcludeId => unwindString
-        case IdStatus.IncludeId => O.array(List(indexString, unwindString))
+        case IdStatus.IdOnly =>
+          O.$cond(
+            O.$eq(List(unwindString, undefined)),
+            undefined,
+            indexString)
+        case IdStatus.ExcludeId =>
+          unwindString
+        case IdStatus.IncludeId => O.array(List(
+          indexString,
+          O.$cond(
+            O.$eq(List(unwindString, undefined)),
+            undefined,
+            unwindString)))
       }
       case ColumnType.Object => status match {
         case IdStatus.IdOnly => kString
@@ -72,7 +88,9 @@ object Pivot {
     List(
       ensureArray(vectorType, unwindKey, pivotUndefined(state.uniqueKey)),
       Pipeline.$unwind(unwindKey, indexKey),
-      Pipeline.$project(Map(state.uniqueKey -> mkValue(status, vectorType, unwindKey, indexKey))),
+      Pipeline.$project(Map(
+        "_id" -> O.int(0),
+        state.uniqueKey -> mkValue(status, vectorType, unwindKey, indexKey, pivotUndefined(state.uniqueKey)))),
       Pipeline.PivotFilter(state.uniqueKey))
   }
 

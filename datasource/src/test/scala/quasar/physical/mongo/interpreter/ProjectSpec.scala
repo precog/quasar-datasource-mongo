@@ -30,7 +30,7 @@ class ProjectSpec extends Specification with quasar.TreeMatchers {
     val actual = Project[State[InterpretationState, ?]](foobarPrj) run InterpretationState("root", Mapper.Unfocus)
     val expected = List(
       Pipeline.$match(O.obj(Map("foo.bar" -> O.$exists(O.bool(true))))),
-      Pipeline.$project(Map("root_project" -> O.projection(foobarPrj))),
+      Pipeline.$project(Map("_id" -> O.int(0), "root_project" -> O.projection(foobarPrj))),
       Pipeline.$project(Map("root" -> O.string("$root_project"))))
     (actual._2 must beTree(expected)) and (actual._1.mapper === Mapper.Focus("root"))
   }
@@ -39,7 +39,7 @@ class ProjectSpec extends Specification with quasar.TreeMatchers {
     val actual = Project[State[InterpretationState, ?]](foo1Prj) run InterpretationState("other", Mapper.Focus("other"))
     val expected = List(
       Pipeline.$match(O.obj(Map("other.foo.1" -> O.$exists(O.bool(true))))),
-      Pipeline.$project(Map("other_project" -> O.projection(Projection.key("other") + foo1Prj))),
+      Pipeline.$project(Map("_id" -> O.int(0), "other_project" -> O.projection(Projection.key("other") + foo1Prj))),
       Pipeline.$project(Map("other" -> O.string("$other_project"))))
     (actual._2 must beTree(expected)) and (actual._1.mapper === Mapper.Focus("other"))
   }

@@ -178,6 +178,11 @@ object Compiler {
       case Op.Ne(a) => O._obj(Map("$ne" -> a))
       case Op.ObjectToArray(a) => O._obj(Map("$objectToArray" -> a))
       case Op.ArrayElemAt(a, ix) => O._obj(Map("$arrayElemAt" -> O.array(List(a, O.int(ix)))))
+      case Op.Reduce(a, b, c) => O._obj(Map("$reduce" -> O.obj(Map(
+        "input" -> a,
+        "initialValue" -> b,
+        "in" -> c))))
+      case Op.ConcatArrays(a) => O._obj(Map("$concatArrays" -> O.array(a)))
     }
   }
 
