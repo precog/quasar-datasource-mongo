@@ -127,7 +127,7 @@ object Mask {
     if (proj === Projection(List())) {
       if (!tree.obj.isEmpty) obj
       else if (!tree.types.contains(ColumnType.Object)) O.projection(undefined)
-      else O.obj(Map(uniqueKey -> O.string("$$ROOT")))
+      else O.string("$$ROOT")
     }
     else // we need double check to exclude empty objects and other redundant stuff
       O.$cond(
@@ -145,13 +145,21 @@ object Mask {
   def apply[F[_]: MonadInState: PlusEmpty](masks: Map[CPath, Set[ColumnType]]): F[List[Pipe]] =
     MonadState[F, InterpretationState].get flatMap { state =>
       val undefinedKey = state.uniqueKey concat "_non_existent_field"
+
+      def projectionObject(tree: TypeTree): Option[Map[String, Expr]] = {
+        val rebuilt = rebuildDoc(state.uniqueKey, Projection.key(undefinedKey), Projection(List()), tree)
+        state.mapper match {
+          case Mapper.Unfocus => Some(Map(state.uniqueKey -> rebuilt))
+          case Mapper.Focus(_) => O.obj.getOption(rebuilt)
+        }
+      }
+
       if (masks.isEmpty)
         List(Pipeline.$match(O.obj(Map(undefinedKey -> O.bool(false)))): Pipe).point[F]
       else for {
         projObj <- optToAlternative[F].apply(for {
           tree <- masksToTypeTree(state.mapper, masks)
-          rebuilt = rebuildDoc(state.uniqueKey, Projection.key(undefinedKey), Projection(List()), tree)
-          pObj <- O.obj.getOption(rebuilt)
+          pObj <- projectionObject(tree)
         } yield pObj)
         _ <- focus[F]
       } yield List(Pipeline.$project(projObj), Pipeline.NotNull(state.uniqueKey))
