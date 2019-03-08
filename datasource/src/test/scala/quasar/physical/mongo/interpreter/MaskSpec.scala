@@ -54,7 +54,23 @@ class MaskSpec extends Specification with quasar.TreeMatchers {
     Mask[InState](masks) run state map (_ leftMap (_.mapper))
 
   "state modifications" >> {
-    "unfocused" >> {
+    "unfocused non root" >> {
+      val state = InterpretationState("unique", Mapper.Unfocus)
+      val result = eval(state, Map(CPath.parse("foo") -> Set(ColumnType.String)))
+      val expected = wrapWithProject(O.obj(Map(
+        "_id" -> O.int(0),
+        "unique" -> O.obj(Map(
+          "foo" -> O.$cond(
+            O.$or(List(
+              O.$eq(List(O.$type(O.string("$foo")), O.string("string"))),
+              O.$eq(List(O.$type(O.string("$foo")), O.string("objectId"))))),
+            O.string("$foo"),
+            O.string("$unique_non_existent_field")))))))
+      pipeEqualWithKey("unique", result map (_._2), expected) and (
+        (result map (_._1)) === Some(Mapper.Focus("unique")))
+    }
+
+    "unfocused root" >> {
       val state = InterpretationState("unique", Mapper.Unfocus)
       val result = eval(state, Map(CPath.Identity -> Set(ColumnType.Object)))
       val expected = wrapWithProject(O.obj(Map("_id" -> O.int(0), "unique" -> O.string("$$ROOT"))))

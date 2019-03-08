@@ -138,8 +138,8 @@ object Mask {
 
     if (proj === Projection(List())) {
       if (tree.obj.isEmpty) {
-        if (tree.types.contains(ColumnType.Object)) O.obj(Map(uniqueKey -> O.string("$$ROOT"))).point[F]
-        else O.obj(Map(uniqueKey -> undefined)).point[F]
+        if (tree.types.contains(ColumnType.Object)) O.string("$$ROOT").point[F]
+        else undefined.point[F]
       } else obj
     }
     else for {
@@ -168,16 +168,24 @@ object Mask {
   def apply[F[_]: MonadInState: PlusEmpty](masks: Map[CPath, Set[ColumnType]]): F[List[Pipe]] =
     MonadState[F, InterpretationState].get flatMap { state =>
       val undefinedKey = state.uniqueKey concat NonExistentSuffix
-      val initialConfig = Config(state.uniqueKey, O.key(undefinedKey))
       val eraseId = Map("_id" -> O.int(0))
+
+      def projectionObject(tree: TypeTree): Option[Map[String, Expr]] = {
+        val initialConfig = Config(state.uniqueKey, O.key(undefinedKey))
+        val rebuilt = rebuildDoc[Reader[Config, ?]](Projection(List()), tree).run(initialConfig)
+        state.mapper match {
+          case Mapper.Unfocus => Some(Map(state.uniqueKey -> rebuilt))
+          case Mapper.Focus(_) => O.obj.getOption(rebuilt)
+        }
+      }
+
       if (masks.isEmpty) {
         List(Pipeline.$match(O.obj(Map(undefinedKey -> O.bool(false)))): Pipe).point[F]
       }
       else for {
         projObj <- optToAlternative[F].apply(for {
           tree <- masksToTypeTree(state.mapper, masks)
-          rebuilt = rebuildDoc[Reader[Config, ?]](Projection(List()), tree).run(initialConfig)
-          pObj <- O.obj.getOption(rebuilt)
+          pObj <- projectionObject(tree)
         } yield pObj)
         _ <- focus[F]
       } yield List(Pipeline.$project(eraseId ++ projObj), Pipeline.MaskFilter(state.uniqueKey))
