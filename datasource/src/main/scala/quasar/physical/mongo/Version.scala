@@ -49,7 +49,9 @@ object Version {
 
   val zero: Version = Version(0, 0, 0)
   val $type: Version = Version(3, 4, 0)
+  val $reduce: Version = Version(3, 4, 0)
   val $objectToArray: Version = Version(3, 4, 4)
   val $arrayElemAt: Version = Version(3, 2, 0)
   val $unwind: Version = Version(3, 2, 0) // we use includeArrayIndices added in 3.2.0
+  val $concatArrays: Version = Version(3, 2, 0)
 }

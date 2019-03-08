@@ -25,23 +25,49 @@ import quasar.IdStatus
 import scalaz.{MonadState, Scalaz}, Scalaz._
 
 object Pivot {
-  def ensureArray(vectorType: ColumnType.Vector, key: String): Pipe =
+  def ensureArray(vectorType: ColumnType.Vector, key: String, undefined: Expr): Pipe = {
+    val proj = O.steps(List())
     Pipeline.$project(Map(key -> (vectorType match {
-      case ColumnType.Object => O.$objectToArray(O.steps(List()))
-      case ColumnType.Array => O.steps(List())
+      case ColumnType.Object =>
+        O.$cond(
+          O.$eq(List(O.$type(proj), O.string("object"))),
+          O.$objectToArray(O.steps(List())),
+          O.array(List(O.obj(Map("k" -> undefined, "v" -> undefined)))))
+      case ColumnType.Array =>
+        O.$cond(
+          O.$eq(List(O.$type(proj), O.string("array"))),
+          proj,
+          O.array(List(undefined)))
+
     })))
+  }
 
-
-  def mkValue(status: IdStatus, vectorType: ColumnType.Vector, unwinded: String, index: String): Expr = {
+  def mkValue(
+      status: IdStatus,
+      vectorType: ColumnType.Vector,
+      unwinded: String,
+      index: String,
+      undefined: Expr)
+      : Expr = {
     val indexString = O.string("$" concat index)
     val unwindString = O.string("$" concat unwinded)
     val kString = O.string("$" concat unwinded concat ".k")
     val vString = O.string("$" concat unwinded concat ".v")
     vectorType match {
       case ColumnType.Array => status match {
-        case IdStatus.IdOnly => indexString
-        case IdStatus.ExcludeId => unwindString
-        case IdStatus.IncludeId => O.array(List(indexString, unwindString))
+        case IdStatus.IdOnly =>
+          O.$cond(
+            O.$eq(List(unwindString, undefined)),
+            undefined,
+            indexString)
+        case IdStatus.ExcludeId =>
+          unwindString
+        case IdStatus.IncludeId => O.array(List(
+          indexString,
+          O.$cond(
+            O.$eq(List(unwindString, undefined)),
+            undefined,
+            unwindString)))
       }
       case ColumnType.Object => status match {
         case IdStatus.IdOnly => kString
@@ -60,11 +86,12 @@ object Pivot {
     val indexKey = state.uniqueKey concat "_unwind_index"
 
     List(
-      ensureArray(vectorType, unwindKey),
+      ensureArray(vectorType, unwindKey, pivotUndefined(state.uniqueKey)),
       Pipeline.$unwind(unwindKey, indexKey),
-      Pipeline.$project(Map(state.uniqueKey -> mkValue(status, vectorType, unwindKey, indexKey))),
-      Pipeline.NotNull(state.uniqueKey)
-    )
+      Pipeline.$project(Map(
+        "_id" -> O.int(0),
+        state.uniqueKey -> mkValue(status, vectorType, unwindKey, indexKey, pivotUndefined(state.uniqueKey)))),
+      Pipeline.PivotFilter(state.uniqueKey))
   }
 
 

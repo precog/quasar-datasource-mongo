@@ -39,8 +39,11 @@ class MaskSpec extends Specification with quasar.TreeMatchers {
 
   def pipeEqualWithKey(key: String, a: Option[List[Pipe]], b: Expr) = {
     a must beLike {
-      case Some(x :: Pipeline.NotNull(k) :: List()) if k === key =>
-        toCoreOp(eraseCustomPipeline(x)) must beTree(b)
+      case Some(x :: Pipeline.MaskFilter(k) :: List()) if k === key =>
+        eraseCustomPipeline(x) must beLike {
+          case List(pipe) =>
+            toCoreOp(pipe) must beTree(b)
+        }
     }
   }
 
@@ -55,9 +58,12 @@ class MaskSpec extends Specification with quasar.TreeMatchers {
       val state = InterpretationState("unique", Mapper.Unfocus)
       val result = eval(state, Map(CPath.parse("foo") -> Set(ColumnType.String)))
       val expected = wrapWithProject(O.obj(Map(
+        "_id" -> O.int(0),
         "unique" -> O.obj(Map(
           "foo" -> O.$cond(
-            O.$eq(List(O.$type(O.string("$foo")), O.string("string"))),
+            O.$or(List(
+              O.$eq(List(O.$type(O.string("$foo")), O.string("string"))),
+              O.$eq(List(O.$type(O.string("$foo")), O.string("objectId"))))),
             O.string("$foo"),
             O.string("$unique_non_existent_field")))))))
       pipeEqualWithKey("unique", result map (_._2), expected) and (
@@ -67,8 +73,7 @@ class MaskSpec extends Specification with quasar.TreeMatchers {
     "unfocused root" >> {
       val state = InterpretationState("unique", Mapper.Unfocus)
       val result = eval(state, Map(CPath.Identity -> Set(ColumnType.Object)))
-
-      val expected = wrapWithProject(O.obj(Map("unique" -> O.string("$$ROOT"))))
+      val expected = wrapWithProject(O.obj(Map("_id" -> O.int(0), "unique" -> O.string("$$ROOT"))))
       pipeEqualWithKey("unique", result map (_._2), expected) and (
         (result map (_._1)) === Some(Mapper.Focus("unique")))
     }
@@ -77,6 +82,7 @@ class MaskSpec extends Specification with quasar.TreeMatchers {
       val state = InterpretationState("other", Mapper.Focus("other"))
       val result = eval(state, Map(CPath.Identity -> Set(ColumnType.Object)))
       val expected = wrapWithProject(O.obj(Map(
+        "_id" -> O.int(0),
         "other" -> O.$cond(
           typeEq(O.string("$other"), "object"),
           O.string("$other"),
@@ -89,6 +95,7 @@ class MaskSpec extends Specification with quasar.TreeMatchers {
   "examples" >> {
     val rootKey = O.string("$root")
     val undefined = O.string("$root_non_existent_field")
+    val invalidArrElem = O.string("root_non_existent_field")
 
     def pipeEqual(a: Option[List[Pipe]], b: Expr) = pipeEqualWithKey("root", a, b)
 
@@ -102,15 +109,19 @@ class MaskSpec extends Specification with quasar.TreeMatchers {
       evalMask(Map.empty) must beLike {
         case Some(List(x)) =>
           val expected = wrapWithMatch(O.obj(Map("root_non_existent_field" -> O.bool(false))))
-          toCoreOp(eraseCustomPipeline(x)) must beTree(expected)
+          eraseCustomPipeline(x) must beLike {
+            case List(pipe) => toCoreOp(pipe) must beTree(expected)
+          }
       }
     }
 
     "numbers and booleans types at identity" >> {
       val actual = evalMask(Map(CPath.Identity -> Set(ColumnType.Number, ColumnType.Boolean)))
 
-      val expected = wrapWithProject(O.obj(Map("root" -> O.$cond(
-        O.$or(List(
+      val expected = wrapWithProject(O.obj(Map(
+        "_id" -> O.int(0),
+        "root" -> O.$cond(
+          O.$or(List(
             typeEq(rootKey, "double"),
             typeEq(rootKey, "long"),
             typeEq(rootKey, "int"),
@@ -123,7 +134,9 @@ class MaskSpec extends Specification with quasar.TreeMatchers {
 
     "objects at identity" >> {
       val actual = evalMask(Map(CPath.Identity -> Set(ColumnType.Object)))
-      val expected = wrapWithProject(O.obj(Map("root" -> O.$cond(typeEq(rootKey, "object"), rootKey, undefined))))
+      val expected = wrapWithProject(O.obj(Map(
+        "_id" -> O.int(0),
+        "root" -> O.$cond(typeEq(rootKey, "object"), rootKey, undefined))))
       pipeEqual(actual, expected)
     }
 
@@ -131,10 +144,16 @@ class MaskSpec extends Specification with quasar.TreeMatchers {
       val actual = evalMask(Map(CPath.parse(".a.b") -> Set(ColumnType.String)))
 
       def abFilter(x: Expr): Expr =
-        O.$cond(typeEq(O.string("$root.a.b"), "string"), x, undefined)
+        O.$cond(
+          O.$or(List(
+            typeEq(O.string("$root.a.b"), "string"),
+            typeEq(O.string("$root.a.b"), "objectId"))),
+          x,
+          undefined)
 
       val expected =
         wrapWithProject(O.obj(Map(
+          "_id" -> O.int(0),
           "root" -> abFilter(
             isObjectFilter(rootKey, O.obj(Map("a" ->
               abFilter(isObjectFilter(O.string("$root.a"), O.obj(Map("b" ->
@@ -154,6 +173,7 @@ class MaskSpec extends Specification with quasar.TreeMatchers {
         O.$cond(O.$or(List(typeEq(O.string("$root.a"), "array"), typeEq(O.string("$root.a.c"), "bool"))), x, undefined)
 
       val expected = wrapWithProject(O.obj(Map(
+        "_id" -> O.int(0),
         "root" -> bothFilters(
           isObjectFilter(rootKey, O.obj(Map("a" ->
             bothFilters(
@@ -177,6 +197,7 @@ class MaskSpec extends Specification with quasar.TreeMatchers {
         O.$let(Map("level1" -> e), O.$arrayElemAt(O.string("$$level1"), ix))
 
       val expected = wrapWithProject(O.obj(Map(
+        "_id" -> O.int(0),
         "root" -> O.$cond(
           O.$or(List(
             typeEq(O.string("$root.c"), "array"),
@@ -195,11 +216,17 @@ class MaskSpec extends Specification with quasar.TreeMatchers {
                   typeEq(indexed(O.string("$root.d"), 1), "bool"),
                   O.$cond(
                     typeEq(O.string("$root.d"), "array"),
-                    O.array(List(
+                    O.$reduce(
+                      O.array(List(
+                        O.$cond(
+                          typeEq(indexed(O.string("$root.d"), 1), "bool"),
+                          indexed(O.string("$root.d"), 1),
+                          invalidArrElem))),
+                      O.array(List()),
                       O.$cond(
-                        typeEq(indexed(O.string("$root.d"), 1), "bool"),
-                        indexed(O.string("$root.d"), 1),
-                        undefined))),
+                        O.$eq(List(O.string("$$this"), O.string("root_non_existent_field"))),
+                        O.string("$$value"),
+                        O.$concatArrays(List(O.string("$$value"), O.array(List(O.string("$$this"))))))),
                     undefined),
                   undefined),
               "a" ->
