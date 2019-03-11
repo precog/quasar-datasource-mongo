@@ -35,7 +35,7 @@ class MongoScalarStagesInterpreterSpec
   val projectPendingExamples: Set[Int] = Set()
   val maskPendingExamples: Set[Int] = Set()
   val pivotPendingExamples: Set[Int] = Set()
-  val focusedPendingExamples: Set[Int] = Set()
+  val focusedPendingExamples: Set[Int] = Set(41, 44)
   val cartesianPendingExamples: Set[Int] = Set()
 
   "Id statuses" >> {
