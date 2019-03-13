@@ -67,6 +67,8 @@ object Cartesian {
             List()
           case Pipeline.PivotFilter(_) =>
             List()
+          case Pipeline.$match(_) =>
+            List()
           case x => List(x)
         })
 

@@ -80,7 +80,7 @@ object Compiler {
 
     pipeline match {
       case MaskFilter(fld) =>
-        List($match(O.obj(Map(fld -> O.$ne(O.string(fld concat "_non_existent_field")))))) //O.nil())))))
+        List($match(O.obj(Map(fld -> O.$ne(O.string(fld concat "_non_existent_field"))))))
       case PivotFilter(fld) =>
         val undefined: T[ExprF] = pivotUndefined(fld)
         List(
