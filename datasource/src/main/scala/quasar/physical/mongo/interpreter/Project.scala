@@ -19,18 +19,40 @@ package quasar.physical.mongo.interpreter
 import slamdata.Predef._
 
 import quasar.physical.mongo.expression._
+import quasar.physical.mongo.expression.Projection.Step
 
 import scalaz.{MonadState, Scalaz}, Scalaz._
 
 object Project {
-  def apply[F[_]: MonadInState](prj: Projection): F[List[Pipe]] = for {
-    state <- MonadState[F, InterpretationState].get
-    tmpKey = state.uniqueKey concat "_project"
-    fld = Mapper.projection(state.mapper)(prj)
-    res = List(
-      Pipeline.$match(O.obj(Map(fld.toKey -> O.$exists(O.bool(true))))),
-      Pipeline.$project(Map("_id" -> O.int(0)) ++ Map(tmpKey -> O.projection(fld))),
-      Pipeline.$project(Map(state.uniqueKey -> O.string("$" concat tmpKey))))
-    _ <- focus[F]
-  } yield res
+  def stepType(step: Step): Expr = step match {
+    case Step.Field(_) => O.string("object")
+    case Step.Index(_) => O.string("array")
+  }
+
+  // We need to be sure that type of projectee is coherent with projector
+  @scala.annotation.tailrec
+  def build(prj: Projection, input: Field, output: Field, res: Field, acc: List[Pipe]): List[Pipe] = prj.steps match {
+    case List() =>
+      acc :+ Pipeline.$project(Map(
+        res.keyPart -> O.steps(List(input))))
+    case hd :: tail =>
+      val insertType: Pipe = Pipeline.$project(Map(
+        input.keyPart -> O.string("$" concat input.keyPart),
+        "type" -> O.$type(O.steps(List(input)))))
+      val filters: Pipe = Pipeline.$match(O.obj(Map(
+        "type" -> stepType(hd),
+        Projection(List(input, hd)).toKey -> O.$exists(O.bool(true)))))
+      val out: Pipe = Pipeline.$project(Map(
+        output.keyPart -> O.steps(List(input, hd))))
+      build(Projection(tail), output, input, res, acc ++ List(insertType, filters, out))
+  }
+
+  def apply[F[_]: MonadInState](prj: Projection): F[List[Pipe]] =
+    MonadState[F, InterpretationState].get map { state =>
+      val tmpKey0 = state.uniqueKey concat "_project0"
+      val tmpKey1 = state.uniqueKey concat "_project1"
+      val fld = Mapper.projection(state.mapper)(prj)
+      val initialProjection = Pipeline.$project(Map(tmpKey0 -> O.steps(List())))
+      initialProjection :: build(fld, Field(tmpKey0), Field(tmpKey1), Field(state.uniqueKey), List())
+    } flatMap { a => focus[F] as a }
 }

@@ -169,6 +169,7 @@ class Mongo[F[_]: MonadResourceErr : ConcurrentEffect] private[mongo](
       stages: ScalarStages)
       : F[(ScalarStages, Stream[F, BsonValue])] = {
 
+    println(stages)
     val fallback: F[(ScalarStages, Stream[F, BsonValue])] = findAll(collection) map (x => (stages, x))
 
     if (ScalarStages.Id === stages || pushdownLevel === PushdownLevel.Disabled) fallback

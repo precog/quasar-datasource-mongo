@@ -63,11 +63,11 @@ object Pivot {
         case IdStatus.ExcludeId =>
           unwindString
         case IdStatus.IncludeId => O.array(List(
-          indexString,
           O.$cond(
             O.$eq(List(unwindString, undefined)),
             undefined,
-            unwindString)))
+            indexString),
+          unwindString))
       }
       case ColumnType.Object => status match {
         case IdStatus.IdOnly => kString

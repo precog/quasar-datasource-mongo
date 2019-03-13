@@ -25,6 +25,7 @@ import org.specs2.mutable.Specification
 import quasar.api.table.ColumnType
 import quasar.common.CPath
 import quasar.physical.mongo.expression.{O => _, Expr => _, _}
+import quasar.RenderTree, RenderTree.ops._
 
 import scalaz.Scalaz._
 
@@ -104,6 +105,16 @@ class MaskSpec extends Specification with quasar.TreeMatchers {
 
     def isObjectFilter(x: Expr, y: Expr): Expr =
       O.$cond(typeEq(x, "object"), y, undefined)
+
+    "multi top" >> {
+      val mask = Map(
+        CPath.parse(".a") -> ColumnType.Top,
+        CPath.parse(".b") -> ColumnType.Top)
+
+      val res = evalMask(mask)
+      println(res.render.shows)
+      res must beNone
+    }
 
     "drop everything when empty" >> {
       evalMask(Map.empty) must beLike {

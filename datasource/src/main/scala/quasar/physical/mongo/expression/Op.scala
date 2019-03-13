@@ -42,6 +42,7 @@ object Op {
   final case class ArrayElemAt[A](exp: A, ix: Int) extends Op[A]
   final case class Reduce[A](input: A, initialValue: A, expression: A) extends Op[A]
   final case class ConcatArrays[A](exps: List[A]) extends Op[A]
+  final case class Not[A](exp: A) extends Op[A]
 
   implicit def traverse: Traverse[Op] = new Traverse[Op] {
     def traverseImpl[G[_]: Applicative, A, B](op: Op[A])(f: A => G[B])
@@ -58,6 +59,7 @@ object Op {
       case Let(vars, in) => ((vars traverse f) |@| f(in))(Let(_, _))
       case Reduce(a, b, c) => (f(a) |@| f(b) |@| f(c))(Reduce(_, _, _))
       case ConcatArrays(lst) => lst traverse f map (ConcatArrays(_))
+      case Not(a) => f(a) map (Not(_))
     }
   }
 
@@ -84,6 +86,7 @@ object Op {
         NonTerminal(List(), Some("initialValue"), List(fa.render(b))),
         NonTerminal(List(), Some("expression"), List(fa.render(c)))))
       case ConcatArrays(a) => NonTerminal(List("ConcatArrays"), None, a map fa.render)
+      case Not(a) => NonTerminal(List("Not"), None, List(fa.render(a)))
     }
   }
 
@@ -133,6 +136,10 @@ object Op {
       Prism.partial[Op[A], List[A]] {
         case ConcatArrays(a) => a
       } { a => ConcatArrays(a) }
+    val _not: Prism[Op[A], A] =
+      Prism.partial[Op[A], A] {
+        case Not(a) => a
+      } { a => Not(a) }
 
 
     val $let: Prism[O, (Map[String, A], A)] = opPrism composePrism _let
@@ -146,9 +153,10 @@ object Op {
     val $ne: Prism[O, A] = opPrism composePrism _ne
     val $reduce: Prism[O, (A, A, A)] = opPrism composePrism _reduce
     val $concatArrays: Prism[O, List[A]] = opPrism composePrism _concatArrays
+    val $not: Prism[O, A] = opPrism composePrism _not
   }
 
-  def opMinVersion[A](op: Op[A]): Version = op match {
+  def opMinVersion(op: Op[_]): Version = op match {
     case Let(_, _) => Version.zero
     case Type(_) => Version.$type
     case Eq(_) => Version.zero
@@ -160,5 +168,6 @@ object Op {
     case Ne(_) => Version.zero
     case Reduce(_, _, _) => Version.$reduce
     case ConcatArrays(_) => Version.$concatArrays
+    case Not(_) => Version.zero
   }
 }

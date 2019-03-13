@@ -44,7 +44,7 @@ class CartesianSpec extends Specification with quasar.TreeMatchers {
     val expected = List(Pipeline.$match(O.obj(Map("root_cartesian_empty" -> O.bool(false)))))
     actual must beLike {
       case Some((mapper, pipes)) =>
-        (pipes must beTree(expected)) and (mapper === Mapper.Unfocus)
+        (pipes must beTree(expected)) and (mapper must_=== Mapper.Unfocus)
     }
   }
   "example" >> {
@@ -135,7 +135,7 @@ class CartesianSpec extends Specification with quasar.TreeMatchers {
 
     evalCartesian(cartouches) must beLike {
       case Some((mapper, pipes)) =>
-        (pipes must beTree(expected)) and (mapper === Mapper.Unfocus)
+        (pipes must beTree(expected)) and (mapper must_=== Mapper.Unfocus)
     }
   }
 }
