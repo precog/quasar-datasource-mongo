@@ -27,7 +27,7 @@ import org.bson._
 
 import quasar.physical.mongo.Version
 
-import scalaz.{:<:, Const, Coproduct, Functor, Scalaz, MonadPlus, ApplicativePlus}, Scalaz._
+import scalaz.{:<:, Const, Coproduct, Functor, Scalaz, MonadPlus, ApplicativePlus, Free}, Scalaz._
 import scalaz.syntax._
 
 import Pipeline._
@@ -115,7 +115,6 @@ object Compiler {
     trait GroupedSteps
     final case class IndexGroup(i: Int) extends GroupedSteps
     final case class FieldGroup(s: List[String]) extends GroupedSteps
-    final case class IndexedAccess(i: Int) extends GroupedSteps
 
     def groupSteps(prj: Projection): List[GroupedSteps] = {
       val accum = prj.steps.foldl ((List[String](), List[GroupedSteps]())) {
@@ -131,31 +130,37 @@ object Compiler {
     }
     type Elem = (GroupedSteps, Int)
 
+    type FCore = Free[CoreOp, List[Elem]]
+    val OF = Optics.coreOp(Prism.id[CoreOp[FCore]])
     val O = Optics.coreOp(Prism.id[CoreOp[List[Elem]]])
 
-    val ψ: Coalgebra[CoreOp, List[Elem]] = {
+    val ψ: GCoalgebra[Free[CoreOp, ?], CoreOp, List[Elem]] = {
       case List() =>
-        O.string("$$ROOT")
+        OF.string("$$ROOT")
       case (FieldGroup(hd :: tail), _) :: List() =>
-        O.string(tail.foldl("$" concat hd) { accum => s => accum concat "." concat s  })
+        OF.string(tail.foldl("$" concat hd) { accum => s => accum concat "." concat s  })
       case (hd, levelIx) :: tl => hd match {
-        case IndexedAccess(i) =>
-          O.$arrayElemAt(tl, i)
         case IndexGroup(i) =>
           val level = "level" concat levelIx.toString
-          val vars: Map[String, List[Elem]] = Map(level -> tl)
-          val expSteps = IndexedAccess(i)
-          val exp = List[Elem]((expSteps, 0), (FieldGroup(List("$" concat level)), 1))
-          O.$let(vars, exp)
+          val vars = Map(level -> (Free.point[CoreOp, List[Elem]](tl)))
+          val nil: FCore = Free.liftF(O.nil())
+          val elemAt: FCore = Free.liftF(O.$arrayElemAt(tl, i))
+          val check: FCore = {
+            val ty: FCore = Free.liftF(O.$type(tl))
+            val str: FCore = Free.liftF(O.string("array"))
+            Free.roll(OF.$eq(List(ty, str)))
+          }
+          val cond = Free.roll(OF.$cond(check, elemAt, nil))
+          OF.$let(vars, cond)
         case FieldGroup(steps) =>
           val level = "level".concat(levelIx.toString)
-          val vars = Map(level -> tl)
+          val vars: Map[String, FCore] = Map(level -> (Free.point(tl)))
           val expSteps: GroupedSteps = FieldGroup("$".concat(level) :: steps)
-          val exp = List((expSteps, 0))
-          O.$let(vars, exp)
+          val exp: FCore = Free.point(List((expSteps, 0)))
+          OF.$let(vars, exp)
       }
     }
-    groupSteps(prj).zipWithIndex.reverse.ana[T[CoreOp]](ψ)
+    groupSteps(prj).zipWithIndex.reverse.futu[T[CoreOp]](ψ)
   }
 
   def compileProjections[T[_[_]]: BirecursiveT](inp: T[ExprF]): T[CoreOp] = {
