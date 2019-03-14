@@ -123,6 +123,24 @@ class MongoScalarStagesInterpreterSpec
       val actual = interpret(stages, input, (x => x))
       actual must bestSemanticEqual(expected)
     }
+    "heterogeneousShiftArrayValueAndShiftMapValueWithField" >> {
+      val input = ldjson("""
+        { "a": 1, "b": [ ] }
+        { "a": 2, "b": { } }""")
+      val stages = ScalarStages(IdStatus.ExcludeId, List(
+        Cartesian(Map(
+          (CPathField("a"), (CPathField("a"), List())),
+          (CPathField("ba"), (CPathField("b"), List(
+            Mask(Map(CPath.Identity -> Set(ColumnType.Array))),
+            Pivot(IdStatus.ExcludeId, ColumnType.Array))))))))
+      val expected = ldjson("""
+        {"a": 1}
+        {"a": 2}""")
+
+      val actual = interpret(stages, input, (x => x))
+      actual must bestSemanticEqual(expected)
+
+    }
   }
 
   val RootKey: String = "rootKey"

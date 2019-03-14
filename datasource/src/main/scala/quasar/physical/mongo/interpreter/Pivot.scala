@@ -30,14 +30,15 @@ object Pivot {
     Pipeline.$project(Map(key -> (vectorType match {
       case ColumnType.Object =>
         O.$cond(
-          O.$eq(List(O.$type(proj), O.string("object"))),
-          O.$objectToArray(O.steps(List())),
-          O.array(List(O.obj(Map("k" -> undefined, "v" -> undefined)))))
+          O.$or(List(O.$not(O.$eq(List(O.$type(proj), O.string("object")))), O.$eq(List(proj, O.obj(Map()))))),
+          O.array(List(O.obj(Map("k" -> undefined, "v" -> undefined)))),
+          O.$objectToArray(O.steps(List())))
+
       case ColumnType.Array =>
         O.$cond(
-          O.$eq(List(O.$type(proj), O.string("array"))),
-          proj,
-          O.array(List(undefined)))
+          O.$or(List(O.$not(O.$eq(List(O.$type(proj), O.string("array")))), O.$eq(List(proj, O.array(List()))))),
+          O.array(List(undefined)),
+          proj)
 
     })))
   }
