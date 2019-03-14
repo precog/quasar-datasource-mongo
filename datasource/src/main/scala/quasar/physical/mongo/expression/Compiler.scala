@@ -38,15 +38,17 @@ object Compiler {
 
   def compilePipeline[T[_[_]]: BirecursiveT, F[_]: MonadPlus](
       version: Version,
+      uuid: String,
       pipes: List[Pipeline[T[ExprF]]])
       : F[List[BsonDocument]] =
-    pipes flatMap (eraseCustomPipeline(_)) foldMapM { x => compilePipe[T, F](version, x) map (List(_)) }
+    pipes flatMap (eraseCustomPipeline(_)) foldMapM { x => compilePipe[T, F](version, uuid, x) map (List(_)) }
 
-  def toCoreOp[T[_[_]]: BirecursiveT](pipe: MongoPipeline[T[ExprF]]): T[CoreOp] =
-    optimize(compileProjections(pipelineObjects(pipe)))
+  def toCoreOp[T[_[_]]: BirecursiveT](uuid: String, pipe: MongoPipeline[T[ExprF]]): T[CoreOp] =
+    optimize(compileProjections(uuid, pipelineObjects(pipe)))
 
   def compilePipe[T[_[_]]: BirecursiveT, F[_]: MonadPlus](
       version: Version,
+      uuid: String,
       pipe: MongoPipeline[T[ExprF]])
       : F[BsonDocument] = {
     if (version < pipeMinVersion(pipe)) MonadPlus[F].empty
@@ -55,7 +57,7 @@ object Compiler {
         if (version < Op.opMinVersion(op)) MonadPlus[F].empty
         else opsToCore[T](op).point[F]
 
-      toCoreOp(pipe)
+      toCoreOp(uuid, pipe)
         .transCataM[F, T[Core], Core](_.run.fold(transformM, MonadPlus[F].point(_)))
         .map(coreToBson[T](_))
         .flatMap(mbBsonDocument[F])
@@ -111,7 +113,7 @@ object Compiler {
     }
   }
 
-  def unfoldProjection[T[_[_]]: BirecursiveT](prj: Projection): T[CoreOp] = {
+  def unfoldProjection[T[_[_]]: BirecursiveT](uuid: String, prj: Projection): T[CoreOp] = {
     trait GroupedSteps
     final case class IndexGroup(i: Int) extends GroupedSteps
     final case class FieldGroup(s: List[String]) extends GroupedSteps
@@ -130,8 +132,8 @@ object Compiler {
     }
     type Elem = (GroupedSteps, Int)
 
-    type FCore = Free[CoreOp, List[Elem]]
-    val OF = Optics.coreOp(Prism.id[CoreOp[FCore]])
+    type FCoreOp = Free[CoreOp, List[Elem]]
+    val OF = Optics.coreOp(Prism.id[CoreOp[FCoreOp]])
     val O = Optics.coreOp(Prism.id[CoreOp[List[Elem]]])
 
     val ψ: GCoalgebra[Free[CoreOp, ?], CoreOp, List[Elem]] = {
@@ -143,29 +145,29 @@ object Compiler {
         case IndexGroup(i) =>
           val level = "level" concat levelIx.toString
           val vars = Map(level -> (Free.point[CoreOp, List[Elem]](tl)))
-          val nil: FCore = Free.liftF(O.nil())
-          val elemAt: FCore = Free.liftF(O.$arrayElemAt(tl, i))
-          val check: FCore = {
-            val ty: FCore = Free.liftF(O.$type(tl))
-            val str: FCore = Free.liftF(O.string("array"))
+          val nil: FCoreOp = Free.liftF(O.string("$" concat uuid))
+          val elemAt: FCoreOp = Free.liftF(O.$arrayElemAt(tl, i))
+          val check: FCoreOp = {
+            val ty: FCoreOp = Free.liftF(O.$type(tl))
+            val str: FCoreOp = Free.liftF(O.string("array"))
             Free.roll(OF.$eq(List(ty, str)))
           }
           val cond = Free.roll(OF.$cond(check, elemAt, nil))
           OF.$let(vars, cond)
         case FieldGroup(steps) =>
           val level = "level".concat(levelIx.toString)
-          val vars: Map[String, FCore] = Map(level -> (Free.point(tl)))
+          val vars: Map[String, FCoreOp] = Map(level -> (Free.point(tl)))
           val expSteps: GroupedSteps = FieldGroup("$".concat(level) :: steps)
-          val exp: FCore = Free.point(List((expSteps, 0)))
+          val exp: FCoreOp = Free.point(List((expSteps, 0)))
           OF.$let(vars, exp)
       }
     }
     groupSteps(prj).zipWithIndex.reverse.futu[T[CoreOp]](ψ)
   }
 
-  def compileProjections[T[_[_]]: BirecursiveT](inp: T[ExprF]): T[CoreOp] = {
+  def compileProjections[T[_[_]]: BirecursiveT](uuid: String, inp: T[ExprF]): T[CoreOp] = {
     def τ(inp: Const[Projection, T[CoreOp]]): CoreOp[T[CoreOp]] =
-      unfoldProjection(inp.getConst).project
+      unfoldProjection(uuid, inp.getConst).project
     inp.transCata[T[CoreOp]](_.run.fold(τ, (x => x)))
   }
 
