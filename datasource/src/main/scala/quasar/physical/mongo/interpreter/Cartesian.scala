@@ -37,10 +37,11 @@ object Cartesian {
     if (cartouches.isEmpty)
       unfocus[F] as List(Pipeline.$match(O.obj(Map(undefinedKey -> O.bool(false)))): Pipe)
     else {
+      val ns = x => state.uniqueKey concat x
       val interpretations: F[List[List[Pipe]]] =
         cartouches.toList.traverse {
           case (alias, (_, instructions)) => for {
-            _ <- MonadState[F, InterpretationState].put(InterpretationState(alias.name, Mapper.Focus(alias.name)))
+            _ <- MonadState[F, InterpretationState].put(InterpretationState(ns(alias.name), Mapper.Focus(ns(alias.name))))
             res <- instructions foldMapM { x => for {
               a <- interpretStep(x)
               _ <- focus[F]
@@ -50,25 +51,21 @@ object Cartesian {
 
       interpretations map { is =>
         val defaultObject = cartouches map {
-          case (alias, _) => alias.name -> O.string("$" concat alias.name)
+          case (alias, _) => ns(alias.name) -> O.string("$" concat ns(alias.name))
         }
         // We don't need to map any projections except initial since they're mapped already
         val initialProjection =
           Pipeline.$project(
             Map("_id" -> O.int(0)) ++ (cartouches map {
               case (alias, (field, instructions)) =>
-                alias.name -> O.projection(Mapper.projection(state.mapper)(Projection.key(field.name)))
+                ns(alias.name) -> O.projection(Mapper.projection(state.mapper)(Projection.key(field.name)))
             }))
 
         val instructions = is flatMap (_ flatMap {
           case Pipeline.$project(mp) =>
             List(Pipeline.$project(defaultObject ++ mp))
-          case Pipeline.MaskFilter(_) =>
-            List()
-          case Pipeline.PivotFilter(_) =>
-            List()
-          case Pipeline.$match(_) =>
-            List()
+          case Pipeline.Presented => List()
+          case Pipeline.Erase => List()
           case x => List(x)
         })
 
@@ -77,15 +74,11 @@ object Cartesian {
             case (alias, _) => alias.name -> O.$cond(
               O.$or(List(
                 O.$eq(List(
-                  O.string("$" concat alias.name),
-                  pivotUndefined(alias.name))),
-                O.$eq(List(
-                  O.string("$" concat alias.name),
-                  O.array(List(pivotUndefined(alias.name), pivotUndefined(alias.name))))))),
-              O.string("$" concat alias.name concat("_non_existent_field")),
-              O.string("$" concat alias.name))
+                  O.string("$" concat ns(alias.name)),
+                  missing(ns(alias.name)))))),
+              O.string("$" concat ns(alias.name) concat("_non_existent_field")),
+              O.string("$" concat ns(alias.name)))
           })
-
 
         val removeEmptyObjects =
           Pipeline.$match(O.$or(cartouches.toList map {

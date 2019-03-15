@@ -41,7 +41,7 @@ object Compiler {
       uuid: String,
       pipes: List[Pipeline[T[ExprF]]])
       : F[List[BsonDocument]] =
-    pipes flatMap (eraseCustomPipeline(_)) foldMapM { x => compilePipe[T, F](version, uuid, x) map (List(_)) }
+    pipes flatMap (eraseCustomPipeline(uuid, _)) foldMapM { x => compilePipe[T, F](version, uuid, x) map (List(_)) }
 
   def toCoreOp[T[_[_]]: BirecursiveT](uuid: String, pipe: MongoPipeline[T[ExprF]]): T[CoreOp] =
     optimize(compileProjections(uuid, pipelineObjects(pipe)))
@@ -69,22 +69,30 @@ object Compiler {
     case _ => ApplicativePlus[F].empty
   }
 
-  def pivotUndefined[T[_[_]]: BirecursiveT, F[_]: Functor](key: String)(implicit F: Core :<: F): T[F] = {
+  val MissingSuffix = "_missing"
+
+  def missing[T[_[_]]: BirecursiveT, F[_]: Functor](key: String)(implicit F: Core :<: F): T[F] = {
     val O = Optics.core(birecursiveIso[T[F], F].reverse.asPrism)
-    O.string(key concat "_pivot_undefined")
+    O.string(key concat MissingSuffix)
+  }
+
+  def missingKey[T[_[_]]: BirecursiveT](key: String): T[ExprF] = {
+    val O = Optics.fullT[T, ExprF]
+    O.key(key concat MissingSuffix)
   }
 
   def eraseCustomPipeline[T[_[_]]: BirecursiveT](
+      uuid: String,
       pipeline: Pipeline[T[ExprF]])
       : List[MongoPipeline[T[ExprF]]] = {
 
     val O = Optics.fullT[T, ExprF]
 
     pipeline match {
-      case MaskFilter(fld) =>
-        List($match(O.obj(Map(fld -> O.$ne(pivotUndefined(fld))))))
-      case PivotFilter(fld) =>
-        List($match(O.obj(Map(fld -> O.$ne(pivotUndefined(fld))))))
+      case Presented =>
+        List($match(O.obj(Map(uuid -> O.$ne(missing(uuid))))))
+      case Erase =>
+        List($match(O.obj(Map(uuid.concat("_erase") -> O.bool(false)))))
       case $project(obj) =>
         List($project(obj))
       case $match(obj) =>
@@ -93,7 +101,6 @@ object Compiler {
         List($unwind(a, i))
     }
   }
-
 
   def pipelineObjects[T[_[_]]: BirecursiveT](pipe: MongoPipeline[T[ExprF]]): T[ExprF] = {
     val O = Optics.fullT[T, ExprF]

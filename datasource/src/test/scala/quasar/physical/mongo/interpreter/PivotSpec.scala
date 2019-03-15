@@ -34,7 +34,6 @@ class PivotSpec extends Specification with quasar.TreeMatchers {
       : (Mapper, List[Pipe]) =
     Pivot[State[InterpretationState, ?]](idStatus, columnType) run state leftMap (_.mapper)
 
-
   "Array examples" >> {
     val initialState = InterpretationState("root", Mapper.Unfocus)
     def mkExpected(e: Expr): List[Pipe] = List(
@@ -45,7 +44,7 @@ class PivotSpec extends Specification with quasar.TreeMatchers {
           O.array(List(O.string("root_pivot_undefined")))))),
       Pipeline.$unwind("root_unwind", "root_unwind_index"),
       Pipeline.$project(Map("_id" -> O.int(0), "root" -> e)),
-      Pipeline.PivotFilter("root"))
+      Pipeline.Presented)
 
     "id only" >> {
       val actual = evalPivot(initialState, IdStatus.IdOnly, ColumnType.Array)
@@ -88,7 +87,7 @@ class PivotSpec extends Specification with quasar.TreeMatchers {
             "v" -> O.string("root_pivot_undefined")))))))),
       Pipeline.$unwind("root_unwind", "root_unwind_index"),
       Pipeline.$project(Map("_id" -> O.int(0), "root" -> e)),
-      Pipeline.PivotFilter("root"))
+      Pipeline.Presented)
 
     "id only" >> {
       val actual = evalPivot(initialState, IdStatus.IdOnly, ColumnType.Object)
@@ -121,8 +120,7 @@ class PivotSpec extends Specification with quasar.TreeMatchers {
             O.array(List(O.string("unique_pivot_undefined")))))),
         Pipeline.$unwind("unique_unwind", "unique_unwind_index"),
         Pipeline.$project(Map("_id" -> O.int(0), "unique" -> O.string("$unique_unwind"))),
-        Pipeline.PivotFilter("unique")
-      )
+        Pipeline.Presented)
       (actual._2 must beTree(expected)) and (actual._1 === Mapper.Focus("unique"))
     }
     "object" >> {
@@ -137,8 +135,7 @@ class PivotSpec extends Specification with quasar.TreeMatchers {
               "v" -> O.string("unique_pivot_undefined")))))))),
         Pipeline.$unwind("unique_unwind", "unique_unwind_index"),
         Pipeline.$project(Map("_id" -> O.int(0), "unique" -> O.string("$unique_unwind.v"))),
-        Pipeline.PivotFilter("unique")
-      )
+        Pipeline.Presented)
       (actual._2 must beTree(expected)) and (actual._1 === Mapper.Focus("unique"))
     }
   }

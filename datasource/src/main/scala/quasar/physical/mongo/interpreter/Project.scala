@@ -30,6 +30,7 @@ object Project {
   }
 
   // We need to be sure that type of projectee is coherent with projector
+  // E.g. if we project [1] the type of Projection(List()) must be "array"
   @scala.annotation.tailrec
   def build(
       key: String,
@@ -43,19 +44,17 @@ object Project {
     case List() =>
       acc ++ List(
         Pipeline.$project(Map(res.keyPart -> O.steps(List(input)))),
-        Pipeline.PivotFilter(key))
+        Pipeline.Presented)
     case hd :: tail =>
-      val value =
+      val projectionObject =
         O.$cond(
           O.$or(List(
             O.$not(O.$eq(List(O.$type(O.steps(List(input))), stepType(hd)))),
             O.$eq(List(O.$type(O.steps(List(input, hd))), O.string("missing"))))),
-          pivotUndefined(key),
+          missing(key),
           O.steps(List(input, hd)))
-      val project: Pipe =
-        Pipeline.$project(Map(output.keyPart -> value))
-      val filters: Pipe = Pipeline.PivotFilter(key)
-      build(key, Projection(tail), output, input, res, acc ++ List(project, filters))
+      val project: Pipe = Pipeline.$project(Map(output.keyPart -> projectionObject))
+      build(key, Projection(tail), output, input, res, acc ++ List(project, Pipeline.Presented))
   }
 
   def apply[F[_]: MonadInState](prj: Projection): F[List[Pipe]] =

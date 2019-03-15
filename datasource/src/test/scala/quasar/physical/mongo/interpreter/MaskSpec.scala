@@ -40,8 +40,8 @@ class MaskSpec extends Specification with quasar.TreeMatchers {
 
   def pipeEqualWithKey(key: String, a: Option[List[Pipe]], b: Expr) = {
     a must beLike {
-      case Some(x :: Pipeline.MaskFilter(k) :: List()) if k === key =>
-        eraseCustomPipeline(x) must beLike {
+      case Some(x :: Pipeline.Presented :: List()) =>
+        eraseCustomPipeline(key, x) must beLike {
           case List(pipe) =>
             toCoreOp(key, pipe) must beTree(b)
         }
@@ -120,7 +120,7 @@ class MaskSpec extends Specification with quasar.TreeMatchers {
       evalMask(Map.empty) must beLike {
         case Some(List(x)) =>
           val expected = wrapWithMatch(O.obj(Map("root_non_existent_field" -> O.bool(false))))
-          eraseCustomPipeline(x) must beLike {
+          eraseCustomPipeline("root", x) must beLike {
             case List(pipe) => toCoreOp("root", pipe) must beTree(expected)
           }
       }

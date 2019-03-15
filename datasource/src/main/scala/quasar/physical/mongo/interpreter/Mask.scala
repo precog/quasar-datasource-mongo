@@ -75,9 +75,7 @@ object Mask {
     if (tree.types === ColumnType.Top) {
       O.$not(O.$eq(List(
         O.$type(O.projection(proj)),
-        O.string("missing")
-      )))
-
+        O.string("missing"))))
     } else {
       val typeExprs: List[Expr] = tree.types.toList flatMap parseTypeStrings map (O.string(_))
       val eqExprs: List[Expr] = typeExprs map (x => O.$eq(List(O.$type(O.projection(proj)), x)))
@@ -166,26 +164,23 @@ object Mask {
     } yield O.$cond(typeTreeFilters(proj, tree), arr, undefined))
   }
 
-  val NonExistentSuffix: String = "_pivot_undefined"
-
   final case class Config(uniqueKey: String, undefined: Expr, mapper: Mapper)
 
   def inArray[F[_]: MonadReader[?[_], Config], A](action: F[A]): F[A] = {
-    val modify: Config => Config = cfg => cfg.copy(undefined = O.string(cfg.uniqueKey concat NonExistentSuffix))
+    val modify: Config => Config = cfg => cfg.copy(undefined = missing(cfg.uniqueKey))
     MonadReader[F, Config].local(modify)(action)
   }
   def inObject[F[_]: MonadReader[?[_], Config], A](action: F[A]): F[A] = {
-    val modify: Config => Config = cfg => cfg.copy(undefined = O.key(cfg.uniqueKey concat NonExistentSuffix))
+    val modify: Config => Config = cfg => cfg.copy(undefined = missingKey(cfg.uniqueKey))
     MonadReader[F, Config].local(modify)(action)
   }
 
   def apply[F[_]: MonadInState: PlusEmpty](masks: Map[CPath, Set[ColumnType]]): F[List[Pipe]] =
     MonadState[F, InterpretationState].get flatMap { state =>
-      val undefinedKey = state.uniqueKey concat NonExistentSuffix
       val eraseId = Map("_id" -> O.int(0))
 
       def projectionObject(tree: TypeTree): Option[Map[String, Expr]] = {
-        val initialConfig = Config(state.uniqueKey, O.string(undefinedKey), state.mapper)
+        val initialConfig = Config(state.uniqueKey, missing(state.uniqueKey), state.mapper)
         val rebuilt = rebuildDoc[Reader[Config, ?]](Projection(List()), tree).run(initialConfig)
         state.mapper match {
           case Mapper.Unfocus => Some(Map(state.uniqueKey -> rebuilt))
@@ -194,7 +189,7 @@ object Mask {
       }
 
       if (masks.isEmpty) {
-        List(Pipeline.$match(O.obj(Map(undefinedKey -> O.bool(false)))): Pipe).point[F]
+        List(Pipeline.Erase: Pipe).point[F]
       }
       else for {
         projObj <- optToAlternative[F].apply(for {
@@ -202,6 +197,6 @@ object Mask {
           pObj <- projectionObject(tree)
         } yield pObj)
         _ <- focus[F]
-      } yield List(Pipeline.$project(eraseId ++ projObj), Pipeline.MaskFilter(state.uniqueKey))
+      } yield List(Pipeline.$project(eraseId ++ projObj), Pipeline.Presented)
     }
 }

@@ -45,10 +45,11 @@ package object expression {
     Compiler.compilePipeline[Fix, F](version, uuid, pipes)
 
   def compilePipe[F[_]: MonadPlus](version: Version, uuid: String, pipe: Pipe): F[List[BsonDocument]] =
-    Compiler.eraseCustomPipeline(pipe) foldMapM { x => Compiler.compilePipe[Fix, F](version, uuid, x) map (List(_)) }
+    Compiler.eraseCustomPipeline(uuid, pipe) foldMapM { x => Compiler.compilePipe[Fix, F](version, uuid, x) map (List(_)) }
 
   def mapProjection(mp: Mapper)(pipe: Pipe): Pipe =
     pipe map Compiler.mapProjection(Mapper.projection(mp))
 
-  def pivotUndefined(key: String): Expr = Compiler.pivotUndefined[Fix, ExprF](key)
+  def missing(key: String): Expr = Compiler.missing[Fix, ExprF](key)
+  def missingKey(key: String): Expr = Compiler.missingKey[Fix](key)
 }
