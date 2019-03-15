@@ -21,6 +21,7 @@ import slamdata.Predef._
 import org.specs2.mutable.Specification
 
 import quasar.physical.mongo.expression._
+import quasar.physical.mongo.expression.{Projection, Pipeline}, Projection._, Pipeline._
 
 import scalaz.{State, Scalaz}, Scalaz._
 
@@ -29,18 +30,53 @@ class ProjectSpec extends Specification with quasar.TreeMatchers {
     val foobarPrj = Projection.key("foo") + Projection.key("bar")
     val actual = Project[State[InterpretationState, ?]](foobarPrj) run InterpretationState("root", Mapper.Unfocus)
     val expected = List(
-      Pipeline.$match(O.obj(Map("foo.bar" -> O.$exists(O.bool(true))))),
-      Pipeline.$project(Map("_id" -> O.int(0), "root_project" -> O.projection(foobarPrj))),
-      Pipeline.$project(Map("root" -> O.string("$root_project"))))
+      $project(Map("root_project0" -> O.steps(List()))),
+      $project(Map("root_project1" -> O.$cond(
+        O.$or(List(
+          O.$not(O.$eq(List(O.$type(O.key("root_project0")), O.string("object")))),
+          O.$eq(List(O.$type(O.steps(List(Field("root_project0"), Field("foo")))), O.string("missing"))))),
+        O.string("root_missing"),
+        O.steps(List(Field("root_project0"), Field("foo")))))),
+      Presented,
+      $project(Map("root_project0" -> O.$cond(
+        O.$or(List(
+          O.$not(O.$eq(List(O.$type(O.key("root_project1")), O.string("object")))),
+          O.$eq(List(O.$type(O.steps(List(Field("root_project1"), Field("bar")))), O.string("missing"))))),
+        O.string("root_missing"),
+        O.steps(List(Field("root_project1"), Field("bar")))))),
+      Presented,
+      $project(Map("root" -> O.key("root_project0"))),
+      Presented)
     (actual._2 must beTree(expected)) and (actual._1.mapper === Mapper.Focus("root"))
   }
   "focused" >> {
     val foo1Prj = Projection.key("foo") + Projection.index(1)
     val actual = Project[State[InterpretationState, ?]](foo1Prj) run InterpretationState("other", Mapper.Focus("other"))
     val expected = List(
-      Pipeline.$match(O.obj(Map("other.foo.1" -> O.$exists(O.bool(true))))),
-      Pipeline.$project(Map("_id" -> O.int(0), "other_project" -> O.projection(Projection.key("other") + foo1Prj))),
-      Pipeline.$project(Map("other" -> O.string("$other_project"))))
+      $project(Map("other_project0" -> O.steps(List()))),
+      $project(Map("other_project1" -> O.$cond(
+        O.$or(List(
+          O.$not(O.$eq(List(O.$type(O.key("other_project0")), O.string("object")))),
+          O.$eq(List(O.$type(O.steps(List(Field("other_project0"), Field("other")))), O.string("missing"))))),
+        O.string("other_missing"),
+        O.steps(List(Field("other_project0"), Field("other")))))),
+      Presented,
+      $project(Map("other_project0" -> O.$cond(
+        O.$or(List(
+          O.$not(O.$eq(List(O.$type(O.key("other_project1")), O.string("object")))),
+          O.$eq(List(O.$type(O.steps(List(Field("other_project1"), Field("foo")))), O.string("missing"))))),
+        O.string("other_missing"),
+        O.steps(List(Field("other_project1"), Field("foo")))))),
+      Presented,
+      $project(Map("other_project1" -> O.$cond(
+        O.$or(List(
+          O.$not(O.$eq(List(O.$type(O.key("other_project0")), O.string("array")))),
+          O.$eq(List(O.$type(O.steps(List(Field("other_project0"), Index(1)))), O.string("missing"))))),
+        O.string("other_missing"),
+        O.steps(List(Field("other_project0"), Index(1)))))),
+      Presented,
+      $project(Map("other" -> O.key("other_project1"))),
+      Presented)
     (actual._2 must beTree(expected)) and (actual._1.mapper === Mapper.Focus("other"))
   }
 }

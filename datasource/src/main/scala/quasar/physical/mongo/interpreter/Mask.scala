@@ -72,28 +72,36 @@ object Mask {
 
   @SuppressWarnings(Array("org.wartremover.warts.Recursion"))
   private def typeTreeFilters(proj: Projection, tree: TypeTree): Expr = {
-    val typeExprs: List[Expr] = tree.types.toList flatMap parseTypeStrings map (O.string(_))
-    val eqExprs: List[Expr] = typeExprs map (x => O.$eq(List(O.$type(O.projection(proj)), x)))
-    val listExprs: List[Expr] =
-      if (tree.types.contains(ColumnType.Array)) List()
-      else tree.list.toList.sortBy(_._1) map {
-        case (i, child) => typeTreeFilters(proj + Projection.index(i), child)
-      }
-    val objExprs: List[Expr] =
-      if (tree.types.contains(ColumnType.Object)) List()
-      else tree.obj.toList map {
-        case (key, child) => typeTreeFilters(proj + Projection.key(key), child)
-      }
-    O.$or(eqExprs ++ listExprs ++ objExprs)
+    if (tree.types === ColumnType.Top) {
+      O.$not(O.$eq(List(
+        O.$type(O.projection(proj)),
+        O.string("missing"))))
+    } else {
+      val typeExprs: List[Expr] = tree.types.toList flatMap parseTypeStrings map (O.string(_))
+      val eqExprs: List[Expr] = typeExprs map (x => O.$eq(List(O.$type(O.projection(proj)), x)))
+      val listExprs: List[Expr] =
+        if (tree.types.contains(ColumnType.Array)) List()
+        else tree.list.toList.sortBy(_._1) map {
+          case (i, child) => typeTreeFilters(proj + Projection.index(i), child)
+        }
+      val objExprs: List[Expr] =
+        if (tree.types.contains(ColumnType.Object)) List()
+        else tree.obj.toList map {
+          case (key, child) => typeTreeFilters(proj + Projection.key(key), child)
+        }
+      O.$or(eqExprs ++ listExprs ++ objExprs)
+    }
+
   }
 
   @SuppressWarnings(Array("org.wartremover.warts.Recursion"))
   private def rebuildDoc[F[_]: MonadReader[?[_], Config]](
       proj: Projection,
       tree: TypeTree)
-      : F[Expr] = MonadReader[F, Config].ask flatMap { case Config(uniqueKey, undefined) =>
+      : F[Expr] = MonadReader[F, Config].ask flatMap { case Config(uniqueKey, undefined, mapper) =>
 
-    val obj: F[Expr] = inObject {
+
+    val obj: F[Expr] = {
       val treeMap = tree.obj.toList.foldLeftM(Map[String, Expr]()) {
         case (m, (key, child)) =>
           rebuildDoc(proj + Projection.key(key), child) map (m.updated(key, _))
@@ -131,47 +139,48 @@ object Mask {
 
     def objectOr(e: Expr): F[Expr] =
       if (tree.types.contains(ColumnType.Object) || tree.obj.isEmpty) e.point[F]
-      else obj map (O.$cond(isObject(O.projection(proj)), _, e))
+      else inObject(obj) map (O.$cond(isObject(O.projection(proj)), _, e))
 
     def projectionOr(e: Expr): Expr =
       if (tree.types.isEmpty) e else O.projection(proj)
+
+    def rootWrapper[A](x: F[A]): F[A] =
+      if (proj === Projection.key(uniqueKey)) mapper match {
+        case Mapper.Focus(key) if key === uniqueKey => inArray(x)
+        case _ => x
+      } else x
 
     if (proj === Projection(List())) {
       if (tree.obj.isEmpty) {
         if (tree.types.contains(ColumnType.Object)) O.string("$$ROOT").point[F]
         else undefined.point[F]
-      } else obj
+      } else if (tree.obj.keySet === Set(uniqueKey) && mapper === Mapper.Focus(uniqueKey)) {
+        inArray(obj)
+      } else inObject(obj)
     }
-    else for {
+    else rootWrapper(for {
       obj <- objectOr(projectionOr(undefined))
       arr <- arrayOr(obj)
-    } yield O.$cond(typeTreeFilters(proj, tree), arr, undefined)
+    } yield O.$cond(typeTreeFilters(proj, tree), arr, undefined))
   }
 
-  val NonExistentSuffix: String = "_non_existent_field"
-
-  final case class Config(uniqueKey: String, undefined: Expr)
+  final case class Config(uniqueKey: String, undefined: Expr, mapper: Mapper)
 
   def inArray[F[_]: MonadReader[?[_], Config], A](action: F[A]): F[A] = {
-    val modify: Config => Config = {
-      case Config(uniqueKey, _) => Config(uniqueKey, O.string(uniqueKey concat NonExistentSuffix))
-    }
+    val modify: Config => Config = cfg => cfg.copy(undefined = missing(cfg.uniqueKey))
     MonadReader[F, Config].local(modify)(action)
   }
   def inObject[F[_]: MonadReader[?[_], Config], A](action: F[A]): F[A] = {
-    val modify: Config => Config = {
-      case Config(uniqueKey, _) => Config(uniqueKey, O.key(uniqueKey concat NonExistentSuffix))
-    }
+    val modify: Config => Config = cfg => cfg.copy(undefined = missingKey(cfg.uniqueKey))
     MonadReader[F, Config].local(modify)(action)
   }
 
   def apply[F[_]: MonadInState: PlusEmpty](masks: Map[CPath, Set[ColumnType]]): F[List[Pipe]] =
     MonadState[F, InterpretationState].get flatMap { state =>
-      val undefinedKey = state.uniqueKey concat NonExistentSuffix
       val eraseId = Map("_id" -> O.int(0))
 
       def projectionObject(tree: TypeTree): Option[Map[String, Expr]] = {
-        val initialConfig = Config(state.uniqueKey, O.key(undefinedKey))
+        val initialConfig = Config(state.uniqueKey, missing(state.uniqueKey), state.mapper)
         val rebuilt = rebuildDoc[Reader[Config, ?]](Projection(List()), tree).run(initialConfig)
         state.mapper match {
           case Mapper.Unfocus => Some(Map(state.uniqueKey -> rebuilt))
@@ -180,7 +189,7 @@ object Mask {
       }
 
       if (masks.isEmpty) {
-        List(Pipeline.$match(O.obj(Map(undefinedKey -> O.bool(false)))): Pipe).point[F]
+        List(Pipeline.Erase: Pipe).point[F]
       }
       else for {
         projObj <- optToAlternative[F].apply(for {
@@ -188,6 +197,6 @@ object Mask {
           pObj <- projectionObject(tree)
         } yield pObj)
         _ <- focus[F]
-      } yield List(Pipeline.$project(eraseId ++ projObj), Pipeline.MaskFilter(state.uniqueKey))
+      } yield List(Pipeline.$project(eraseId ++ projObj), Pipeline.Presented)
     }
 }

@@ -27,7 +27,7 @@ import org.bson._
 
 import quasar.physical.mongo.Version
 
-import scalaz.{:<:, Const, Coproduct, Functor, Scalaz, MonadPlus, ApplicativePlus}, Scalaz._
+import scalaz.{:<:, Const, Coproduct, Functor, Scalaz, MonadPlus, ApplicativePlus, Free}, Scalaz._
 import scalaz.syntax._
 
 import Pipeline._
@@ -38,15 +38,17 @@ object Compiler {
 
   def compilePipeline[T[_[_]]: BirecursiveT, F[_]: MonadPlus](
       version: Version,
+      uuid: String,
       pipes: List[Pipeline[T[ExprF]]])
       : F[List[BsonDocument]] =
-    pipes flatMap (eraseCustomPipeline(_)) foldMapM { x => compilePipe[T, F](version, x) map (List(_)) }
+    pipes flatMap (eraseCustomPipeline(uuid, _)) foldMapM { x => compilePipe[T, F](version, uuid, x) map (List(_)) }
 
-  def toCoreOp[T[_[_]]: BirecursiveT](pipe: MongoPipeline[T[ExprF]]): T[CoreOp] =
-    optimize(compileProjections(pipelineObjects(pipe)))
+  def toCoreOp[T[_[_]]: BirecursiveT](uuid: String, pipe: MongoPipeline[T[ExprF]]): T[CoreOp] =
+    optimize(compileProjections(uuid, pipelineObjects(pipe)))
 
   def compilePipe[T[_[_]]: BirecursiveT, F[_]: MonadPlus](
       version: Version,
+      uuid: String,
       pipe: MongoPipeline[T[ExprF]])
       : F[BsonDocument] = {
     if (version < pipeMinVersion(pipe)) MonadPlus[F].empty
@@ -55,7 +57,7 @@ object Compiler {
         if (version < Op.opMinVersion(op)) MonadPlus[F].empty
         else opsToCore[T](op).point[F]
 
-      toCoreOp(pipe)
+      toCoreOp(uuid, pipe)
         .transCataM[F, T[Core], Core](_.run.fold(transformM, MonadPlus[F].point(_)))
         .map(coreToBson[T](_))
         .flatMap(mbBsonDocument[F])
@@ -67,25 +69,30 @@ object Compiler {
     case _ => ApplicativePlus[F].empty
   }
 
-  def pivotUndefined[T[_[_]]: BirecursiveT, F[_]: Functor](key: String)(implicit F: Core :<: F): T[F] = {
+  val MissingSuffix = "_missing"
+
+  def missing[T[_[_]]: BirecursiveT, F[_]: Functor](key: String)(implicit F: Core :<: F): T[F] = {
     val O = Optics.core(birecursiveIso[T[F], F].reverse.asPrism)
-    O.string(key concat "_pivot_undefined")
+    O.string(key concat MissingSuffix)
+  }
+
+  def missingKey[T[_[_]]: BirecursiveT, F[_]: Functor](key: String)(implicit F: Core :<: F): T[F] = {
+    val O = Optics.core(birecursiveIso[T[F], F].reverse.asPrism)
+    O.string("$" concat key concat MissingSuffix)
   }
 
   def eraseCustomPipeline[T[_[_]]: BirecursiveT](
+      uuid: String,
       pipeline: Pipeline[T[ExprF]])
       : List[MongoPipeline[T[ExprF]]] = {
 
     val O = Optics.fullT[T, ExprF]
 
     pipeline match {
-      case MaskFilter(fld) =>
-        List($match(O.obj(Map(fld -> O.$ne(O.nil())))))
-      case PivotFilter(fld) =>
-        val undefined: T[ExprF] = pivotUndefined(fld)
-        List(
-          $match(O.obj(Map(fld -> O.$ne(undefined)))),
-          $match(O.obj(Map(fld -> O.$ne(O.array(List(undefined, undefined)))))))
+      case Presented =>
+        List($match(O.obj(Map(uuid -> O.$ne(missing(uuid))))))
+      case Erase =>
+        List($match(O.obj(Map(uuid.concat("_erase") -> O.bool(false)))))
       case $project(obj) =>
         List($project(obj))
       case $match(obj) =>
@@ -94,7 +101,6 @@ object Compiler {
         List($unwind(a, i))
     }
   }
-
 
   def pipelineObjects[T[_[_]]: BirecursiveT](pipe: MongoPipeline[T[ExprF]]): T[ExprF] = {
     val O = Optics.fullT[T, ExprF]
@@ -111,11 +117,10 @@ object Compiler {
     }
   }
 
-  def unfoldProjection[T[_[_]]: BirecursiveT](prj: Projection): T[CoreOp] = {
+  def unfoldProjection[T[_[_]]: BirecursiveT](uuid: String, prj: Projection): T[CoreOp] = {
     trait GroupedSteps
     final case class IndexGroup(i: Int) extends GroupedSteps
     final case class FieldGroup(s: List[String]) extends GroupedSteps
-    final case class IndexedAccess(i: Int) extends GroupedSteps
 
     def groupSteps(prj: Projection): List[GroupedSteps] = {
       val accum = prj.steps.foldl ((List[String](), List[GroupedSteps]())) {
@@ -131,36 +136,43 @@ object Compiler {
     }
     type Elem = (GroupedSteps, Int)
 
+    type FCoreOp = Free[CoreOp, List[Elem]]
+    val OF = Optics.coreOp(Prism.id[CoreOp[FCoreOp]])
     val O = Optics.coreOp(Prism.id[CoreOp[List[Elem]]])
 
-    val ψ: Coalgebra[CoreOp, List[Elem]] = {
+    val ψ: GCoalgebra[Free[CoreOp, ?], CoreOp, List[Elem]] = {
       case List() =>
-        O.string("$$ROOT")
+        OF.string("$$ROOT")
       case (FieldGroup(hd :: tail), _) :: List() =>
-        O.string(tail.foldl("$" concat hd) { accum => s => accum concat "." concat s  })
+        OF.string(tail.foldl("$" concat hd) { accum => s => accum concat "." concat s  })
       case (hd, levelIx) :: tl => hd match {
-        case IndexedAccess(i) =>
-          O.$arrayElemAt(tl, i)
         case IndexGroup(i) =>
           val level = "level" concat levelIx.toString
-          val vars: Map[String, List[Elem]] = Map(level -> tl)
-          val expSteps = IndexedAccess(i)
-          val exp = List[Elem]((expSteps, 0), (FieldGroup(List("$" concat level)), 1))
-          O.$let(vars, exp)
+          val vars = Map(level -> (Free.point[CoreOp, List[Elem]](tl)))
+          val nil: FCoreOp = Free.liftF(O.string(uuid concat MissingSuffix))
+          val levelExp: FCoreOp = Free.liftF(O.string("$$" concat level))
+          val elemAt: FCoreOp = Free.roll(OF.$arrayElemAt(levelExp, i))
+          val check: FCoreOp = {
+            val ty: FCoreOp = Free.liftF(O.$type(tl))
+            val str: FCoreOp = Free.liftF(O.string("array"))
+            Free.roll(OF.$eq(List(ty, str)))
+          }
+          val cond = Free.roll(OF.$cond(check, elemAt, nil))
+          OF.$let(vars, cond)
         case FieldGroup(steps) =>
           val level = "level".concat(levelIx.toString)
-          val vars = Map(level -> tl)
+          val vars: Map[String, FCoreOp] = Map(level -> (Free.point(tl)))
           val expSteps: GroupedSteps = FieldGroup("$".concat(level) :: steps)
-          val exp = List((expSteps, 0))
-          O.$let(vars, exp)
+          val exp: FCoreOp = Free.point(List((expSteps, 0)))
+          OF.$let(vars, exp)
       }
     }
-    groupSteps(prj).zipWithIndex.reverse.ana[T[CoreOp]](ψ)
+    groupSteps(prj).zipWithIndex.reverse.futu[T[CoreOp]](ψ)
   }
 
-  def compileProjections[T[_[_]]: BirecursiveT](inp: T[ExprF]): T[CoreOp] = {
+  def compileProjections[T[_[_]]: BirecursiveT](uuid: String, inp: T[ExprF]): T[CoreOp] = {
     def τ(inp: Const[Projection, T[CoreOp]]): CoreOp[T[CoreOp]] =
-      unfoldProjection(inp.getConst).project
+      unfoldProjection(uuid, inp.getConst).project
     inp.transCata[T[CoreOp]](_.run.fold(τ, (x => x)))
   }
 
@@ -183,6 +195,7 @@ object Compiler {
         "initialValue" -> b,
         "in" -> c))))
       case Op.ConcatArrays(a) => O._obj(Map("$concatArrays" -> O.array(a)))
+      case Op.Not(a) => O._obj(Map("$not" -> a))
     }
   }
 

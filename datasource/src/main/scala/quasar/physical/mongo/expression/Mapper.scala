@@ -22,6 +22,8 @@ import org.bson._
 
 trait Mapper extends Product with Serializable
 
+import scalaz.{Order, Ordering, Scalaz}, Scalaz._
+
 object Mapper {
   final case class Focus(str: String) extends Mapper
   final case object Unfocus extends Mapper
@@ -34,5 +36,18 @@ object Mapper {
   def projection(mapper: Mapper)(inp: Projection): Projection = mapper match {
     case Focus(str) => Projection.key(str) + inp
     case Unfocus => inp
+  }
+
+  implicit val orderMapper: Order[Mapper] = new Order[Mapper] {
+    def order(a: Mapper, b: Mapper) = a match {
+      case Unfocus => b match {
+        case Unfocus => Ordering.EQ
+        case Focus(_) => Ordering.LT
+      }
+      case Focus(afld) => b match {
+        case Unfocus => Ordering.GT
+        case Focus(bfld) => Order[String].order(afld, bfld)
+      }
+    }
   }
 }

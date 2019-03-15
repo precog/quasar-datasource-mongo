@@ -28,12 +28,28 @@ import scalaz.{State, Scalaz}, Scalaz._
 class WrapSpec extends Specification with ScalaCheck {
   "unfocused" >> {
     val actual = Wrap[State[InterpretationState, ?]](Field("wrapper")) run InterpretationState("root", Mapper.Unfocus)
-    val expected = List(Pipeline.$project(Map("wrapper" -> O.steps(List()), "_id" -> O.int(0))))
-    (actual._2 === expected) and (actual._1.mapper === Mapper.Unfocus)
+    val expected = List(
+      Pipeline.$project(Map(
+        "root" ->
+          O.$cond(
+            O.$eq(List(O.steps(List()), O.string("root_missing"))),
+            O.string("root_missing"),
+            O.obj(Map("wrapper" -> O.steps(List())))),
+        "_id" -> O.int(0))),
+      Pipeline.Presented)
+    (actual._2 === expected) and (actual._1.mapper === Mapper.Focus("root"))
   }
   "focused" >> {
     val actual = Wrap[State[InterpretationState, ?]](Field("wrapper")) run InterpretationState("root", Mapper.Focus("root"))
-    val expected = List(Pipeline.$project(Map("wrapper" -> O.key("root"), "_id" -> O.int(0))))
-    (actual._2 === expected) and (actual._1.mapper === Mapper.Unfocus)
+    val expected = List(
+      Pipeline.$project(Map(
+        "root" ->
+          O.$cond(
+            O.$eq(List(O.key("root"), O.string("root_missing"))),
+            O.string("root_missing"),
+            O.obj(Map("wrapper" -> O.key("root")))),
+        "_id" -> O.int(0))),
+      Pipeline.Presented)
+    (actual._2 === expected) and (actual._1.mapper === Mapper.Focus("root"))
   }
 }

@@ -43,7 +43,7 @@ class Interpreter(version: Version, uniqueKey: String, pushdownLevel: PushdownLe
     case hd :: tail =>
       val nextStep = for {
         pipes <- interpretStep[InState](hd)
-        docs <- compilePipeline[InState](version, pipes)
+        docs <- compilePipeline[InState](version, uniqueKey, pipes)
       } yield Interpretation(tail, inp.docs ++ docs).left[Interpretation]
       nextStep <+> inp.right[Interpretation].point[InState]
   }
@@ -79,7 +79,7 @@ class Interpreter(version: Version, uniqueKey: String, pushdownLevel: PushdownLe
   def interpret(stages: ScalarStages): (Interpretation, Mapper) = {
     val interpreted = for {
       firstPipes <- initial[InState](stages.idStatus)
-      firstDocs <- firstPipes foldMapM (compilePipe[InState](version, _))
+      firstDocs <- firstPipes foldMapM (compilePipe[InState](version, uniqueKey, _))
       result <- BindRec[InState].tailrecM(refine)(Interpretation(stages.stages, firstDocs))
     } yield result
     interpreted.run(InterpretationState(uniqueKey, Mapper.Unfocus)) match {

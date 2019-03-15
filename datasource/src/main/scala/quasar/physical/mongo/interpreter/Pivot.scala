@@ -28,17 +28,18 @@ object Pivot {
   def ensureArray(vectorType: ColumnType.Vector, key: String, undefined: Expr): Pipe = {
     val proj = O.steps(List())
     Pipeline.$project(Map(key -> (vectorType match {
+      // if proj === {} or its type isn't "object" this emits [{k: missing, v: missing}]
       case ColumnType.Object =>
         O.$cond(
-          O.$eq(List(O.$type(proj), O.string("object"))),
-          O.$objectToArray(O.steps(List())),
-          O.array(List(O.obj(Map("k" -> undefined, "v" -> undefined)))))
+          O.$or(List(O.$not(O.$eq(List(O.$type(proj), O.string("object")))), O.$eq(List(proj, O.obj(Map()))))),
+          O.array(List(O.obj(Map("k" -> undefined, "v" -> undefined)))),
+          O.$objectToArray(O.steps(List())))
+      // if proj === [] or its type isn't "array" this emits [missing]
       case ColumnType.Array =>
         O.$cond(
-          O.$eq(List(O.$type(proj), O.string("array"))),
-          proj,
-          O.array(List(undefined)))
-
+          O.$or(List(O.$not(O.$eq(List(O.$type(proj), O.string("array")))), O.$eq(List(proj, O.array(List()))))),
+          O.array(List(undefined)),
+          proj)
     })))
   }
 
@@ -55,6 +56,7 @@ object Pivot {
     val vString = O.string("$" concat unwinded concat ".v")
     vectorType match {
       case ColumnType.Array => status match {
+        // if we have `missing` in values then index has no sense, it's `missing` too
         case IdStatus.IdOnly =>
           O.$cond(
             O.$eq(List(unwindString, undefined)),
@@ -62,17 +64,23 @@ object Pivot {
             indexString)
         case IdStatus.ExcludeId =>
           unwindString
-        case IdStatus.IncludeId => O.array(List(
-          indexString,
+        // the same as above, but we erase whole [id, val] instead of elements
+        case IdStatus.IncludeId =>
           O.$cond(
             O.$eq(List(unwindString, undefined)),
             undefined,
-            unwindString)))
+            O.array(List(indexString, unwindString)))
       }
       case ColumnType.Object => status match {
+        // no handling in kString, vString, they could be defined as missing in `ensureArray`
         case IdStatus.IdOnly => kString
         case IdStatus.ExcludeId => vString
-        case IdStatus.IncludeId => O.array(List(kString, vString))
+        case IdStatus.IncludeId =>
+          // if value is `missing` whole [id, val] is `missing`
+          O.$cond(
+            O.$eq(List(vString, undefined)),
+            undefined,
+            O.array(List(kString, vString)))
       }
     }
   }
@@ -86,12 +94,12 @@ object Pivot {
     val indexKey = state.uniqueKey concat "_unwind_index"
 
     List(
-      ensureArray(vectorType, unwindKey, pivotUndefined(state.uniqueKey)),
+      ensureArray(vectorType, unwindKey, missing(state.uniqueKey)),
       Pipeline.$unwind(unwindKey, indexKey),
       Pipeline.$project(Map(
         "_id" -> O.int(0),
-        state.uniqueKey -> mkValue(status, vectorType, unwindKey, indexKey, pivotUndefined(state.uniqueKey)))),
-      Pipeline.PivotFilter(state.uniqueKey))
+        state.uniqueKey -> mkValue(status, vectorType, unwindKey, indexKey, missing(state.uniqueKey)))),
+      Pipeline.Presented)
   }
 
 

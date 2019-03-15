@@ -20,7 +20,7 @@ import slamdata.Predef._
 
 import matryoshka.Delay
 
-import quasar.{RenderTree, NonTerminal}, RenderTree.ops._
+import quasar.{RenderTree, NonTerminal, Terminal}, RenderTree.ops._
 import quasar.physical.mongo.Version
 
 trait Pipeline[+A] extends Product with Serializable
@@ -36,6 +36,9 @@ object Pipeline {
   final case class $match[A](a: A) extends MongoPipeline[A]
   final case class $unwind[A](path: String, arrayIndex: String) extends MongoPipeline[A]
 
+  final case object Presented extends CustomPipeline
+  final case object Erase extends CustomPipeline
+
   implicit val delayRenderTreeMongoPipeline: Delay[RenderTree, Pipeline] =
     new Delay[RenderTree, Pipeline] {
       def apply[A](fa: RenderTree[A]): RenderTree[Pipeline[A]] = RenderTree.make {
@@ -45,15 +48,12 @@ object Pipeline {
         case $match(a) => NonTerminal(List("$match"), None, List(fa.render(a)))
         case $unwind(p, a) =>
           NonTerminal(List("$unwind"), None, List(p.render, a.render))
-        case PivotFilter(fld) =>
-          NonTerminal(List("PivotFilter"), None, List(fld.render))
-        case MaskFilter(fld) =>
-          NonTerminal(List("MaskFilter"), None, List(fld.render))
+        case Presented =>
+          Terminal(List("Presented"), None)
+        case Erase =>
+          Terminal(List("Erase"), None)
       }
   }
-
-  final case class MaskFilter(field: String) extends CustomPipeline
-  final case class PivotFilter(field: String) extends CustomPipeline
 
   def pipeMinVersion(pipe: MongoPipeline[_]): Version = pipe match {
     case $project(_) => Version.zero
@@ -63,8 +63,8 @@ object Pipeline {
 
   implicit val functorPipeline: Functor[Pipeline] = new Functor[Pipeline] {
     def map[A, B](fa: Pipeline[A])(f: A => B): Pipeline[B] = fa match {
-      case MaskFilter(fld) => MaskFilter(fld)
-      case PivotFilter(fld) => PivotFilter(fld)
+      case Presented => Presented
+      case Erase => Erase
       case $project(obj) => $project(obj map { case (k, v) => (k, f(v)) })
       case $match(a) => $match(f(a))
       case $unwind(p, i) => $unwind(p, i)
