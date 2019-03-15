@@ -62,70 +62,74 @@ class CartesianSpec extends Specification with quasar.TreeMatchers {
     val expected = List(
       Pipeline.$project(Map(
         "_id" -> O.int(0),
-        "a" -> O.projection(Projection.key("root") + Projection.key("a")),
-        "ba" -> O.projection(Projection.key("root") + Projection.key("b")),
-        "bm" -> O.projection(Projection.key("root") + Projection.key("b")))),
+        "roota" -> O.projection(Projection.key("root") + Projection.key("a")),
+        "rootba" -> O.projection(Projection.key("root") + Projection.key("b")),
+        "rootbm" -> O.projection(Projection.key("root") + Projection.key("b")))),
       Pipeline.$project(Map(
-        "_id" -> O.int(0),
-        "a" -> O.string("$a"),
-        "ba" -> O.$cond(
-          O.$or(List(O.$eq(List(O.$type(O.key("ba")), O.string("array"))))),
-          O.key("ba"),
-          O.key("ba_non_existent_field")),
-        "bm" -> O.string("$bm"))),
+        "roota" -> O.string("$roota"),
+        "rootba" -> O.$cond(
+          O.$or(List(O.$eq(List(O.$type(O.key("rootba")), O.string("array"))))),
+          O.key("rootba"),
+          O.string("rootba_missing")),
+        "rootbm" -> O.string("$rootbm"),
+        "_id" -> O.int(0))),
       Pipeline.$project(Map(
-        "a" -> O.string("$a"),
-        "ba" -> O.string("$ba"),
-        "bm" -> O.string("$bm"),
-        "ba_unwind" ->
+        "roota" -> O.string("$roota"),
+        "rootba" -> O.string("$rootba"),
+        "rootbm" -> O.string("$rootbm"),
+        "rootba_unwind" ->
           O.$cond(
-            O.$eq(List(O.$type(O.key("ba")), O.string("array"))),
-            O.key("ba"),
-            O.array(List(O.string("ba_pivot_undefined")))))),
-      Pipeline.$unwind("ba_unwind", "ba_unwind_index"),
+            O.$or(List(
+              O.$not(O.$eq(List(O.$type(O.key("rootba")), O.string("array")))),
+              O.$eq(List(O.key("rootba"), O.array(List()))))),
+            O.array(List(O.string("rootba_missing"))),
+            O.key("rootba")))),
+      Pipeline.$unwind("rootba_unwind", "rootba_unwind_index"),
       Pipeline.$project(Map(
-        "_id" -> O.int(0),
-        "a" -> O.string("$a"),
-        "ba" -> O.string("$ba_unwind"),
-        "bm" -> O.string("$bm"))),
+        "roota" -> O.string("$roota"),
+        "rootba" -> O.string("$rootba_unwind"),
+        "rootbm" -> O.string("$rootbm"),
+        "_id" -> O.int(0))),
       Pipeline.$project(Map(
-        "_id" -> O.int(0),
-        "a" -> O.string("$a"),
-        "ba" -> O.string("$ba"),
-        "bm" -> O.$cond(
-          O.$or(List(O.$eq(List(O.$type(O.key("bm")), O.string("object"))))),
-          O.key("bm"),
-          O.key("bm_non_existent_field")))),
+        "roota" -> O.string("$roota"),
+        "rootba" -> O.string("$rootba"),
+        "rootbm" -> O.$cond(
+          O.$or(List(O.$eq(List(O.$type(O.key("rootbm")), O.string("object"))))),
+          O.key("rootbm"),
+          O.string("rootbm_missing")),
+        "_id" -> O.int(0))),
       Pipeline.$project(Map(
-        "a" -> O.string("$a"),
-        "ba" -> O.string("$ba"),
-        "bm" -> O.string("$bm"),
-        "bm_unwind" ->
+        "roota" -> O.string("$roota"),
+        "rootba" -> O.string("$rootba"),
+        "rootbm" -> O.string("$rootbm"),
+        "rootbm_unwind" ->
           O.$cond(
-            O.$eq(List(O.$type(O.key("bm")), O.string("object"))),
-            O.$objectToArray(O.key("bm")),
+            O.$or(List(
+              O.$not(O.$eq(List(O.$type(O.key("rootbm")), O.string("object")))),
+              O.$eq(List(O.key("rootbm"), O.obj(Map()))))),
             O.array(List(O.obj(Map(
-              "k" -> O.string("bm_pivot_undefined"),
-              "v" -> O.string("bm_pivot_undefined")))))))),
-      Pipeline.$unwind("bm_unwind", "bm_unwind_index"),
+              "k" -> O.string("rootbm_missing"),
+              "v" -> O.string("rootbm_missing"))))),
+            O.$objectToArray(O.key("rootbm"))))),
+      Pipeline.$unwind("rootbm_unwind", "rootbm_unwind_index"),
       Pipeline.$project(Map(
-        "_id" -> O.int(0),
-        "a" -> O.string("$a"),
-        "ba" -> O.string("$ba"),
-        "bm" -> O.string("$bm_unwind.v"))),
+        "roota" -> O.string("$roota"),
+        "rootba" -> O.string("$rootba"),
+        "rootbm" -> O.string("$rootbm_unwind.v"),
+        "_id" -> O.int(0))),
       Pipeline.$project(Map(
         "a" -> O.$cond(
-          O.$eq(List(O.string("$a"), O.string("a_pivot_undefined"))),
-          O.string("$a_non_existent_field"),
-          O.string("$a")),
+          O.$eq(List(O.string("$roota"), O.string("roota_missing"))),
+          O.string("$roota_missing"),
+          O.string("$roota")),
         "ba" -> O.$cond(
-          O.$eq(List(O.string("$ba"), O.string("ba_pivot_undefined"))),
-          O.string("$ba_non_existent_field"),
-          O.string("$ba")),
+          O.$eq(List(O.string("$rootba"), O.string("rootba_missing"))),
+          O.string("$rootba_missing"),
+          O.string("$rootba")),
         "bm" -> O.$cond(
-          O.$eq(List(O.string("$bm"), O.string("bm_pivot_undefined"))),
-          O.string("$bm_non_existent_field"),
-          O.string("$bm")),
+          O.$eq(List(O.string("$rootbm"), O.string("rootbm_missing"))),
+          O.string("$rootbm_missing"),
+          O.string("$rootbm")),
       )),
       Pipeline.$match(O.$or(List(
         O.obj(Map("a" -> O.$exists(O.bool(true)))),

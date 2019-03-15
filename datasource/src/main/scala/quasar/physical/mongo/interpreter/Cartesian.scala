@@ -72,11 +72,10 @@ object Cartesian {
         val removeEmptyFields =
           Pipeline.$project(cartouches map {
             case (alias, _) => alias.name -> O.$cond(
-              O.$or(List(
-                O.$eq(List(
-                  O.string("$" concat ns(alias.name)),
-                  missing(ns(alias.name)))))),
-              O.string("$" concat ns(alias.name) concat("_non_existent_field")),
+              O.$eq(List(
+                O.string("$" concat ns(alias.name)),
+                missing(ns(alias.name)))),
+              missingKey(ns(alias.name)),
               O.string("$" concat ns(alias.name)))
           })
 

@@ -51,5 +51,5 @@ package object expression {
     pipe map Compiler.mapProjection(Mapper.projection(mp))
 
   def missing(key: String): Expr = Compiler.missing[Fix, ExprF](key)
-  def missingKey(key: String): Expr = Compiler.missingKey[Fix](key)
+  def missingKey(key: String): Expr = Compiler.missingKey[Fix, ExprF](key)
 }

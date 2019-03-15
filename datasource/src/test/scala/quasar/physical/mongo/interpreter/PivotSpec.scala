@@ -39,9 +39,11 @@ class PivotSpec extends Specification with quasar.TreeMatchers {
     def mkExpected(e: Expr): List[Pipe] = List(
       Pipeline.$project(Map("root_unwind" ->
         O.$cond(
-          O.$eq(List(O.$type(O.steps(List())), O.string("array"))),
-          O.steps(List()),
-          O.array(List(O.string("root_pivot_undefined")))))),
+          O.$or(List(
+            O.$not(O.$eq(List(O.$type(O.steps(List())), O.string("array")))),
+            O.$eq(List(O.steps(List()), O.array(List()))))),
+          O.array(List(O.string("root_missing"))),
+          O.steps(List())))),
       Pipeline.$unwind("root_unwind", "root_unwind_index"),
       Pipeline.$project(Map("_id" -> O.int(0), "root" -> e)),
       Pipeline.Presented)
@@ -50,8 +52,8 @@ class PivotSpec extends Specification with quasar.TreeMatchers {
       val actual = evalPivot(initialState, IdStatus.IdOnly, ColumnType.Array)
       val expected = mkExpected(
         O.$cond(
-          O.$eq(List(O.string("$root_unwind"), O.string("root_pivot_undefined"))),
-          O.string("root_pivot_undefined"),
+          O.$eq(List(O.string("$root_unwind"), O.string("root_missing"))),
+          O.string("root_missing"),
           O.string("$root_unwind_index")))
       (actual._2 must beTree(expected)) and (actual._1 === Mapper.Focus("root"))
     }
@@ -64,12 +66,10 @@ class PivotSpec extends Specification with quasar.TreeMatchers {
     "both" >> {
       val actual = evalPivot(initialState, IdStatus.IncludeId, ColumnType.Array)
       val expected = mkExpected(
-        O.array(List(
-          O.string("$root_unwind_index"),
-          O.$cond(
-            O.$eq(List(O.string("$root_unwind"), O.string("root_pivot_undefined"))),
-            O.string("root_pivot_undefined"),
-            O.string("$root_unwind")))))
+        O.$cond(
+          O.$eq(List(O.string("$root_unwind"), O.string("root_missing"))),
+          O.string("root_missing"),
+          O.array(List(O.string("$root_unwind_index"), O.string("$root_unwind")))))
       (actual._2 must beTree(expected)) and (actual._1 === Mapper.Focus("root"))
     }
   }
@@ -80,11 +80,13 @@ class PivotSpec extends Specification with quasar.TreeMatchers {
     def mkExpected(e: Expr): List[Pipe] = List(
       Pipeline.$project(Map("root_unwind" ->
         O.$cond(
-          O.$eq(List(O.$type(O.steps(List())), O.string("object"))),
-          O.$objectToArray(O.steps(List())),
+          O.$or(List(
+            O.$not(O.$eq(List(O.$type(O.steps(List())), O.string("object")))),
+            O.$eq(List(O.steps(List()), O.obj(Map()))))),
           O.array(List(O.obj(Map(
-            "k" -> O.string("root_pivot_undefined"),
-            "v" -> O.string("root_pivot_undefined")))))))),
+            "k" -> O.string("root_missing"),
+            "v" -> O.string("root_missing"))))),
+          O.$objectToArray(O.steps(List()))))),
       Pipeline.$unwind("root_unwind", "root_unwind_index"),
       Pipeline.$project(Map("_id" -> O.int(0), "root" -> e)),
       Pipeline.Presented)
@@ -101,9 +103,12 @@ class PivotSpec extends Specification with quasar.TreeMatchers {
     }
     "both" >> {
       val actual = evalPivot(initialState, IdStatus.IncludeId, ColumnType.Object)
-      val expected = mkExpected(O.array(List(
-        O.string("$root_unwind.k"),
-        O.string("$root_unwind.v"))))
+      val expected = mkExpected(O.$cond(
+        O.$eq(List(O.string("$root_unwind.v"), O.string("root_missing"))),
+        O.string("root_missing"),
+        O.array(List(
+          O.string("$root_unwind.k"),
+          O.string("$root_unwind.v")))))
       (actual._2 must beTree(expected)) and (actual._1 === Mapper.Focus("root"))
     }
   }
@@ -115,9 +120,11 @@ class PivotSpec extends Specification with quasar.TreeMatchers {
       val expected = List(
         Pipeline.$project(Map("unique_unwind" ->
           O.$cond(
-            O.$eq(List(O.$type(O.key("focused")), O.string("array"))),
-            O.key("focused"),
-            O.array(List(O.string("unique_pivot_undefined")))))),
+            O.$or(List(
+              O.$not(O.$eq(List(O.$type(O.key("focused")), O.string("array")))),
+              O.$eq(List(O.key("focused"), O.array(List()))))),
+          O.array(List(O.string("unique_missing"))),
+          O.key("focused")))),
         Pipeline.$unwind("unique_unwind", "unique_unwind_index"),
         Pipeline.$project(Map("_id" -> O.int(0), "unique" -> O.string("$unique_unwind"))),
         Pipeline.Presented)
@@ -128,11 +135,14 @@ class PivotSpec extends Specification with quasar.TreeMatchers {
       val expected = List(
         Pipeline.$project(Map("unique_unwind" ->
           O.$cond(
-            O.$eq(List(O.$type(O.key("focused")), O.string("object"))),
-            O.$objectToArray(O.key("focused")),
+            O.$or(List(
+              O.$not(O.$eq(List(O.$type(O.key("focused")), O.string("object")))),
+              O.$eq(List(O.key("focused"), O.obj(Map()))))),
             O.array(List(O.obj(Map(
-              "k" -> O.string("unique_pivot_undefined"),
-              "v" -> O.string("unique_pivot_undefined")))))))),
+              "k" -> O.string("unique_missing"),
+              "v" -> O.string("unique_missing"))))),
+            O.$objectToArray(O.key("focused"))))),
+
         Pipeline.$unwind("unique_unwind", "unique_unwind_index"),
         Pipeline.$project(Map("_id" -> O.int(0), "unique" -> O.string("$unique_unwind.v"))),
         Pipeline.Presented)

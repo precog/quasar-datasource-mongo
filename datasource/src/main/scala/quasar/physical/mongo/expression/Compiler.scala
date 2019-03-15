@@ -76,9 +76,9 @@ object Compiler {
     O.string(key concat MissingSuffix)
   }
 
-  def missingKey[T[_[_]]: BirecursiveT](key: String): T[ExprF] = {
-    val O = Optics.fullT[T, ExprF]
-    O.key(key concat MissingSuffix)
+  def missingKey[T[_[_]]: BirecursiveT, F[_]: Functor](key: String)(implicit F: Core :<: F): T[F] = {
+    val O = Optics.core(birecursiveIso[T[F], F].reverse.asPrism)
+    O.string("$" concat key concat MissingSuffix)
   }
 
   def eraseCustomPipeline[T[_[_]]: BirecursiveT](
@@ -149,8 +149,9 @@ object Compiler {
         case IndexGroup(i) =>
           val level = "level" concat levelIx.toString
           val vars = Map(level -> (Free.point[CoreOp, List[Elem]](tl)))
-          val nil: FCoreOp = Free.liftF(O.string("$" concat uuid))
-          val elemAt: FCoreOp = Free.liftF(O.$arrayElemAt(tl, i))
+          val nil: FCoreOp = Free.liftF(O.string(uuid concat MissingSuffix))
+          val levelExp: FCoreOp = Free.liftF(O.string("$$" concat level))
+          val elemAt: FCoreOp = Free.roll(OF.$arrayElemAt(levelExp, i))
           val check: FCoreOp = {
             val ty: FCoreOp = Free.liftF(O.$type(tl))
             val str: FCoreOp = Free.liftF(O.string("array"))
