@@ -82,7 +82,7 @@ object Cartesian {
                 O.$eq(List(
                   O.string("$" concat alias.name),
                   O.array(List(pivotUndefined(alias.name), pivotUndefined(alias.name))))))),
-              O.string("$" concat alias.name concat "_non_existent_field"),
+              O.string("$" concat alias.name concat("_non_existent_field")),
               O.string("$" concat alias.name))
           })
 

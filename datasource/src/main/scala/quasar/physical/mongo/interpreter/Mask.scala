@@ -166,7 +166,7 @@ object Mask {
     } yield O.$cond(typeTreeFilters(proj, tree), arr, undefined))
   }
 
-  val NonExistentSuffix: String = "_non_existent_field"
+  val NonExistentSuffix: String = "_pivot_undefined"
 
   final case class Config(uniqueKey: String, undefined: Expr, mapper: Mapper)
 

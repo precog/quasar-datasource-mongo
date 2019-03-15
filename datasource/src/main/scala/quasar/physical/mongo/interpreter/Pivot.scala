@@ -63,17 +63,20 @@ object Pivot {
             indexString)
         case IdStatus.ExcludeId =>
           unwindString
-        case IdStatus.IncludeId => O.array(List(
+        case IdStatus.IncludeId =>
           O.$cond(
             O.$eq(List(unwindString, undefined)),
             undefined,
-            indexString),
-          unwindString))
+            O.array(List(indexString, unwindString)))
       }
       case ColumnType.Object => status match {
         case IdStatus.IdOnly => kString
         case IdStatus.ExcludeId => vString
-        case IdStatus.IncludeId => O.array(List(kString, vString))
+        case IdStatus.IncludeId =>
+          O.$cond(
+            O.$eq(List(vString, undefined)),
+            undefined,
+            O.array(List(kString, vString)))
       }
     }
   }

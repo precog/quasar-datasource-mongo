@@ -31,20 +31,31 @@ object Project {
 
   // We need to be sure that type of projectee is coherent with projector
   @scala.annotation.tailrec
-  def build(prj: Projection, input: Field, output: Field, res: Field, acc: List[Pipe]): List[Pipe] = prj.steps match {
+  def build(
+      key: String,
+      prj: Projection,
+      input: Field,
+      output: Field,
+      res: Field,
+      acc: List[Pipe])
+      : List[Pipe] = prj.steps match {
+
     case List() =>
-      acc :+ Pipeline.$project(Map(
-        res.keyPart -> O.steps(List(input))))
+      acc ++ List(
+        Pipeline.$project(Map(res.keyPart -> O.steps(List(input)))),
+        Pipeline.PivotFilter(key))
     case hd :: tail =>
-      val insertType: Pipe = Pipeline.$project(Map(
-        input.keyPart -> O.string("$" concat input.keyPart),
-        "type" -> O.$type(O.steps(List(input)))))
-      val filters: Pipe = Pipeline.$match(O.obj(Map(
-        "type" -> stepType(hd),
-        Projection(List(input, hd)).toKey -> O.$exists(O.bool(true)))))
-      val out: Pipe = Pipeline.$project(Map(
-        output.keyPart -> O.steps(List(input, hd))))
-      build(Projection(tail), output, input, res, acc ++ List(insertType, filters, out))
+      val value =
+        O.$cond(
+          O.$or(List(
+            O.$not(O.$eq(List(O.$type(O.steps(List(input))), stepType(hd)))),
+            O.$eq(List(O.$type(O.steps(List(input, hd))), O.string("missing"))))),
+          pivotUndefined(key),
+          O.steps(List(input, hd)))
+      val project: Pipe =
+        Pipeline.$project(Map(output.keyPart -> value))
+      val filters: Pipe = Pipeline.PivotFilter(key)
+      build(key, Projection(tail), output, input, res, acc ++ List(project, filters))
   }
 
   def apply[F[_]: MonadInState](prj: Projection): F[List[Pipe]] =
@@ -53,6 +64,6 @@ object Project {
       val tmpKey1 = state.uniqueKey concat "_project1"
       val fld = Mapper.projection(state.mapper)(prj)
       val initialProjection = Pipeline.$project(Map(tmpKey0 -> O.steps(List())))
-      initialProjection :: build(fld, Field(tmpKey0), Field(tmpKey1), Field(state.uniqueKey), List())
+      initialProjection :: build(state.uniqueKey, fld, Field(tmpKey0), Field(tmpKey1), Field(state.uniqueKey), List())
     } flatMap { a => focus[F] as a }
 }

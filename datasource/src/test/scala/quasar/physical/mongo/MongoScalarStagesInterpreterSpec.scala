@@ -139,7 +139,53 @@ class MongoScalarStagesInterpreterSpec
 
       val actual = interpret(stages, input, (x => x))
       actual must bestSemanticEqual(expected)
+    }
+    "realGiraffe" >> {
+      val input = ldjson("""
+        {"b2fe01ea-a7e0-452c-95e6-7047a62ecc71":{"S":{"to":["ethan@example.com"],"rId":"2fe76790"},"dateTime":1518610539149.4202, "testField":"A"}, "X": "P"}
+        {"f5fb62c9-564d-4c3f-b0a5-a804a3cc4d25":{"S":{"to":["jacques@example.com"],"rId":"8e820358"},"dateTime":1518610554083.7378, "testField":"B"}, "X": "Q"}
+        {"d153fccb-1707-42e3-ba90-03c473687964":{"S":{"to":["deshawn@example.com"],"rId":"28642fbe"},"dateTime":1518610722075.8232, "testField":"C"}, "X": "R"}
+        {"b5207e48-10b4-4a42-8e6e-9a4551a88249":{"MAS":{"sId":"661929ef","rId":"08a42ad4"},"dateTime":1518610493869.1462, "testField":"D"}, "X": "S"}
+        {"cfc2c0d5-b81e-4f3c-9bf4-d6d06e4ba82f":{"MAS":{"sId":"c12c935b","rId":"0b609f84"},"dateTime":1518610653487.1868, "testField":"E"}, "X": "T"}
+        {"shifted": false}
+        {"shifted": {"shifted": true}}
+        {}
+        []
+        [3, 5, 7, 11]
+        123.456""")
 
+      val expected = ldjson("""
+        {"key":"X","x":"P"}
+        {"testField":"A","key":"b2fe01ea-a7e0-452c-95e6-7047a62ecc71","x":"P"}
+        {"key":"X","x":"Q"}
+        {"testField":"B","key":"f5fb62c9-564d-4c3f-b0a5-a804a3cc4d25","x":"Q"}
+        {"key":"X","x":"R"}
+        {"testField":"C","key":"d153fccb-1707-42e3-ba90-03c473687964","x":"R"}
+        {"key":"X","x":"S"}
+        {"testField":"D","key":"b5207e48-10b4-4a42-8e6e-9a4551a88249","x":"S"}
+        {"key":"X","x":"T"}
+        {"testField":"E","key":"cfc2c0d5-b81e-4f3c-9bf4-d6d06e4ba82f","x":"T"}
+        {"key":"shifted"}
+        {"key":"shifted"}""")
+
+      val stages = ScalarStages(IdStatus.ExcludeId, List(
+        RootProjection,
+        Wrap("cartesian"),
+        Cartesian(Map(
+          (CPathField("cartouche1"), (CPathField("cartesian"), List(Project(CPath.parse("X"))))),
+          (CPathField("cartouche0"), (CPathField("cartesian"), List(
+            Mask(Map(CPath.Identity -> Set(ColumnType.Object))),
+            Pivot(IdStatus.IncludeId, ColumnType.Object),
+            Mask(Map(
+              (CPath.parse("[1].testField"), ColumnType.Top),
+              (CPath.parse("[0]"), ColumnType.Top)))))))),
+        Cartesian(Map(
+          (CPathField("key"), (CPathField("cartouche0"), List(Project(CPath.parse("[0]"))))),
+          (CPathField("testField"), (CPathField("cartouche0"), List(Project(CPath.parse("[1].testField"))))),
+          (CPathField("x"), (CPathField("cartouche1"), List()))))))
+
+      val actual = interpret(stages, input, rootWrapper)
+      actual must bestSemanticEqual(expected)
     }
   }
 
