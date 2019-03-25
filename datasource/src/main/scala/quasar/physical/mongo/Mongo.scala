@@ -162,7 +162,10 @@ class Mongo[F[_]: MonadResourceErr : ConcurrentEffect] private[mongo](
     withCollectionExists(collection, getCollection(collection).find[BsonValue]())
 
   def aggregate(collection: Collection, aggs: List[BsonDocument]): F[Stream[F, BsonValue]] =
-    withCollectionExists(collection, getCollection(collection).aggregate[BsonValue](aggs))
+    withCollectionExists(
+      collection,
+      getCollection(collection).aggregate[BsonValue](aggs)
+        .allowDiskUse(true))
 
   def evaluate(
       collection: Collection,
