@@ -20,6 +20,8 @@ import slamdata.Predef._
 
 import cats.effect.{Async, ConcurrentEffect, IO, Sync}
 import cats.effect.concurrent.MVar
+import cats.kernel.instances.int._
+import cats.kernel.instances.string._
 import cats.syntax.eq._
 import cats.syntax.flatMap._
 import cats.syntax.functor._
@@ -180,10 +182,17 @@ class Mongo[F[_]: MonadResourceErr : ConcurrentEffect] private[mongo](
       if (result._1.docs.isEmpty) fallback
       else {
         val aggregated = aggregate(collection, result._1.docs)
-        val newStages = ScalarStages(IdStatus.ExcludeId, result._1.stages)
-        val parsed = aggregated map (x => (newStages, x map Mapper.bson(result._2)))
-        // versioning last stand
-        F.handleErrorWith(parsed)(_ => fallback)
+        // F.attempt catches both .aggregate error (e.g. version is too low)
+        // and the stream head error (e.g. we use atlas and its limitations are violated)
+        val hd: F[Either[Throwable, Option[BsonValue]]] =
+          F.attempt(aggregated flatMap (_.head.compile.last))
+        hd flatMap {
+          case Right(bson) =>
+            val newStages = ScalarStages(IdStatus.ExcludeId, result._1.stages)
+            aggregated map (x => (newStages, x map Mapper.bson(result._2)))
+          case Left(_) =>
+            fallback
+        }
       }
     }
   }
