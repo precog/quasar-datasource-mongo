@@ -20,8 +20,6 @@ import slamdata.Predef._
 
 import cats.effect.{Async, ConcurrentEffect, IO, Sync}
 import cats.effect.concurrent.MVar
-import cats.kernel.instances.int._
-import cats.kernel.instances.string._
 import cats.syntax.eq._
 import cats.syntax.flatMap._
 import cats.syntax.functor._
