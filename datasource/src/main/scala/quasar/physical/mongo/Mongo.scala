@@ -167,29 +167,41 @@ class Mongo[F[_]: MonadResourceErr : ConcurrentEffect] private[mongo](
       getCollection(collection).aggregate[BsonValue](aggs)
         .allowDiskUse(true))
 
+  def evaluateImpl(
+      collection: Collection,
+      aggs: List[BsonDocument],
+      fallback: F[Stream[F, BsonValue]])
+      : F[(Boolean, Stream[F, BsonValue])] = {
+    val aggregated =
+      aggregate(collection, aggs)
+    val hd: F[Either[Throwable, Option[BsonValue]]] =
+      F.attempt(aggregated flatMap (_.head.compile.last))
+    hd flatMap {
+      case Right(_) =>
+        aggregated map ((true, _))
+      case Left(_) =>
+        fallback map ((false, _))
+    }
+  }
+
   def evaluate(
       collection: Collection,
       stages: ScalarStages)
       : F[(ScalarStages, Stream[F, BsonValue])] = {
 
     val fallback: F[(ScalarStages, Stream[F, BsonValue])] = findAll(collection) map (x => (stages, x))
-
     if (ScalarStages.Id === stages || pushdownLevel === PushdownLevel.Disabled) fallback
     else {
       val result = interpreter.interpret(stages)
       if (result._1.docs.isEmpty) fallback
       else {
-        val aggregated = aggregate(collection, result._1.docs)
-        // F.attempt catches both .aggregate error (e.g. version is too low)
-        // and the stream head error (e.g. we use atlas and its limitations are violated)
-        val hd: F[Either[Throwable, Option[BsonValue]]] =
-          F.attempt(aggregated flatMap (_.head.compile.last))
-        hd flatMap {
-          case Right(bson) =>
-            val newStages = ScalarStages(IdStatus.ExcludeId, result._1.stages)
-            aggregated map (x => (newStages, x map Mapper.bson(result._2)))
-          case Left(_) =>
-            fallback
+        evaluateImpl(collection, result._1.docs, fallback map (_._2)) map {
+          case (isOk, stream) =>
+            val newStages = if (isOk) stages else {
+              ScalarStages(IdStatus.ExcludeId, result._1.stages)
+            }
+            val newStream = if (isOk) { stream map Mapper.bson(result._2) } else stream
+            (newStages, newStream)
         }
       }
     }
