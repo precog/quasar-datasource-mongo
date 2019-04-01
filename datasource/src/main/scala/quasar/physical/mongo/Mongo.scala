@@ -194,15 +194,13 @@ class Mongo[F[_]: MonadResourceErr : ConcurrentEffect] private[mongo](
     else {
       val result = interpreter.interpret(stages)
       if (result._1.docs.isEmpty) fallback
-      else {
-        evaluateImpl(collection, result._1.docs, fallback map (_._2)) map {
-          case (isOk, stream) =>
-            val newStages = if (isOk) stages else {
-              ScalarStages(IdStatus.ExcludeId, result._1.stages)
-            }
-            val newStream = if (isOk) { stream map Mapper.bson(result._2) } else stream
-            (newStages, newStream)
-        }
+      else evaluateImpl(collection, result._1.docs, fallback map (_._2)) map {
+        case (isOk, stream) =>
+          val newStages = if (!isOk) stages else {
+            ScalarStages(IdStatus.ExcludeId, result._1.stages)
+          }
+          val newStream = if (isOk) { stream map Mapper.bson(result._2) } else stream
+          (newStages, newStream)
       }
     }
   }
