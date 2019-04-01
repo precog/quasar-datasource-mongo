@@ -31,6 +31,7 @@ class MongoScalarStagesInterpreterSpec
     with Spec.PivotSpec
     with Spec.FocusedSpec
     with Spec.CartesianSpec
+    with Spec.FullSpec
     with StageInterpreterSpec {
   val wrapPendingExamples: Set[Int] = Set()
   val projectPendingExamples: Set[Int] = Set()
@@ -38,6 +39,7 @@ class MongoScalarStagesInterpreterSpec
   val pivotPendingExamples: Set[Int] = Set()
   val focusedPendingExamples: Set[Int] = Set()
   val cartesianPendingExamples: Set[Int] = Set()
+  val fullPendingExamples: Set[Int] = Set()
 
   "Id statuses" >> {
     val input = ldjson("""
@@ -215,4 +217,7 @@ class MongoScalarStagesInterpreterSpec
 
   def evalCartesian(cartesian: Cartesian, stream: JsonStream): JsonStream =
     evalOneStage(cartesian, stream)
+
+  def evalFull(stages: ScalarStages, stream: JsonStream): JsonStream =
+    interpret(stages, stream, (x => x))
 }

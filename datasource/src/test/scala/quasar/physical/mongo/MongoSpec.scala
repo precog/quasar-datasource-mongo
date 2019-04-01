@@ -132,6 +132,21 @@ class MongoSpec extends EffectfulQSpec[IO] {
     })
   )
 
+  "evaluteImpl works falls back if there is an exception" >> Fragment.foreach(MongoSpec.correctCollections)(col =>
+    s"checking ${col.database.name} :: ${col.name}" >>* mkMongo.flatMap(_ { mongo =>
+      mongo.evaluateImpl(col, incorrectPipeline, mongo.findAll(col)).flatMap { case (_, stream) =>
+        stream
+          .fold(List[BsonValue]())((lst, col) => col :: lst)
+          .map(bsons => bsons match {
+            case (bson: BsonDocument) :: List() => AsResult(bson.getString(col.name).getValue() === col.database.name)
+            case _ => AsResult(false)
+          })
+          .compile
+          .lastOrError
+      }
+    })
+  )
+
   "findAll raises path not found for nonexistent collections" >> Fragment.foreach(MongoSpec.incorrectCollections)(col =>
     s"checking ${col.database.name} :: ${col.name}" >>* mkMongo.flatMap(_ { mongo =>
       IO.delay(mongo.findAll(col).attempt.unsafeRunSync() must beLike {
@@ -206,6 +221,8 @@ object MongoSpec {
 
   def incorrectDbs: List[Database] =
     nonexistentDbs.map(Database(_))
+
+  val incorrectPipeline: List[BsonDocument] = List(new BsonDocument("$incorrect", new BsonInt32(0)))
 
   def setupDB(): Unit = {
     val ioSetup = for {
