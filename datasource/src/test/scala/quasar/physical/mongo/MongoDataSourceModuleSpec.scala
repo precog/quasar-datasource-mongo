@@ -32,18 +32,18 @@ import shims._
 
 class MongoDataSourceModuleSpec extends EffectfulQSpec[IO] {
   "Using incorrect config leads to Left invalid configuration" >>* {
-    val config = Json.obj("foo" -> Json.jString("bar"))
+    val config = Json.obj("foo" -> Json.jString("bar"), "batchSize" -> Json.jNumber(64), "pushdownLevel" -> Json.jString("full"))
     MongoDataSourceModule.lightweightDatasource[IO](config).map (_.asCats must_===
       Left(DatasourceError.InvalidConfiguration(MongoDataSource.kind, config, NonEmptyList("Attempt to decode value on failed cursor."))))
   }
 
   "Using correct config produces Right Disposable" >>* {
-    val config = MongoConfig(MongoSpec.connectionString, None, None).asJson
+    val config = MongoConfig(MongoSpec.connectionString, 12, PushdownLevel.Full).asJson
     MongoDataSourceModule.lightweightDatasource[IO](config).map (_.asCats must beRight)
   }
 
   "Using unreachable config produces Left invalid configuration" >>* {
-    val config = MongoConfig("mongodb://unreachable/?serverSelectionTimeoutMS=1000", None, None).asJson
+    val config = MongoConfig("mongodb://unreachable/?serverSelectionTimeoutMS=1000", 1, PushdownLevel.Disabled).asJson
     MongoDataSourceModule.lightweightDatasource[IO](config).map (_.asCats must beLike {
       case Left(DatasourceError.ConnectionFailed(MongoDataSource.kind, cfg, _)) =>
         cfg must_=== config

@@ -46,11 +46,11 @@ class MongoSpec extends EffectfulQSpec[IO] {
 
   "can't create client from incorrect connection string" >> {
     "for incorrect protocol" >> {
-      Mongo[IO](MongoConfig("http://localhost", Some(128), None)).unsafeRunSync() must throwA[java.lang.IllegalArgumentException]
+      Mongo[IO](MongoConfig("http://localhost", 128, PushdownLevel.Disabled)).unsafeRunSync() must throwA[java.lang.IllegalArgumentException]
     }
 
     "for unreachable config" >> {
-      Mongo[IO](MongoConfig("mongodb://unreachable", Some(128), None)).unsafeRunSync() must throwA[MongoTimeoutException]
+      Mongo[IO](MongoConfig("mongodb://unreachable", 128, PushdownLevel.Disabled)).unsafeRunSync() must throwA[MongoTimeoutException]
     }
   }
 
@@ -176,28 +176,30 @@ object MongoSpec {
   // And, there we have collection .b
   val bbConnectionString: String = s"mongodb://bUser:bPassword@${host}:${port}/B.b"
 
+  val BatchSize: Int = 64
+
   def mkMongo: IO[Disposable[IO, Mongo[IO]]] =
-    Mongo[IO](MongoConfig(connectionString, None, Some(PushdownLevel.Full)))
+    Mongo[IO](MongoConfig(connectionString, BatchSize, PushdownLevel.Full))
 
   def mkAMongo: IO[Disposable[IO, Mongo[IO]]] =
-    Mongo[IO](MongoConfig(aConnectionString, None, None))
+    Mongo[IO](MongoConfig(aConnectionString, BatchSize, PushdownLevel.Full))
 
   def mkInvalidAMongo: IO[Disposable[IO, Mongo[IO]]] =
-    Mongo[IO](MongoConfig(invalidAConnectionString, None, None))
+    Mongo[IO](MongoConfig(invalidAConnectionString, BatchSize, PushdownLevel.Full))
 
   // create an invalid Mongo to test error scenarios, bypassing the ping check that's done in Mongo.apply
   def mkMongoInvalidPort: IO[Disposable[IO, Mongo[IO]]] =
     for {
-      client <- Mongo.mkClient[IO](MongoConfig(connectionStringInvalidPort, None, None))
+      client <- Mongo.mkClient[IO](MongoConfig(connectionStringInvalidPort, 64, PushdownLevel.Full))
       interpreter = new Interpreter(Version(0, 0, 0), "redundant", PushdownLevel.Full)
     } yield Disposable(
-      new Mongo[IO](client, Mongo.DefaultBsonBatch, PushdownLevel.Full, interpreter, None),
+      new Mongo[IO](client, BatchSize.toLong, PushdownLevel.Full, interpreter, None),
       Mongo.close[IO](client))
 
   def mkBMongo: IO[Disposable[IO, Mongo[IO]]] =
-    Mongo[IO](MongoConfig(bConnectionString, None, None))
+    Mongo[IO](MongoConfig(bConnectionString, BatchSize, PushdownLevel.Full))
   def mkBBMongo: IO[Disposable[IO, Mongo[IO]]] =
-    Mongo[IO](MongoConfig(bbConnectionString, None, None))
+    Mongo[IO](MongoConfig(bbConnectionString, BatchSize, PushdownLevel.Full))
 
 
   def incorrectCollections: List[Collection] = {
