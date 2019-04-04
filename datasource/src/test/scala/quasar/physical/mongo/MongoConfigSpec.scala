@@ -118,10 +118,8 @@ class MongoConfigSpec extends Specification with ScalaCheck {
     }
   }
 
-  "json codec" >> {
-    "lawful" >> prop { params: (String, Int)  =>
-      val cfg = MongoConfig(params._1, params._2, PushdownLevel.Disabled)
-      cfg.asJson.as[MongoConfig].toEither === Right(cfg)
-    }
+  "json encode/decode roundtrip is ok" >> prop { params: (String, Int)  =>
+    val cfg = MongoConfig(params._1, params._2, PushdownLevel.Disabled)
+    cfg.asJson.as[MongoConfig].toEither === Right(cfg)
   }
 }
