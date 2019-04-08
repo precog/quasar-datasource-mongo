@@ -26,21 +26,39 @@ import org.specs2.mutable.Specification
 import quasar.physical.mongo.MongoResource.{Database, Collection}
 
 class MongoConfigSpec extends Specification with ScalaCheck {
+  "legacy" >> {
+    "no pushdown" >> {
+      val expected = MongoConfig("mongodb://localhost", 64, PushdownLevel.Disabled)
+      Json.obj(
+        "connectionString" -> jString("mongodb://localhost"),
+        "resultBatchSizeBytes" -> jNumber(128))
+        .as[MongoConfig].toEither === Right(expected)
+    }
+  }
+
   "works for mongodb protocol" >> {
-    Json.obj("connectionString" -> jString("mongodb://localhost"))
-      .as[MongoConfig].toEither === Right(MongoConfig("mongodb://localhost", None, None))
-    Json.obj("connectionString" -> jString("mongodb://user:password@anyhost:2980/database?a=b&c=d"))
-      .as[MongoConfig].toEither === Right(MongoConfig("mongodb://user:password@anyhost:2980/database?a=b&c=d", None, None))
+    val expected1 = MongoConfig("mongodb://localhost", 64, PushdownLevel.Light)
+    val expected2 = MongoConfig("mongodb://user:password@anyhost:2980/database?a=b&c=d", 0, PushdownLevel.Full)
+    Json.obj(
+      "connectionString" -> jString("mongodb://localhost"),
+      "batchSize" -> jNumber(64),
+      "pushdownLevel" -> jString("light"))
+      .as[MongoConfig].toEither === Right(expected1)
+    Json.obj(
+      "connectionString" -> jString("mongodb://user:password@anyhost:2980/database?a=b&c=d"),
+      "batchSize" -> jNumber(0),
+      "pushdownLevel" -> jString("full"))
+      .as[MongoConfig].toEither === Right(expected2)
   }
 
   "sanitized config hides credentials" >> {
     val input = Json.obj(
       "connectionString" -> jString("mongodb://user:password@anyhost:2980/database"),
-      "resultBatchSizeBytes" -> jNumber(128),
+      "batchSize" -> jNumber(128),
       "pushdownLevel" -> jString("light"))
     val expected = Json.obj(
       "connectionString" -> jString("mongodb://<REDACTED>:<REDACTED>@anyhost:2980/database"),
-      "resultBatchSizeBytes" -> jNumber(128),
+      "batchSize" -> jNumber(128),
       "pushdownLevel" -> jString("light"))
 
     MongoConfig.sanitize(input) === expected
@@ -49,20 +67,20 @@ class MongoConfigSpec extends Specification with ScalaCheck {
   "sanitized config without credentials isn't changed" >> {
     val input = Json.obj(
       "connectionString" -> jString("mongodb://host:1234/db?foo=bar"),
-      "resultBatchSizeBytes" -> jNumber(234),
+      "batchSize" -> jNumber(234),
       "pushdownLevel" -> jString("full"))
     MongoConfig.sanitize(input) === input
   }
 
   "accessed resource" >> {
     "for default params is None" >> {
-      MongoConfig("mongodb://localhost", None, None).accessedResource === None
+      MongoConfig("mongodb://localhost", 16, PushdownLevel.Disabled).accessedResource === None
     }
     "for db provided is Some(Database(_))" >> {
-      MongoConfig("mongodb://localhost/db", None, None).accessedResource === Some(Database("db"))
+      MongoConfig("mongodb://localhost/db", 64, PushdownLevel.Light).accessedResource === Some(Database("db"))
     }
     "for collection provided is Some(Collection(_, _))" >> {
-      MongoConfig("mongodb://localhost/db.coll", None, None).accessedResource === Some(Collection(Database("db"), "coll"))
+      MongoConfig("mongodb://localhost/db.coll", 128, PushdownLevel.Full).accessedResource === Some(Collection(Database("db"), "coll"))
     }
   }
 
@@ -70,41 +88,38 @@ class MongoConfigSpec extends Specification with ScalaCheck {
     "full provided" >> {
       val input = Json.obj(
         "connectionString" -> jString("mongodb://user:password@anyhost:1234"),
-        "resultBatchSizeBytes" -> jNumber(128),
+        "batchSize" -> jNumber(128),
         "pushdownLevel" -> jString("full"))
       input.as[MongoConfig].toEither ===
-        Right(MongoConfig("mongodb://user:password@anyhost:1234", Some(128), Some(PushdownLevel.Full)))
+        Right(MongoConfig("mongodb://user:password@anyhost:1234", 128, PushdownLevel.Full))
     }
     "disabled provided" >> {
       val input = Json.obj(
         "connectionString" -> jString("mongodb://user:password@anyhost:1234"),
+        "batchSize" -> jNumber(12),
         "pushdownLevel" -> jString("disabled"))
       input.as[MongoConfig].toEither ===
-        Right(MongoConfig("mongodb://user:password@anyhost:1234", None, Some(PushdownLevel.Disabled)))
+        Right(MongoConfig("mongodb://user:password@anyhost:1234", 12, PushdownLevel.Disabled))
     }
     "light provided" >> {
       val input = Json.obj(
         "connectionString" -> jString("mongodb://user:password@anyhost:1234"),
+        "batchSize" -> jNumber(142),
         "pushdownLevel" -> jString("light"))
       input.as[MongoConfig].toEither ===
-        Right(MongoConfig("mongodb://user:password@anyhost:1234", None, Some(PushdownLevel.Light)))
+        Right(MongoConfig("mongodb://user:password@anyhost:1234", 142, PushdownLevel.Light))
     }
     "incorrect provided" >> {
       val input = Json.obj(
         "connectionString" -> jString("mongodb://user:password@anyhost:1234"),
+        "batchSize" -> jNumber(0),
         "pushdownLevel" -> jString("incorrect"))
       input.as[MongoConfig].toEither must beLeft
     }
-
-    "omitted" >> {
-      val input = Json.obj("connectionString" -> jString("mongodb://user:password@anyhost:1234"))
-      input.as[MongoConfig].toEither === Right(MongoConfig("mongodb://user:password@anyhost:1234", None, None))
-    }
   }
 
-  "json codec" >> {
-    "lawful" >> prop { params: (String, Option[Int])  =>
-      CodecJson.codecLaw(MongoConfig.codecMongoConfig)(MongoConfig(params._1, params._2, None))
-    }
+  "json encode/decode roundtrip is ok" >> prop { params: (String, Int)  =>
+    val cfg = MongoConfig(params._1, params._2, PushdownLevel.Disabled)
+    cfg.asJson.as[MongoConfig].toEither === Right(cfg)
   }
 }

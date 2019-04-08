@@ -26,25 +26,41 @@ import quasar.physical.mongo.MongoResource.{Database, Collection}
 
 final case class MongoConfig(
     connectionString: String,
-    resultBatchSizeBytes: Option[Int],
-    pushdownLevel: Option[PushdownLevel]) {
+    batchSize: Int,
+    pushdownLevel: PushdownLevel) {
+
   def accessedResource: Option[MongoResource] = {
     val connString = new ConnectionString(connectionString)
     val dbStr = Option(connString.getDatabase())
     val collStr = Option(connString.getCollection())
-    dbStr.map(Database(_)).flatMap((db: Database) => collStr match {
+    dbStr map(Database(_)) flatMap { (db: Database) => collStr match {
       case None => Some(db)
       case Some(cn) => Some(Collection(db, cn))
-    })
+    }}
   }
 }
 
 object MongoConfig {
-  implicit val codecMongoConfig: CodecJson[MongoConfig] =
-    casecodec3(MongoConfig.apply, MongoConfig.unapply)(
-      "connectionString",
-      "resultBatchSizeBytes",
-      "pushdownLevel")
+  val Migration1to2BatchSize: Int = 64
+  val Migration1to2PushdownLevel: PushdownLevel = PushdownLevel.Disabled
+
+  implicit val encodeJsonMongoConfig: EncodeJson[MongoConfig] = EncodeJson { (config: MongoConfig) =>
+    Json(
+      "connectionString" := config.connectionString,
+      "batchSize" := config.batchSize,
+      "pushdownLevel" := config.pushdownLevel)
+  }
+
+  implicit val decodeJsonMongoConfig: DecodeJson[MongoConfig] = DecodeJson { c =>
+    for {
+      connectionString <- (c --\ "connectionString").as[String]
+      batchSize <- (c --\ "batchSize").as[Option[Int]]
+      pushdownLevel <- (c --\ "pushdownLevel").as[Option[PushdownLevel]]
+    } yield MongoConfig(
+      connectionString,
+      batchSize getOrElse Migration1to2BatchSize,
+      pushdownLevel getOrElse Migration1to2PushdownLevel)
+  }
 
   private val credentialsRegex = "://[^@+]+@".r
 

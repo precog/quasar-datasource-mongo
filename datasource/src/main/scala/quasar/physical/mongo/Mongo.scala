@@ -43,7 +43,7 @@ import shims._
 
 class Mongo[F[_]: MonadResourceErr : ConcurrentEffect] private[mongo](
     client: MongoClient,
-    maxMemory: Int,
+    batchSize: Long,
     pushdownLevel: PushdownLevel,
     val interpreter: Interpreter,
     val accessedResource: Option[MongoResource]) {
@@ -154,7 +154,7 @@ class Mongo[F[_]: MonadResourceErr : ConcurrentEffect] private[mongo](
 
   private def withCollectionExists[A](collection: Collection, obs: Observable[A]): F[Stream[F, A]] =
     collectionExists(collection).compile.last map(_ getOrElse false) flatMap { exists =>
-      if (exists) getQueueSize(collection) map { (qs: Long) => observableAsStream(obs, qs) }
+      if (exists) F.point(observableAsStream(obs, batchSize))
       else MonadResourceErr.raiseError(ResourceError.pathNotFound(collection.resourcePath))
     }
 
@@ -189,39 +189,20 @@ class Mongo[F[_]: MonadResourceErr : ConcurrentEffect] private[mongo](
       stages: ScalarStages)
       : F[(ScalarStages, Stream[F, BsonValue])] = {
 
-    val fallback: F[(ScalarStages, Stream[F, BsonValue])] = findAll(collection) map (x => (stages, x))
+    val fallback: F[(ScalarStages, Stream[F, BsonValue])] =
+      findAll(collection) map (x => (stages, x))
+
     if (ScalarStages.Id === stages || pushdownLevel === PushdownLevel.Disabled) fallback
     else {
       val result = interpreter.interpret(stages)
       if (result._1.docs.isEmpty) fallback
-      else evaluateImpl(collection, result._1.docs, fallback map (_._2)) map {
-        case (isOk, stream) =>
-          val newStages = if (!isOk) stages else {
-            ScalarStages(IdStatus.ExcludeId, result._1.stages)
-          }
-          val newStream = if (isOk) { stream map Mapper.bson(result._2) } else stream
-          (newStages, newStream)
+      else evaluateImpl(collection, result._1.docs, fallback map (_._2)) flatMap {
+        case (isOk, stream) if isOk =>
+          val newStream = stream map Mapper.bson(result._2)
+          val newStages = ScalarStages(IdStatus.ExcludeId, result._1.stages)
+          F.point((newStages, newStream))
+        case _ => fallback
       }
-    }
-  }
-
-  private val maximumBatchBytes: Long = if (maxMemory > MaxBsonBatch) MaxBsonBatch else maxMemory.toLong
-
-  def getQueueSize(collection: Collection): F[Long] = {
-    val getStats: F[Option[Document]] = F.attempt(F.suspend(singleObservableAsF[F, Document](
-      client.getDatabase(collection.database.name).runCommand[Document](Document(
-        "collStats" -> collection.name,
-        "scale" -> 1
-      ))
-    ))).map(_.toOption)
-
-    getStats map { doc =>
-      val optSize: Option[Long] = doc.flatMap (_.get("avgObjSize")) flatMap (_ match {
-        case x: BsonInt32 => Some(x.getValue().toLong)
-        case x: BsonInt64 => Some(x.getValue())
-        case _ => None
-      })
-      optSize.fold(DefaultQueueSize)(x => scala.math.max(1L, maximumBatchBytes / x))
     }
   }
 
@@ -231,8 +212,6 @@ class Mongo[F[_]: MonadResourceErr : ConcurrentEffect] private[mongo](
 }
 
 object Mongo {
-  val DefaultBsonBatch: Int = 1024 * 128
-  val MaxBsonBatch: Long = 128L * 1024L * 1024L
   val DefaultQueueSize: Long = 256L
 
   private def mkMsg(ex: MongoCommandException) = s"Mongo command error: ${ex.getErrorCodeName}"
@@ -311,16 +290,16 @@ object Mongo {
       buildInfo(client) map { x =>
         getVersionString(x) map (_.split("\\.")) flatMap mkVersion getOrElse Version.zero
       }
-    val pushdownLevel = config.pushdownLevel getOrElse PushdownLevel.Disabled
+
     for {
       client <- mkClient(config)
       version <- getVersion(client)
-      interpreter <- Interpreter(version, pushdownLevel)
+      interpreter <- Interpreter(version, config.pushdownLevel)
     } yield Disposable(
       new Mongo[F](
         client,
-        config.resultBatchSizeBytes.getOrElse(DefaultBsonBatch),
-        pushdownLevel,
+        scala.math.max(1L, config.batchSize.toLong),
+        config.pushdownLevel,
         interpreter,
         config.accessedResource),
       close(client))
