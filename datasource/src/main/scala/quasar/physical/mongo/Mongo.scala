@@ -18,7 +18,7 @@ package quasar.physical.mongo
 
 import slamdata.Predef._
 
-import cats.effect.{Async, ConcurrentEffect, IO, Sync}
+import cats.effect._
 import cats.effect.concurrent.MVar
 import cats.syntax.eq._
 import cats.syntax.flatMap._
@@ -237,14 +237,19 @@ object Mongo {
     }
   }
 
-  def singleObservableAsF[F[_]: Async, A](obs: SingleObservable[A]): F[A] =
-    Async[F].async { cb: (Either[Throwable, A] => Unit) =>
-      obs.subscribe(new Observer[A] {
-        override def onNext(r: A): Unit = cb(Right(r))
-        override def onError(e: Throwable): Unit = cb(Left(e))
-        override def onComplete() = ()
-      })
-    }
+  def singleObservableAsF[F[_]: Async: ContextShift, A](obs: SingleObservable[A]): F[A] =
+    for {
+      res <- Async[F].async { cb: (Either[Throwable, A] => Unit) =>
+        obs.subscribe(new Observer[A] {
+          override def onNext(r: A): Unit = cb(Right(r))
+
+          override def onError(e: Throwable): Unit = cb(Left(e))
+
+          override def onComplete() = ()
+        })
+      }
+      _ <- ContextShift[F].shift
+    } yield res
 
   def mkClient[F[_]](config: MongoConfig)(implicit F: Sync[F]): F[MongoClient] =
     for {
@@ -260,7 +265,7 @@ object Mongo {
   def close[F[_]](client: MongoClient)(implicit F: Sync[F]): F[Unit] =
     F.delay(client.close())
 
-  def apply[F[_]: ConcurrentEffect: MonadResourceErr](config: MongoConfig): F[Disposable[F, Mongo[F]]] = {
+  def apply[F[_]: ConcurrentEffect: ContextShift: MonadResourceErr](config: MongoConfig): F[Disposable[F, Mongo[F]]] = {
     val F = ConcurrentEffect[F]
 
     def buildInfo(client: MongoClient): F[Document] =
