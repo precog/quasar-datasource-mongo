@@ -45,6 +45,7 @@ import java.time.{
 import spire.math.Real
 
 import shims._
+import testImplicits._
 
 trait StageInterpreterSpec extends JsonSpec {
   import MongoSpec.mkMongo
