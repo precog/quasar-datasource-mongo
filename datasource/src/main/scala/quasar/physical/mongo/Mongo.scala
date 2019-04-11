@@ -20,6 +20,7 @@ import slamdata.Predef._
 
 import cats.effect._
 import cats.effect.concurrent.MVar
+import cats.effect.syntax.bracket._
 import cats.syntax.eq._
 import cats.syntax.flatMap._
 import cats.syntax.functor._
@@ -238,18 +239,15 @@ object Mongo {
   }
 
   def singleObservableAsF[F[_]: Async: ContextShift, A](obs: SingleObservable[A]): F[A] =
-    for {
-      res <- Async[F].async { cb: (Either[Throwable, A] => Unit) =>
-        obs.subscribe(new Observer[A] {
-          override def onNext(r: A): Unit = cb(Right(r))
+    Async[F].async { cb: (Either[Throwable, A] => Unit) =>
+      obs.subscribe(new Observer[A] {
+        override def onNext(r: A): Unit = cb(Right(r))
 
-          override def onError(e: Throwable): Unit = cb(Left(e))
+        override def onError(e: Throwable): Unit = cb(Left(e))
 
-          override def onComplete() = ()
-        })
-      }
-      _ <- ContextShift[F].shift
-    } yield res
+        override def onComplete() = ()
+      })
+    } guarantee ContextShift[F].shift
 
   def mkClient[F[_]](config: MongoConfig)(implicit F: Sync[F]): F[MongoClient] =
     for {
