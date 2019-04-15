@@ -48,8 +48,10 @@ jobs:
       - "$SBT transferPublishAndTagResources"
       - TRAVIS_JOB_NUMBER=1 scripts/publishAndTag 'slamdata/quasar-datasource-mongo'
       - bumpInDownstream() { echo $1 > slamdata-mongo-version; }
+      - bumpInDownstreamBench() { echo $1 > mongo-datasource-version; }
       - export -f bumpInDownstream
       - scripts/bumpDependentProject slamdata slamx bumpInDownstream
+      - scripts/bumpDependentProject slamdata benchmarks bumpInDownstream
     git:
       depth: false
 
