@@ -51,7 +51,7 @@ jobs:
       - bumpInDownstreamBench() { echo $1 > mongo-datasource-version; }
       - export -f bumpInDownstream
       - scripts/bumpDependentProject slamdata slamx bumpInDownstream
-      - scripts/bumpDependentProject slamdata benchmarks bumpInDownstream
+      - scripts/bumpDependentProject slamdata benchmarks bumpInDownstreamBench
     git:
       depth: false
 
