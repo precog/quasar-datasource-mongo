@@ -50,6 +50,7 @@ jobs:
       - bumpInDownstream() { echo $1 > slamdata-mongo-version; }
       - bumpInDownstreamBench() { echo $1 > mongo-datasource-version; }
       - export -f bumpInDownstream
+      - export -f bumpInDownstreamBench
       - scripts/bumpDependentProject slamdata slamx bumpInDownstream
       - scripts/bumpDependentProject slamdata benchmarks bumpInDownstreamBench
     git:
