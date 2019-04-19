@@ -72,7 +72,7 @@ class MongoDataSource[F[_]: ConcurrentEffect: ContextShift: MonadResourceErr: Ti
   }
 
   override def prefixedChildPaths(prefixPath: ResourcePath)
-    : F[Option[Stream[F, (ResourceName, ResourcePathType)]]] = prefixPath match {
+    : F[Option[Stream[F, (ResourceName, ResourcePathType.Physical)]]] = prefixPath match {
 
     case ResourcePath.Root =>
       mongo.databases.map(x => (ResourceName(x.name), ResourcePathType.prefix)).some.pure[F]
@@ -82,7 +82,7 @@ class MongoDataSource[F[_]: ConcurrentEffect: ContextShift: MonadResourceErr: Ti
 
       case Some(coll@Collection(_, _)) =>
         val exists: F[Boolean] = mongo.collectionExists(coll).compile.last.map(_ getOrElse false)
-        exists.ifM(Stream.empty.covary[F].covaryOutput[(ResourceName, ResourcePathType)].some.pure[F], none.pure[F])
+        exists.ifM(Stream.empty.covary[F].covaryOutput[(ResourceName, ResourcePathType.Physical)].some.pure[F], none.pure[F])
 
       case Some(db@Database(_)) =>
         val dbExists: F[Boolean] = mongo.databaseExists(db).compile.last.map(_.getOrElse(false))
