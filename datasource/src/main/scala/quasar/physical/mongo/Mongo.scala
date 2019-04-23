@@ -34,9 +34,11 @@ import quasar.connector.{MonadResourceErr, ResourceError}
 import quasar.physical.mongo.MongoResource.{Collection, Database}
 import quasar.physical.mongo.expression.Mapper
 import quasar.{Disposable, IdStatus, ScalarStages}
+import quasar.fp.ski._
 
 import org.bson.{Document => _, _}
-import com.mongodb.ConnectionString
+import com.mongodb.{Block, ConnectionString}
+import com.mongodb.connection.ClusterSettings
 import org.mongodb.scala._
 import org.mongodb.scala.connection.NettyStreamFactoryFactory
 
@@ -249,16 +251,24 @@ object Mongo {
       })
     } guarantee ContextShift[F].shift
 
-  def mkClient[F[_]](config: MongoConfig)(implicit F: Sync[F]): F[MongoClient] =
-    for {
-      connString <- F.delay(new ConnectionString(config.connectionString))
-      connStringSettings <- F.delay(MongoClientSettings.builder().applyConnectionString(connString).build())
-      settings <- F.delay(
-        if (connStringSettings.getSslSettings.isEnabled)
-          MongoClientSettings.builder(connStringSettings).streamFactoryFactory(NettyStreamFactoryFactory()).build()
-        else connStringSettings)
+  def mkClient[F[_]](config: MongoConfig)(implicit F: Sync[F]): F[Disposable[F, MongoClient]] =
+    Tunnel[F](config) flatMap { (disposable: Disposable[F, ClusterSettings]) => for {
+      conn <- F.delay { new ConnectionString(config.connectionString) }
+      rawSettings <- F.delay {
+        val updateCluster: Block[ClusterSettings.Builder] = new Block[ClusterSettings.Builder] {
+          def apply(t: ClusterSettings.Builder): Unit = {
+            val _ = t.applySettings(disposable.unsafeValue); ()
+          }
+        }
+        MongoClientSettings.builder.applyConnectionString(conn).applyToClusterSettings(updateCluster).build
+      }
+      settings <- F.delay {
+        if (rawSettings.getSslSettings.isEnabled)
+          MongoClientSettings.builder(rawSettings).streamFactoryFactory(NettyStreamFactoryFactory()).build
+        else rawSettings
+      }
       client <- F.delay(MongoClient(settings))
-    } yield client
+    } yield disposable flatMap (κ(Disposable(client, close(client)))) }
 
   def close[F[_]](client: MongoClient)(implicit F: Sync[F]): F[Unit] =
     F.delay(client.close())
@@ -294,17 +304,13 @@ object Mongo {
         getVersionString(x) map (_.split("\\.")) flatMap mkVersion getOrElse Version.zero
       }
 
-    for {
-      client <- mkClient(config)
-      version <- getVersion(client)
-      interpreter <- Interpreter(version, config.pushdownLevel)
-    } yield Disposable(
-      new Mongo[F](
-        client,
-        scala.math.max(1L, config.batchSize.toLong),
-        config.pushdownLevel,
-        interpreter,
-        config.accessedResource),
-      close(client))
+    mkClient(config) flatMap { (disposable: Disposable[F, MongoClient]) => {
+      val client = disposable.unsafeValue
+      val mongoF = for {
+        version <- getVersion(client)
+        interpreter <- Interpreter(version, config.pushdownLevel)
+      } yield new Mongo[F](client, scala.math.max(1L, config.batchSize.toLong), config.pushdownLevel, interpreter, config.accessedResource)
+      mongoF map { (m: Mongo[F]) => disposable map (κ(m)) }
+    }}
   }
 }

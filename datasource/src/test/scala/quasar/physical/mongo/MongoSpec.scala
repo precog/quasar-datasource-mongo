@@ -46,11 +46,11 @@ class MongoSpec extends EffectfulQSpec[IO] {
 
   "can't create client from incorrect connection string" >> {
     "for incorrect protocol" >> {
-      Mongo[IO](MongoConfig("http://localhost", 128, PushdownLevel.Disabled)).unsafeRunSync() must throwA[java.lang.IllegalArgumentException]
+      Mongo[IO](MongoConfig("http://localhost", 128, PushdownLevel.Disabled, None)).unsafeRunSync() must throwA[java.lang.IllegalArgumentException]
     }
 
     "for unreachable config" >> {
-      Mongo[IO](MongoConfig("mongodb://unreachable", 128, PushdownLevel.Disabled)).unsafeRunSync() must throwA[MongoTimeoutException]
+      Mongo[IO](MongoConfig("mongodb://unreachable", 128, PushdownLevel.Disabled, None)).unsafeRunSync() must throwA[MongoTimeoutException]
     }
   }
 
@@ -179,27 +179,29 @@ object MongoSpec {
   val BatchSize: Int = 64
 
   def mkMongo: IO[Disposable[IO, Mongo[IO]]] =
-    Mongo[IO](MongoConfig(connectionString, BatchSize, PushdownLevel.Full))
+    Mongo[IO](MongoConfig(connectionString, BatchSize, PushdownLevel.Full, None))
 
   def mkAMongo: IO[Disposable[IO, Mongo[IO]]] =
-    Mongo[IO](MongoConfig(aConnectionString, BatchSize, PushdownLevel.Full))
+    Mongo[IO](MongoConfig(aConnectionString, BatchSize, PushdownLevel.Full, None))
 
   def mkInvalidAMongo: IO[Disposable[IO, Mongo[IO]]] =
-    Mongo[IO](MongoConfig(invalidAConnectionString, BatchSize, PushdownLevel.Full))
+    Mongo[IO](MongoConfig(invalidAConnectionString, BatchSize, PushdownLevel.Full, None))
 
   // create an invalid Mongo to test error scenarios, bypassing the ping check that's done in Mongo.apply
   def mkMongoInvalidPort: IO[Disposable[IO, Mongo[IO]]] =
     for {
-      client <- Mongo.mkClient[IO](MongoConfig(connectionStringInvalidPort, 64, PushdownLevel.Full))
+      clientDisposable <- Mongo.mkClient[IO](MongoConfig(connectionStringInvalidPort, 64, PushdownLevel.Full, None))
       interpreter = new Interpreter(Version(0, 0, 0), "redundant", PushdownLevel.Full)
-    } yield Disposable(
-      new Mongo[IO](client, BatchSize.toLong, PushdownLevel.Full, interpreter, None),
-      Mongo.close[IO](client))
+    } yield clientDisposable flatMap { (c: MongoClient) =>
+      val mongo = new Mongo[IO](c, BatchSize.toLong, PushdownLevel.Full, interpreter, None)
+      Disposable(mongo, IO.unit)
+    }
+
 
   def mkBMongo: IO[Disposable[IO, Mongo[IO]]] =
-    Mongo[IO](MongoConfig(bConnectionString, BatchSize, PushdownLevel.Full))
+    Mongo[IO](MongoConfig(bConnectionString, BatchSize, PushdownLevel.Full, None))
   def mkBBMongo: IO[Disposable[IO, Mongo[IO]]] =
-    Mongo[IO](MongoConfig(bbConnectionString, BatchSize, PushdownLevel.Full))
+    Mongo[IO](MongoConfig(bbConnectionString, BatchSize, PushdownLevel.Full, None))
 
 
   def incorrectCollections: List[Collection] = {
