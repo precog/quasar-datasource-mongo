@@ -38,8 +38,17 @@ install:
 jobs:
   include:
   - stage: test
+    sudo: required
     script:
+      # plain machine with mongodb on 27018 port
       - docker run -d -p 127.0.0.1:27018:27017 --name mongodb -e MONGODB_ROOT_PASSWORD=secret bitnami/mongodb:4.1.4
+      # sshd can look at 27017 using `mng` host name, used to create tunnel like
+      # ssh -f -N -L 33333:mng:27017 root@localhost -p 22222
+      - docker-compose up -d
+      - sudo apt-get update
+      - sudo apt-get install sshpass
+      - ssh-keygen -t rsa -N "" -f ~/.ssh/for_docker
+      - sshpass -p root ssh-copy-id -i ~/.ssh/for_docker root@localhost -p 22222
       - set -e
       - "$SBT ++$TRAVIS_SCALA_VERSION test"
   - stage: publish
