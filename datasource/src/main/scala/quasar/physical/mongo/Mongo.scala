@@ -44,7 +44,7 @@ import org.mongodb.scala.connection.NettyStreamFactoryFactory
 
 import shims._
 
-class Mongo[F[_]: MonadResourceErr : ConcurrentEffect] private[mongo](
+class Mongo[F[_]: MonadResourceErr : ConcurrentEffect : ContextShift] private[mongo](
     client: MongoClient,
     batchSize: Long,
     pushdownLevel: PushdownLevel,
@@ -251,7 +251,7 @@ object Mongo {
       })
     } guarantee ContextShift[F].shift
 
-  def mkClient[F[_]](config: MongoConfig)(implicit F: Sync[F]): F[Disposable[F, MongoClient]] =
+  def mkClient[F[_]: ContextShift](config: MongoConfig)(implicit F: Sync[F]): F[Disposable[F, MongoClient]] =
     Tunnel[F](config) flatMap { (disposable: Disposable[F, ClusterSettings]) => for {
       conn <- F.delay { new ConnectionString(config.connectionString) }
       rawSettings <- F.delay {

@@ -154,10 +154,19 @@ class MongoSpec extends EffectfulQSpec[IO] {
       })
     })
   )
+
+  "tunnels" >> {
+    "via key identity" >>* keyTunneledMongo map (_ must not(throwA[Throwable]))
+    "via user/password pair" >>* passwordTunneledMongo map (_ must not(throwA[Throwable]))
+  }
 }
 
 object MongoSpec {
+  import java.nio.charset.StandardCharsets
+  import java.nio.file.{Files, Paths}
+
   import Mongo._
+  import TunnelConfig.Credentials._
 
   val dbs = List("A", "B", "C", "D")
   val cols = List("a", "b", "c", "d")
@@ -180,6 +189,31 @@ object MongoSpec {
 
   def mkMongo: IO[Disposable[IO, Mongo[IO]]] =
     Mongo[IO](MongoConfig(connectionString, BatchSize, PushdownLevel.Full, None))
+
+  def privateKey: IO[String] = IO.delay {
+    val path = Paths.get("key_for_docker")
+    new String(Files.readAllBytes(path), StandardCharsets.UTF_8)
+  }
+
+
+  def keyTunneledMongo: IO[Disposable[IO, Mongo[IO]]] =
+    Mongo[IO](MongoConfig(
+      "mongodb://root:secret@localhost:27017",
+      BatchSize,
+      PushdownLevel.Full,
+      Some(TunnelConfig("localhost", 22222,
+        Some(LoginPassword("root", "root"))))))
+
+  def passwordTunneledMongo: IO[Disposable[IO, Mongo[IO]]] = privateKey flatMap { key =>
+    Mongo[IO](MongoConfig(
+      "mongodb://root:secret@localhost:27017",
+      BatchSize,
+      PushdownLevel.Full,
+      Some(TunnelConfig("localhost", 22222,
+        Some(Identity(key, Some("passphrase")))))))
+  }
+
+
 
   def mkAMongo: IO[Disposable[IO, Mongo[IO]]] =
     Mongo[IO](MongoConfig(aConnectionString, BatchSize, PushdownLevel.Full, None))
