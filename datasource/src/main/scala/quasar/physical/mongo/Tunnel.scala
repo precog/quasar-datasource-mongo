@@ -133,5 +133,5 @@ object Tunnel {
     address <- serverAddress(settings)
     tunnel <- ContextShift[F].evalOn(blockingPool.unwrap)(openTunnel(sess, address))
     result <- tunneledSettings(settings, tunnel)
-  } yield Disposable(result, closeTunnel(sess, tunnel))
+  } yield Disposable(result, ContextShift[F].evalOn(blockingPool.unwrap)(closeTunnel(sess, tunnel)))
 }
