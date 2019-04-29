@@ -23,6 +23,7 @@ import cats.instances.list._
 import cats.syntax.apply._
 import cats.syntax.traverse._
 
+import quasar.concurrent.BlockingContext
 import quasar.connector.ResourceError
 import quasar.physical.mongo.MongoResource.{Collection, Database}
 import quasar.{Disposable, EffectfulQSpec}
@@ -46,11 +47,21 @@ class MongoSpec extends EffectfulQSpec[IO] {
 
   "can't create client from incorrect connection string" >> {
     "for incorrect protocol" >> {
-      Mongo[IO](MongoConfig("http://localhost", 128, PushdownLevel.Disabled, None)).unsafeRunSync() must throwA[java.lang.IllegalArgumentException]
+      Mongo[IO](MongoConfig(
+        "http://localhost",
+        128,
+        PushdownLevel.Disabled,
+        None),
+      BlockingContext.cached("not-used")).unsafeRunSync() must throwA[java.lang.IllegalArgumentException]
     }
 
     "for unreachable config" >> {
-      Mongo[IO](MongoConfig("mongodb://unreachable", 128, PushdownLevel.Disabled, None)).unsafeRunSync() must throwA[MongoTimeoutException]
+      Mongo[IO](MongoConfig(
+        "mongodb://unreachable",
+        128,
+        PushdownLevel.Disabled,
+        None),
+      BlockingContext.cached("not-used")).unsafeRunSync() must throwA[MongoTimeoutException]
     }
   }
 
@@ -167,6 +178,8 @@ object MongoSpec {
   import Mongo._
   import TunnelConfig.Pass._
 
+  private val blockingPool: BlockingContext = BlockingContext.cached("mongo-datasource")
+
   val dbs = List("A", "B", "C", "D")
   val cols = List("a", "b", "c", "d")
   val nonexistentDbs = List("Z", "Y")
@@ -187,7 +200,7 @@ object MongoSpec {
   val BatchSize: Int = 64
 
   def mkMongo: IO[Disposable[IO, Mongo[IO]]] =
-    Mongo[IO](MongoConfig(connectionString, BatchSize, PushdownLevel.Full, None))
+    Mongo[IO](MongoConfig(connectionString, BatchSize, PushdownLevel.Full, None), blockingPool)
 
   def privateKey: IO[String] = IO.delay {
     val path = Paths.get("key_for_docker")
@@ -207,7 +220,8 @@ object MongoSpec {
       BatchSize,
       PushdownLevel.Full,
       Some(TunnelConfig(TunnelHost, TunnelPort, TunnelUser,
-        Some(Password(TunnelPassword))))))
+        Some(Password(TunnelPassword))))),
+      blockingPool)
 
   def keyTunneledMongo: IO[Disposable[IO, Mongo[IO]]] = privateKey flatMap { key =>
     Mongo[IO](MongoConfig(
@@ -215,19 +229,20 @@ object MongoSpec {
       BatchSize,
       PushdownLevel.Full,
       Some(TunnelConfig(TunnelHost, TunnelPort, TunnelUser,
-        Some(Identity(key, TunnelPassphrase))))))
+        Some(Identity(key, TunnelPassphrase))))),
+      blockingPool)
   }
 
   def mkAMongo: IO[Disposable[IO, Mongo[IO]]] =
-    Mongo[IO](MongoConfig(aConnectionString, BatchSize, PushdownLevel.Full, None))
+    Mongo[IO](MongoConfig(aConnectionString, BatchSize, PushdownLevel.Full, None), blockingPool)
 
   def mkInvalidAMongo: IO[Disposable[IO, Mongo[IO]]] =
-    Mongo[IO](MongoConfig(invalidAConnectionString, BatchSize, PushdownLevel.Full, None))
+    Mongo[IO](MongoConfig(invalidAConnectionString, BatchSize, PushdownLevel.Full, None), blockingPool)
 
   // create an invalid Mongo to test error scenarios, bypassing the ping check that's done in Mongo.apply
   def mkMongoInvalidPort: IO[Disposable[IO, Mongo[IO]]] =
     for {
-      clientDisposable <- Mongo.mkClient[IO](MongoConfig(connectionStringInvalidPort, 64, PushdownLevel.Full, None))
+      clientDisposable <- Mongo.mkClient[IO](MongoConfig(connectionStringInvalidPort, 64, PushdownLevel.Full, None), blockingPool)
       interpreter = new Interpreter(Version(0, 0, 0), "redundant", PushdownLevel.Full)
     } yield clientDisposable flatMap { (c: MongoClient) =>
       val mongo = new Mongo[IO](c, BatchSize.toLong, PushdownLevel.Full, interpreter, None)
@@ -235,9 +250,9 @@ object MongoSpec {
     }
 
   def mkBMongo: IO[Disposable[IO, Mongo[IO]]] =
-    Mongo[IO](MongoConfig(bConnectionString, BatchSize, PushdownLevel.Full, None))
+    Mongo[IO](MongoConfig(bConnectionString, BatchSize, PushdownLevel.Full, None), blockingPool)
   def mkBBMongo: IO[Disposable[IO, Mongo[IO]]] =
-    Mongo[IO](MongoConfig(bbConnectionString, BatchSize, PushdownLevel.Full, None))
+    Mongo[IO](MongoConfig(bbConnectionString, BatchSize, PushdownLevel.Full, None), blockingPool)
 
 
   def incorrectCollections: List[Collection] = {

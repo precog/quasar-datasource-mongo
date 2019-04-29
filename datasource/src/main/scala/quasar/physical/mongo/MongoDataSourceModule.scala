@@ -25,6 +25,7 @@ import cats.syntax.applicativeError._
 import cats.syntax.functor._
 
 import quasar.api.datasource.{DatasourceError, DatasourceType}, DatasourceError.InitializationError
+import quasar.concurrent.BlockingContext
 import quasar.connector.{LightweightDatasourceModule, MonadResourceErr}
 import quasar.physical.mongo.Mongo.{MongoAccessDenied, MongoConnectionFailed}
 import quasar.Disposable
@@ -38,6 +39,8 @@ object MongoDataSourceModule extends LightweightDatasourceModule {
   type Result[F[_]] = Disposable[F, DS[F]]
   type Error = InitializationError[Json]
   type ErrorOrResult[F[_]] = Error \/ Result[F]
+
+  private val blockingPool: BlockingContext = BlockingContext.cached("mongo-datasource")
 
   private def mkInvalidCfgError[F[_]](config: Json, msg: String): ErrorOrResult[F] =
     DatasourceError
@@ -62,7 +65,7 @@ object MongoDataSourceModule extends LightweightDatasourceModule {
       case Left((msg, _)) =>
         mkInvalidCfgError[F](config, msg).pure[F]
       case Right(mongoConfig) => {
-        Mongo(mongoConfig).attempt.map {
+        Mongo(mongoConfig, blockingPool).attempt.map {
           case Left(e) => mkError(config, e)
           case Right(disposableClient) =>
             disposableClient.map(client => new MongoDataSource(client): DS[F]).right[Error]

@@ -29,6 +29,9 @@ import com.mongodb.connection.ClusterSettings
 import com.mongodb.{ConnectionString, ServerAddress}
 
 import quasar.Disposable
+import quasar.concurrent.BlockingContext
+
+import scalaz.syntax.tag._
 
 import scala.collection.JavaConverters._
 
@@ -37,14 +40,14 @@ object Tunnel {
 
   val SessionName: String = "default"
 
-  def apply[F[_]: Sync: ContextShift](config: MongoConfig): F[Disposable[F, ClusterSettings]] =
+  def apply[F[_]: Sync: ContextShift](config: MongoConfig, blockingPool: BlockingContext): F[Disposable[F, ClusterSettings]] =
     connectionString[F](config.connectionString) flatMap { (conn: ConnectionString) =>
       val settings: ClusterSettings = ClusterSettings.builder.applyConnectionString(conn).build
       config.tunnelConfig match {
         case None =>
           Disposable(settings, Sync[F].unit).pure[F]
         case Some(tcfg) =>
-          viaTunnel(tcfg, settings)
+          viaTunnel(tcfg, settings, blockingPool)
       }
     }
 
@@ -104,7 +107,7 @@ object Tunnel {
   final case class Tunnel(port: Int)
 
   def openTunnel[F[_]: Sync](session: Session, address: ServerAddress): F[Tunnel] = Sync[F].delay {
-    session.connect
+    session.connect()
   } productR Sync[F].delay {
     session.setPortForwardingL(0, address.getHost, address.getPort)
   } map (Tunnel(_))
@@ -112,7 +115,7 @@ object Tunnel {
   def closeTunnel[F[_]: Sync](session: Session, tunnel: Tunnel): F[Unit] = Sync[F].delay {
     session.delPortForwardingL(tunnel.port)
   } productR Sync[F].delay {
-    session.disconnect
+    session.disconnect()
   }
 
   def tunneledSettings[F[_]: Sync](settings: ClusterSettings, tunnel: Tunnel): F[ClusterSettings] = Sync[F].delay {
@@ -121,14 +124,14 @@ object Tunnel {
 
   def viaTunnel[F[_]: Sync: ContextShift](
       config: TunnelConfig,
-      settings: ClusterSettings)
+      settings: ClusterSettings,
+      blockingPool: BlockingContext)
       : F[Disposable[F, ClusterSettings]] = for {
     jsch <- mkJSch
     sess <- mkSession(jsch, config)
     _ <- setUserInfo(sess, userInfo(config))
     address <- serverAddress(settings)
-    tunnel <- openTunnel(sess, address)
+    tunnel <- ContextShift[F].evalOn(blockingPool.unwrap)(openTunnel(sess, address))
     result <- tunneledSettings(settings, tunnel)
-    _ <- ContextShift[F].shift
   } yield Disposable(result, closeTunnel(sess, tunnel))
 }

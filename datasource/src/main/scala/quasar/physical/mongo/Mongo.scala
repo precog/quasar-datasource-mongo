@@ -30,6 +30,7 @@ import fs2.concurrent.{NoneTerminatedQueue, Queue}
 import fs2.Stream
 
 import quasar.api.resource.ResourcePath
+import quasar.concurrent.BlockingContext
 import quasar.connector.{MonadResourceErr, ResourceError}
 import quasar.physical.mongo.MongoResource.{Collection, Database}
 import quasar.physical.mongo.expression.Mapper
@@ -251,8 +252,8 @@ object Mongo {
       })
     } guarantee ContextShift[F].shift
 
-  def mkClient[F[_]: ContextShift](config: MongoConfig)(implicit F: Sync[F]): F[Disposable[F, MongoClient]] =
-    Tunnel[F](config) flatMap { (disposable: Disposable[F, ClusterSettings]) => for {
+  def mkClient[F[_]: ContextShift](config: MongoConfig, blockingPool: BlockingContext)(implicit F: Sync[F]): F[Disposable[F, MongoClient]] =
+    Tunnel[F](config, blockingPool) flatMap { (disposable: Disposable[F, ClusterSettings]) => for {
       conn <- F.delay { new ConnectionString(config.connectionString) }
       rawSettings <- F.delay {
         val updateCluster: Block[ClusterSettings.Builder] = new Block[ClusterSettings.Builder] {
@@ -273,7 +274,10 @@ object Mongo {
   def close[F[_]](client: MongoClient)(implicit F: Sync[F]): F[Unit] =
     F.delay(client.close())
 
-  def apply[F[_]: ConcurrentEffect: ContextShift: MonadResourceErr](config: MongoConfig): F[Disposable[F, Mongo[F]]] = {
+  def apply[F[_]: ConcurrentEffect: ContextShift: MonadResourceErr](
+      config: MongoConfig,
+      blockingPool: BlockingContext)
+      : F[Disposable[F, Mongo[F]]] = {
     val F = ConcurrentEffect[F]
 
     def buildInfo(client: MongoClient): F[Document] =
@@ -304,7 +308,7 @@ object Mongo {
         getVersionString(x) map (_.split("\\.")) flatMap mkVersion getOrElse Version.zero
       }
 
-    mkClient(config) flatMap { (disposable: Disposable[F, MongoClient]) => {
+    mkClient(config, blockingPool) flatMap { (disposable: Disposable[F, MongoClient]) => {
       val client = disposable.unsafeValue
       val mongoF = for {
         version <- getVersion(client)
