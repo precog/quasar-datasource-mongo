@@ -27,8 +27,8 @@ import quasar.physical.mongo.MongoResource.{Database, Collection}
 final case class MongoConfig(
     connectionString: String,
     batchSize: Int,
-    pushdownLevel: PushdownLevel) {
-
+    pushdownLevel: PushdownLevel,
+    tunnelConfig: Option[TunnelConfig]) {
   def accessedResource: Option[MongoResource] = {
     val connString = new ConnectionString(connectionString)
     val dbStr = Option(connString.getDatabase())
@@ -48,7 +48,8 @@ object MongoConfig {
     Json(
       "connectionString" := config.connectionString,
       "batchSize" := config.batchSize,
-      "pushdownLevel" := config.pushdownLevel)
+      "pushdownLevel" := config.pushdownLevel,
+      "tunnelConfig" := config.tunnelConfig)
   }
 
   implicit val decodeJsonMongoConfig: DecodeJson[MongoConfig] = DecodeJson { c =>
@@ -56,10 +57,12 @@ object MongoConfig {
       connectionString <- (c --\ "connectionString").as[String]
       batchSize <- (c --\ "batchSize").as[Option[Int]]
       pushdownLevel <- (c --\ "pushdownLevel").as[Option[PushdownLevel]]
+      tunnelConfig <- (c --\ "tunnelConfig").as[Option[TunnelConfig]]
     } yield MongoConfig(
       connectionString,
       batchSize getOrElse Migration1to2BatchSize,
-      pushdownLevel getOrElse Migration1to2PushdownLevel)
+      pushdownLevel getOrElse Migration1to2PushdownLevel,
+      tunnelConfig)
   }
 
   private val credentialsRegex = "://[^@+]+@".r
@@ -68,7 +71,8 @@ object MongoConfig {
     case Left(_) => config
     case Right(cfg) => {
       val newConnectionString = credentialsRegex.replaceFirstIn(cfg.connectionString, "://<REDACTED>:<REDACTED>@")
-      cfg.copy(connectionString = newConnectionString).asJson
+      val newTunnelConfig = cfg.tunnelConfig map TunnelConfig.sanitize
+      cfg.copy(connectionString = newConnectionString, tunnelConfig = newTunnelConfig).asJson
     }
   }
 }

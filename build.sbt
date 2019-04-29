@@ -22,6 +22,7 @@ val specsVersion = "4.3.3"
 val refinedVersion = "0.8.5"
 val nettyVersion = "4.1.28.Final"
 val jsrVersion = "3.0.2"
+val jschVersion = "0.1.55"
 
 lazy val core = project
   .in(file("datasource"))
@@ -38,6 +39,7 @@ lazy val core = project
       "org.typelevel"              %% "cats-effect"                % catsEffectVersion,
       "org.mongodb.scala"          %% "mongo-scala-driver"         % mongoVersion,
       "io.netty"                   %  "netty-all"                  % nettyVersion,
+      "com.jcraft"                 % "jsch"                        % jschVersion,
 
       "com.slamdata"               %% "quasar-foundation"          % quasarVersion % Test classifier "tests",
       "com.slamdata"               %% "quasar-frontend"            % quasarVersion % Test classifier "tests",
