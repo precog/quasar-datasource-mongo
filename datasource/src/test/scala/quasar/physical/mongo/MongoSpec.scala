@@ -156,8 +156,8 @@ class MongoSpec extends EffectfulQSpec[IO] {
   )
 
   "tunnels" >> {
-    "via key identity" >>* keyTunneledMongo map (_ must not(throwA[Throwable]))
-    "via user/password pair" >>* passwordTunneledMongo map (_ must not(throwA[Throwable]))
+    "via key identity" >>* keyTunneledMongo.map(_ must not(throwA[Throwable]))
+    "via user/password pair" >>* passwordTunneledMongo.map(_ must not(throwA[Throwable]))
   }
 }
 
