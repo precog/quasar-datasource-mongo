@@ -74,6 +74,54 @@ class MongoConfigSpec extends Specification with ScalaCheck {
     MongoConfig.sanitize(input) === input
   }
 
+  "sanitized config hides tunnel password" >> {
+    val input = Json.obj(
+      "connectionString" -> jString("mongodb://localhost:27017"),
+      "batchSize" -> jNumber(128),
+      "pushdownLevel" -> jString("disabled"),
+      "tunnelConfig" -> Json.obj(
+        "user" -> jString("user"),
+        "host" -> jString("host"),
+        "port" -> jNumber(22),
+        "pass" -> Json.obj("password" -> jString("should be redacted"))))
+    val expected = Json.obj(
+      "connectionString" -> jString("mongodb://localhost:27017"),
+      "batchSize" -> jNumber(128),
+      "pushdownLevel" -> jString("disabled"),
+      "tunnelConfig" -> Json.obj(
+        "user" -> jString("user"),
+        "host" -> jString("host"),
+        "port" -> jNumber(22),
+        "pass" -> Json.obj("password" -> jString("<REDACTED>"))))
+    MongoConfig.sanitize(input) === expected
+  }
+
+  "sanitized config hides tunnel identity" >> {
+    val input = Json.obj(
+      "connectionString" -> jString("mongodb://localhost:27017"),
+      "batchSize" -> jNumber(128),
+      "pushdownLevel" -> jString("disabled"),
+      "tunnelConfig" -> Json.obj(
+        "user" -> jString("user"),
+        "host" -> jString("host"),
+        "port" -> jNumber(22),
+        "pass" -> Json.obj(
+          "prv" -> jString("should be redacted"),
+          "passphrase" -> jString("should be redacted"))))
+    val expected = Json.obj(
+      "connectionString" -> jString("mongodb://localhost:27017"),
+      "batchSize" -> jNumber(128),
+      "pushdownLevel" -> jString("disabled"),
+      "tunnelConfig" -> Json.obj(
+        "user" -> jString("user"),
+        "host" -> jString("host"),
+        "port" -> jNumber(22),
+        "pass" -> Json.obj(
+          "prv" -> jString("<REDACTED>"),
+          "passphrase" -> jString("<REDACTED>"))))
+    MongoConfig.sanitize(input) === expected
+  }
+
   "accessed resource" >> {
     "for default params is None" >> {
       MongoConfig("mongodb://localhost", 16, PushdownLevel.Disabled, None).accessedResource === None
