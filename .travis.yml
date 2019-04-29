@@ -48,7 +48,7 @@ jobs:
       - sudo apt-get update
       - sudo apt-get install sshpass
       - ssh-keygen -t rsa -N "" -f ~/.ssh/for_docker
-      - sshpass -p root ssh-copy-id -i ~/.ssh/for_docker root@localhost -p 22222
+      - sshpass -p root ssh-copy-id -i ~/.ssh/for_docker -o StrictHostKeyChecking=no root@localhost -p 22222
       - set -e
       - "$SBT ++$TRAVIS_SCALA_VERSION test"
   - stage: publish
