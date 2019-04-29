@@ -20,39 +20,39 @@ import slamdata.Predef._
 
 import argonaut._, Argonaut._
 
-final case class TunnelConfig(host: String, port: Int, credentials: Option[TunnelConfig.Credentials])
+final case class TunnelConfig(host: String, port: Int, user: String, pass: Option[TunnelConfig.Pass])
 
 object TunnelConfig {
-  import Credentials._
+  import Pass._
   def sanitize(inp: TunnelConfig): TunnelConfig = {
-    val newCreds: Option[Credentials] = inp.credentials map {
-      case LoginPassword(login, _) => LoginPassword(login, "<REDACTED>")
+    val newPass: Option[Pass] = inp.pass map {
+      case Password(_) => Password("<REDACTED>")
       case Identity(_, _) => Identity("<REDACTED>", Some("<REDACTED>"))
     }
-    inp.copy(credentials = newCreds)
+    inp.copy(pass = newPass)
   }
 
   implicit val codecTunnelConfig: CodecJson[TunnelConfig] =
-    casecodec3(TunnelConfig.apply, TunnelConfig.unapply)("host", "port", "credentials")
+    casecodec4(TunnelConfig.apply, TunnelConfig.unapply)("host", "port", "user", "pass")
 
-  trait Credentials
+  trait Pass
 
-  object Credentials {
-    final case class Identity(prv: String, passphrase: Option[String]) extends Credentials
-    final case class LoginPassword(login: String, password: String) extends Credentials
+  object Pass {
+    final case class Identity(prv: String, passphrase: Option[String]) extends Pass
+    final case class Password(password: String) extends Pass
 
     implicit val codecIdentity: CodecJson[Identity] =
       casecodec2(Identity.apply, Identity.unapply)("prv", "passphrase")
 
-    implicit val codecLoginPassword: CodecJson[LoginPassword] =
-      casecodec2(LoginPassword.apply, LoginPassword.unapply)("login", "password")
+    implicit val codecPassword: CodecJson[Password] =
+      casecodec1(Password.apply, Password.unapply)("password")
 
-    implicit val codecTunnelCredentials: CodecJson[Credentials] = CodecJson({
+    implicit val codecTunnelPass: CodecJson[Pass] = CodecJson({
       case c: Identity => codecIdentity(c)
-      case c: LoginPassword => codecLoginPassword(c)
+      case c: Password => codecPassword(c)
     }, { j: HCursor =>
-      val id = codecIdentity(j).map(a => a: Credentials)
-      id.result.fold(_ => codecLoginPassword(j).map(a => a: Credentials), _ => id)
+      val id = codecIdentity(j).map(a => a: Pass)
+      id.result.fold(_ => codecPassword(j).map(a => a: Pass), _ => id)
     })
   }
 }

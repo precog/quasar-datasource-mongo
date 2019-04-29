@@ -33,7 +33,7 @@ import quasar.Disposable
 import scala.collection.JavaConverters._
 
 object Tunnel {
-  import TunnelConfig._, Credentials._
+  import TunnelConfig._, Pass._
 
   val SessionName: String = "default"
 
@@ -55,34 +55,34 @@ object Tunnel {
   def mkJSch[F[_]: Sync]: F[JSch] = Sync[F].delay { new JSch() }
 
   @SuppressWarnings(Array("org.wartremover.warts.Null"))
-  def mkSession[F[_]: Sync](jsch: JSch, cfg: TunnelConfig): F[Session] = cfg.credentials match {
+  def mkSession[F[_]: Sync](jsch: JSch, cfg: TunnelConfig): F[Session] = cfg.pass match {
     case None =>
-      Sync[F].delay { jsch.getSession(null, cfg.host, cfg.port) }
+      Sync[F].delay { jsch.getSession(cfg.user, cfg.host, cfg.port) }
     case Some(cred) => cred match {
-      case LoginPassword(login, password) => for {
-        s <- Sync[F].delay { jsch.getSession(login, cfg.host, cfg.port) }
+      case Password(password) => for {
+        s <- Sync[F].delay { jsch.getSession(cfg.user, cfg.host, cfg.port) }
         _ <- Sync[F].delay { s.setPassword(password) }
       } yield s
       case Identity(prv, passphrase) => for {
         _ <- Sync[F].delay { jsch.addIdentity(SessionName, prv.getBytes("UTF-8"), null, passphrase map (_.getBytes("UTF-8")) getOrElse null) }
-        s <- Sync[F].delay { jsch.getSession(null, cfg.host, cfg.port) }
+        s <- Sync[F].delay { jsch.getSession(cfg.user, cfg.host, cfg.port) }
       } yield s
     }
   }
 
   def userInfo(cfg: TunnelConfig): UserInfo = new UserInfo {
-    override def getPassword(): String = cfg.credentials match {
+    override def getPassword(): String = cfg.pass match {
       case None => ""
-      case Some(cred) => cred match {
+      case Some(pass) => pass match {
         case Identity(_, _) => ""
-        case LoginPassword(_, p) => p
+        case Password(p) => p
       }
     }
-    override def getPassphrase(): String = cfg.credentials match {
+    override def getPassphrase(): String = cfg.pass match {
       case None => ""
-      case Some(cred) => cred match {
+      case Some(pass) => pass match {
         case Identity(_, p) => p getOrElse ""
-        case LoginPassword(_, _) => ""
+        case Password(_) => ""
       }
     }
     override def promptYesNo(s: String): Boolean = true

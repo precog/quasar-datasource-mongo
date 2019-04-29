@@ -47,7 +47,6 @@ jobs:
       - docker-compose up -d
       - sudo apt-get update
       - sudo apt-get install sshpass
-      - mkdir ssh
       - ssh-keygen -t rsa -N "passphrase" -f key_for_docker
       - sshpass -p root ssh-copy-id -i key_for_docker -o StrictHostKeyChecking=no root@localhost -p 22222
       - set -e

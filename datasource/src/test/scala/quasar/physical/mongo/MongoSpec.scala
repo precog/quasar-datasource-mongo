@@ -162,11 +162,10 @@ class MongoSpec extends EffectfulQSpec[IO] {
 }
 
 object MongoSpec {
-  import java.nio.charset.StandardCharsets
   import java.nio.file.{Files, Paths}
 
   import Mongo._
-  import TunnelConfig.Credentials._
+  import TunnelConfig.Pass._
 
   val dbs = List("A", "B", "C", "D")
   val cols = List("a", "b", "c", "d")
@@ -192,28 +191,32 @@ object MongoSpec {
 
   def privateKey: IO[String] = IO.delay {
     val path = Paths.get("key_for_docker")
-    new String(Files.readAllBytes(path), StandardCharsets.UTF_8)
+    new String(Files.readAllBytes(path))
   }
 
+  val TunneledURL: String = "mongodb://root:secret@mng:27017"
+  val TunnelUser: String = "root"
+  val TunnelPassword: String = "root"
+  val TunnelPassphrase: Option[String] = Some("passphrase")
+  val TunnelHost: String = "localhost"
+  val TunnelPort: Int = 22222
 
-  def keyTunneledMongo: IO[Disposable[IO, Mongo[IO]]] =
+  def passwordTunneledMongo: IO[Disposable[IO, Mongo[IO]]] =
     Mongo[IO](MongoConfig(
-      "mongodb://root:secret@localhost:27017",
+      TunneledURL,
       BatchSize,
       PushdownLevel.Full,
-      Some(TunnelConfig("localhost", 22222,
-        Some(LoginPassword("root", "root"))))))
+      Some(TunnelConfig(TunnelHost, TunnelPort, TunnelUser,
+        Some(Password(TunnelPassword))))))
 
-  def passwordTunneledMongo: IO[Disposable[IO, Mongo[IO]]] = privateKey flatMap { key =>
+  def keyTunneledMongo: IO[Disposable[IO, Mongo[IO]]] = privateKey flatMap { key =>
     Mongo[IO](MongoConfig(
-      "mongodb://root:secret@localhost:27017",
+      TunneledURL,
       BatchSize,
       PushdownLevel.Full,
-      Some(TunnelConfig("localhost", 22222,
-        Some(Identity(key, Some("passphrase")))))))
+      Some(TunnelConfig(TunnelHost, TunnelPort, TunnelUser,
+        Some(Identity(key, TunnelPassphrase))))))
   }
-
-
 
   def mkAMongo: IO[Disposable[IO, Mongo[IO]]] =
     Mongo[IO](MongoConfig(aConnectionString, BatchSize, PushdownLevel.Full, None))
@@ -230,7 +233,6 @@ object MongoSpec {
       val mongo = new Mongo[IO](c, BatchSize.toLong, PushdownLevel.Full, interpreter, None)
       Disposable(mongo, IO.unit)
     }
-
 
   def mkBMongo: IO[Disposable[IO, Mongo[IO]]] =
     Mongo[IO](MongoConfig(bConnectionString, BatchSize, PushdownLevel.Full, None))
