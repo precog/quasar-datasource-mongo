@@ -40,7 +40,7 @@ object Tunnel {
 
   val SessionName: String = "default"
 
-  def apply[F[_]: Sync: ContextShift](config: MongoConfig, blockingPool: BlockingContext): F[Disposable[F, ClusterSettings]] =
+  def clusterSettings[F[_]: Sync: ContextShift](config: MongoConfig, blockingPool: BlockingContext): F[Disposable[F, ClusterSettings]] =
     connectionString[F](config.connectionString) flatMap { (conn: ConnectionString) =>
       val settings: ClusterSettings = ClusterSettings.builder.applyConnectionString(conn).build
       config.tunnelConfig match {
@@ -126,12 +126,12 @@ object Tunnel {
       config: TunnelConfig,
       settings: ClusterSettings,
       blockingPool: BlockingContext)
-      : F[Disposable[F, ClusterSettings]] = for {
+      : F[Disposable[F, ClusterSettings]] = ContextShift[F].evalOn(blockingPool.unwrap) { for {
     jsch <- mkJSch
     sess <- mkSession(jsch, config)
     _ <- setUserInfo(sess, userInfo(config))
     address <- serverAddress(settings)
-    tunnel <- ContextShift[F].evalOn(blockingPool.unwrap)(openTunnel(sess, address))
+    tunnel <- openTunnel(sess, address)
     result <- tunneledSettings(settings, tunnel)
-  } yield Disposable(result, ContextShift[F].evalOn(blockingPool.unwrap)(closeTunnel(sess, tunnel)))
+  } yield Disposable(result, ContextShift[F].evalOn(blockingPool.unwrap)(closeTunnel(sess, tunnel))) }
 }
