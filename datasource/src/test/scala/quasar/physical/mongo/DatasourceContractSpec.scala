@@ -17,10 +17,10 @@
 package quasar.physical.mongo
 
 import slamdata.Predef._
-import quasar.api.resource.{ResourceName, ResourcePath}
-import quasar.connector.{Datasource, DatasourceSpec, QueryResult}
+import quasar.api.resource.{ResourceName, ResourcePath, ResourcePathType}
+import quasar.connector.LightweightDatasourceModule.DS
+import quasar.connector.DatasourceSpec
 import quasar.physical.mongo.MongoDataSourceModule.ErrorOrResult
-import quasar.qscript.InterpretedRead
 
 import scala.io.Source
 
@@ -30,7 +30,7 @@ import cats.effect.IO
 import fs2.Stream
 import testImplicits._
 
-class DatasourceContractSpec extends DatasourceSpec[IO, Stream[IO, ?]] {
+class DatasourceContractSpec extends DatasourceSpec[IO, Stream[IO, ?], ResourcePathType.Physical] {
 
   val host = Source.fromResource("mongo-host").mkString.trim
   val port: String = "27018"
@@ -41,7 +41,7 @@ class DatasourceContractSpec extends DatasourceSpec[IO, Stream[IO, ?]] {
 
   def ds: IO[ErrorOrResult[IO]] = MongoDataSourceModule.lightweightDatasource(cfg)
 
-  override val datasource: Datasource[IO, Stream[IO, ?], InterpretedRead[ResourcePath], QueryResult[IO]] =
+  override val datasource: DS[IO] =
     ds.unsafeRunSync().getOrElse(throw new RuntimeException("Unexpected error")).unsafeValue
 
   override val nonExistentPath =
