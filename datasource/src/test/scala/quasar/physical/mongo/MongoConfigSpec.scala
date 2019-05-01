@@ -28,7 +28,7 @@ import quasar.physical.mongo.MongoResource.{Database, Collection}
 class MongoConfigSpec extends Specification with ScalaCheck {
   "legacy" >> {
     "no pushdown" >> {
-      val expected = MongoConfig("mongodb://localhost", 64, PushdownLevel.Disabled)
+      val expected = MongoConfig("mongodb://localhost", 64, PushdownLevel.Disabled, None)
       Json.obj(
         "connectionString" -> jString("mongodb://localhost"),
         "resultBatchSizeBytes" -> jNumber(128))
@@ -37,8 +37,8 @@ class MongoConfigSpec extends Specification with ScalaCheck {
   }
 
   "works for mongodb protocol" >> {
-    val expected1 = MongoConfig("mongodb://localhost", 64, PushdownLevel.Light)
-    val expected2 = MongoConfig("mongodb://user:password@anyhost:2980/database?a=b&c=d", 0, PushdownLevel.Full)
+    val expected1 = MongoConfig("mongodb://localhost", 64, PushdownLevel.Light, None)
+    val expected2 = MongoConfig("mongodb://user:password@anyhost:2980/database?a=b&c=d", 0, PushdownLevel.Full, None)
     Json.obj(
       "connectionString" -> jString("mongodb://localhost"),
       "batchSize" -> jNumber(64),
@@ -59,7 +59,8 @@ class MongoConfigSpec extends Specification with ScalaCheck {
     val expected = Json.obj(
       "connectionString" -> jString("mongodb://<REDACTED>:<REDACTED>@anyhost:2980/database"),
       "batchSize" -> jNumber(128),
-      "pushdownLevel" -> jString("light"))
+      "pushdownLevel" -> jString("light"),
+      "tunnelConfig" -> jNull)
 
     MongoConfig.sanitize(input) === expected
   }
@@ -68,19 +69,68 @@ class MongoConfigSpec extends Specification with ScalaCheck {
     val input = Json.obj(
       "connectionString" -> jString("mongodb://host:1234/db?foo=bar"),
       "batchSize" -> jNumber(234),
-      "pushdownLevel" -> jString("full"))
+      "pushdownLevel" -> jString("full"),
+      "tunnelConfig" -> jNull)
     MongoConfig.sanitize(input) === input
+  }
+
+  "sanitized config hides tunnel password" >> {
+    val input = Json.obj(
+      "connectionString" -> jString("mongodb://localhost:27017"),
+      "batchSize" -> jNumber(128),
+      "pushdownLevel" -> jString("disabled"),
+      "tunnelConfig" -> Json.obj(
+        "user" -> jString("user"),
+        "host" -> jString("host"),
+        "port" -> jNumber(22),
+        "pass" -> Json.obj("password" -> jString("should be redacted"))))
+    val expected = Json.obj(
+      "connectionString" -> jString("mongodb://localhost:27017"),
+      "batchSize" -> jNumber(128),
+      "pushdownLevel" -> jString("disabled"),
+      "tunnelConfig" -> Json.obj(
+        "user" -> jString("user"),
+        "host" -> jString("host"),
+        "port" -> jNumber(22),
+        "pass" -> Json.obj("password" -> jString("<REDACTED>"))))
+    MongoConfig.sanitize(input) === expected
+  }
+
+  "sanitized config hides tunnel identity" >> {
+    val input = Json.obj(
+      "connectionString" -> jString("mongodb://localhost:27017"),
+      "batchSize" -> jNumber(128),
+      "pushdownLevel" -> jString("disabled"),
+      "tunnelConfig" -> Json.obj(
+        "user" -> jString("user"),
+        "host" -> jString("host"),
+        "port" -> jNumber(22),
+        "pass" -> Json.obj(
+          "prv" -> jString("should be redacted"),
+          "passphrase" -> jString("should be redacted"))))
+    val expected = Json.obj(
+      "connectionString" -> jString("mongodb://localhost:27017"),
+      "batchSize" -> jNumber(128),
+      "pushdownLevel" -> jString("disabled"),
+      "tunnelConfig" -> Json.obj(
+        "user" -> jString("user"),
+        "host" -> jString("host"),
+        "port" -> jNumber(22),
+        "pass" -> Json.obj(
+          "prv" -> jString("<REDACTED>"),
+          "passphrase" -> jString("<REDACTED>"))))
+    MongoConfig.sanitize(input) === expected
   }
 
   "accessed resource" >> {
     "for default params is None" >> {
-      MongoConfig("mongodb://localhost", 16, PushdownLevel.Disabled).accessedResource === None
+      MongoConfig("mongodb://localhost", 16, PushdownLevel.Disabled, None).accessedResource === None
     }
     "for db provided is Some(Database(_))" >> {
-      MongoConfig("mongodb://localhost/db", 64, PushdownLevel.Light).accessedResource === Some(Database("db"))
+      MongoConfig("mongodb://localhost/db", 64, PushdownLevel.Light, None).accessedResource === Some(Database("db"))
     }
     "for collection provided is Some(Collection(_, _))" >> {
-      MongoConfig("mongodb://localhost/db.coll", 128, PushdownLevel.Full).accessedResource === Some(Collection(Database("db"), "coll"))
+      MongoConfig("mongodb://localhost/db.coll", 128, PushdownLevel.Full, None).accessedResource === Some(Collection(Database("db"), "coll"))
     }
   }
 
@@ -91,7 +141,7 @@ class MongoConfigSpec extends Specification with ScalaCheck {
         "batchSize" -> jNumber(128),
         "pushdownLevel" -> jString("full"))
       input.as[MongoConfig].toEither ===
-        Right(MongoConfig("mongodb://user:password@anyhost:1234", 128, PushdownLevel.Full))
+        Right(MongoConfig("mongodb://user:password@anyhost:1234", 128, PushdownLevel.Full, None))
     }
     "disabled provided" >> {
       val input = Json.obj(
@@ -99,7 +149,7 @@ class MongoConfigSpec extends Specification with ScalaCheck {
         "batchSize" -> jNumber(12),
         "pushdownLevel" -> jString("disabled"))
       input.as[MongoConfig].toEither ===
-        Right(MongoConfig("mongodb://user:password@anyhost:1234", 12, PushdownLevel.Disabled))
+        Right(MongoConfig("mongodb://user:password@anyhost:1234", 12, PushdownLevel.Disabled, None))
     }
     "light provided" >> {
       val input = Json.obj(
@@ -107,7 +157,7 @@ class MongoConfigSpec extends Specification with ScalaCheck {
         "batchSize" -> jNumber(142),
         "pushdownLevel" -> jString("light"))
       input.as[MongoConfig].toEither ===
-        Right(MongoConfig("mongodb://user:password@anyhost:1234", 142, PushdownLevel.Light))
+        Right(MongoConfig("mongodb://user:password@anyhost:1234", 142, PushdownLevel.Light, None))
     }
     "incorrect provided" >> {
       val input = Json.obj(
@@ -119,7 +169,7 @@ class MongoConfigSpec extends Specification with ScalaCheck {
   }
 
   "json encode/decode roundtrip is ok" >> prop { params: (String, Int)  =>
-    val cfg = MongoConfig(params._1, params._2, PushdownLevel.Disabled)
+    val cfg = MongoConfig(params._1, params._2, PushdownLevel.Disabled, None)
     cfg.asJson.as[MongoConfig].toEither === Right(cfg)
   }
 }

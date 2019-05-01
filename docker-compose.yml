@@ -1,0 +1,18 @@
+version: '3'
+
+services:
+  sshd:
+    image: rastasheep/ubuntu-sshd:18.04
+    network_mode: "bridge"
+    ports:
+      - "22222:22"
+    links:
+      - "mongo:mng"
+
+  mongo:
+    image: bitnami/mongodb:4.1.4
+    network_mode: "bridge"
+    expose:
+      - "27017"
+    environment:
+      MONGODB_ROOT_PASSWORD: secret
