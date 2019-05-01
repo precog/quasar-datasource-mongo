@@ -35,12 +35,12 @@ import scalaz.syntax.tag._
 
 import scala.collection.JavaConverters._
 
-object Tunnel {
+object Settings {
   import TunnelConfig._, Pass._
 
   val SessionName: String = "default"
 
-  def clusterSettings[F[_]: Sync: ContextShift](config: MongoConfig, blockingPool: BlockingContext): F[Disposable[F, ClusterSettings]] =
+  def apply[F[_]: Sync: ContextShift](config: MongoConfig, blockingPool: BlockingContext): F[Disposable[F, ClusterSettings]] =
     connectionString[F](config.connectionString) flatMap { (conn: ConnectionString) =>
       val settings: ClusterSettings = ClusterSettings.builder.applyConnectionString(conn).build
       config.tunnelConfig match {

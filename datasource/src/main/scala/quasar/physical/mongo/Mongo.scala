@@ -253,7 +253,7 @@ object Mongo {
     } guarantee ContextShift[F].shift
 
   def mkClient[F[_]: ContextShift](config: MongoConfig, blockingPool: BlockingContext)(implicit F: Sync[F]): F[Disposable[F, MongoClient]] =
-    Tunnel.clusterSettings[F](config, blockingPool) flatMap { (disposable: Disposable[F, ClusterSettings]) => for {
+    Settings[F](config, blockingPool) flatMap { (disposable: Disposable[F, ClusterSettings]) => for {
       conn <- F.delay { new ConnectionString(config.connectionString) }
       rawSettings <- F.delay {
         val updateCluster: Block[ClusterSettings.Builder] = new Block[ClusterSettings.Builder] {
