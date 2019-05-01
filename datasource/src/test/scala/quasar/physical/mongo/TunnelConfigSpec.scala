@@ -18,7 +18,7 @@ package quasar.physical.mongo
 
 import slamdata.Predef._
 
-import argonaut._, argonaut.Argonaut._
+import argonaut._
 
 import org.specs2.ScalaCheck
 import org.specs2.mutable.Specification
