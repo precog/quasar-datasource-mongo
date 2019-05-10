@@ -6,8 +6,8 @@ libraryDependencies += "org.kohsuke" % "github-api" % "1.95" exclude("org.jenkin
 // for packaging the datasource.
 // should remain the newest coursier version.
 libraryDependencies ++= Seq(
-  "io.get-coursier" %% "coursier" % "1.0.1",
-  "io.get-coursier" %% "coursier-cache" % "1.0.1",
+  "io.get-coursier" %% "coursier" % "1.0.3",
+  "io.get-coursier" %% "coursier-cache" % "1.0.3",
   "io.circe" %% "circe-core" % "0.11.1"
 )
 
