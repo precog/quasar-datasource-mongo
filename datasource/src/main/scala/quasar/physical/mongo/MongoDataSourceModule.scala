@@ -26,7 +26,7 @@ import cats.syntax.functor._
 
 import quasar.api.datasource.{DatasourceError, DatasourceType}, DatasourceError.InitializationError
 import quasar.concurrent.BlockingContext
-import quasar.connector.{LightweightDatasourceModule, MonadResourceErr}
+import quasar.connector.{LightweightDatasourceModule, MonadResourceErr}, LightweightDatasourceModule.DS
 import quasar.physical.mongo.Mongo.{MongoAccessDenied, MongoConnectionFailed}
 import quasar.Disposable
 

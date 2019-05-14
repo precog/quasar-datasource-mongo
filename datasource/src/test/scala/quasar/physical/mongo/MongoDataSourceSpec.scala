@@ -115,7 +115,7 @@ class MongoDataSourceSpec extends EffectfulQSpec[IO] {
   }
 
   "prefixedChildPaths" >> {
-    def assertPrefixed(datasource: IO[Disposable[IO, MongoDataSource[IO]]], path: ResourcePath, expected: List[(ResourceName, ResourcePathType)]): IO[MatchResult[Set[(ResourceName, ResourcePathType)]]] = {
+    def assertPrefixed(datasource: IO[Disposable[IO, MongoDataSource[IO]]], path: ResourcePath, expected: List[(ResourceName, ResourcePathType.Physical)]): IO[MatchResult[Set[(ResourceName, ResourcePathType.Physical)]]] = {
       datasource.flatMap(_ { ds => {
         val fStream = ds.prefixedChildPaths(path).map(_ getOrElse Stream.empty)
         Stream.force(fStream).compile.toList.map(_.toSet must contain(expected.toSet))
