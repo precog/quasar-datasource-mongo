@@ -38,12 +38,12 @@ class MongoDataSourceModuleSpec extends EffectfulQSpec[IO] {
   }
 
   "Using correct config produces Right Disposable" >>* {
-    val config = MongoConfig(MongoSpec.connectionString, 12, PushdownLevel.Full).asJson
+    val config = MongoConfig(MongoSpec.connectionString, 12, PushdownLevel.Full, None).asJson
     MongoDataSourceModule.lightweightDatasource[IO](config).map (_.asCats must beRight)
   }
 
   "Using unreachable config produces Left invalid configuration" >>* {
-    val config = MongoConfig("mongodb://unreachable/?serverSelectionTimeoutMS=1000", 1, PushdownLevel.Disabled).asJson
+    val config = MongoConfig("mongodb://unreachable/?serverSelectionTimeoutMS=1000", 1, PushdownLevel.Disabled, None).asJson
     MongoDataSourceModule.lightweightDatasource[IO](config).map (_.asCats must beLike {
       case Left(DatasourceError.ConnectionFailed(MongoDataSource.kind, cfg, _)) =>
         cfg must_=== config
