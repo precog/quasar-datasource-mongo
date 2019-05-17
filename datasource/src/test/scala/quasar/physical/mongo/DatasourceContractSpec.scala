@@ -20,17 +20,19 @@ import slamdata.Predef._
 import quasar.api.resource.{ResourceName, ResourcePath, ResourcePathType}
 import quasar.connector.LightweightDatasourceModule.DS
 import quasar.connector.DatasourceSpec
-import quasar.physical.mongo.MongoDataSourceModule.ErrorOrResult
 
 import scala.io.Source
 
 import argonaut.Argonaut.jString
 import argonaut.Json
 import cats.effect.IO
+import cats.instances.tuple._
+import cats.syntax.bifunctor._
 import fs2.Stream
+import org.specs2.specification.AfterAll
 import testImplicits._
 
-class DatasourceContractSpec extends DatasourceSpec[IO, Stream[IO, ?], ResourcePathType.Physical] {
+class DatasourceContractSpec extends DatasourceSpec[IO, Stream[IO, ?], ResourcePathType.Physical] with AfterAll {
 
   val host = Source.fromResource("mongo-host").mkString.trim
   val port: String = "27018"
@@ -39,10 +41,17 @@ class DatasourceContractSpec extends DatasourceSpec[IO, Stream[IO, ?], ResourceP
     "connectionString" -> jString(s"mongodb://root:secret@${host}:${port}"),
     "pushdownLevel" -> jString("full"))
 
-  def ds: IO[ErrorOrResult[IO]] = MongoDataSourceModule.lightweightDatasource(cfg)
+  lazy val ds: (DS[IO], IO[Unit]) =
+    MongoDataSourceModule.lightweightDatasource[IO](cfg)
+      .allocated
+      .unsafeRunSync()
+      .leftMap(_.getOrElse(throw new RuntimeException("Unexpected error")))
 
-  override val datasource: DS[IO] =
-    ds.unsafeRunSync().getOrElse(throw new RuntimeException("Unexpected error")).unsafeValue
+  def afterAll: Unit =
+    ds._2.unsafeRunSync()
+
+  override def datasource: DS[IO] =
+    ds._1
 
   override val nonExistentPath =
     ResourcePath.root() / ResourceName("doesNotExist")
@@ -50,5 +59,5 @@ class DatasourceContractSpec extends DatasourceSpec[IO, Stream[IO, ?], ResourceP
   override def gatherMultiple[A](s: Stream[IO, A]): IO[List[A]] =
     s.compile.toList
 
-  step(MongoSpec.setupDB)
+  step(MongoSpec.setupDB.unsafeRunSync())
 }

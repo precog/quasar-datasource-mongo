@@ -18,7 +18,7 @@ package quasar.physical.mongo
 
 import slamdata.Predef._
 
-import cats.effect.IO
+import cats.effect.{IO, Resource}
 
 import fs2.Stream
 
@@ -26,23 +26,23 @@ import org.bson._
 import org.specs2.matcher.MatchResult
 import org.specs2.specification.core._
 
+import quasar.{EffectfulQSpec, ScalarStages}
 import quasar.api.resource.{ResourceName, ResourcePath, ResourcePathType}
 import quasar.connector.{QueryResult, ResourceError}
 import quasar.physical.mongo.MongoResource.Collection
 import quasar.qscript.InterpretedRead
-import quasar.{Disposable, EffectfulQSpec, ScalarStages}
 
 import shims._
 import testImplicits._
 
 class MongoDataSourceSpec extends EffectfulQSpec[IO] {
-  def mkDataSource: IO[Disposable[IO, MongoDataSource[IO]]] =
-    MongoSpec.mkMongo.map(_.map(new MongoDataSource[IO](_)))
+  def mkDataSource: Resource[IO, MongoDataSource[IO]] =
+    MongoSpec.mkMongo.map(new MongoDataSource[IO](_))
 
-  val mkInaccessibleDataSource: IO[Disposable[IO, MongoDataSource[IO]]] =
-    MongoSpec.mkMongoInvalidPort.map(_.map(new MongoDataSource[IO](_)))
+  val mkInaccessibleDataSource: Resource[IO, MongoDataSource[IO]] =
+    MongoSpec.mkMongoInvalidPort.map(new MongoDataSource[IO](_))
 
-  step(MongoSpec.setupDB)
+  step(MongoSpec.setupDB.unsafeRunSync())
 
   private def iRead[A](path: A): InterpretedRead[A] = InterpretedRead(path, ScalarStages.Id)
 
@@ -60,12 +60,12 @@ class MongoDataSourceSpec extends EffectfulQSpec[IO] {
     res must beLike(expected)
 
   "evaluation of" >> {
-    def assertPathNotFound(ds: IO[Disposable[IO, MongoDataSource[IO]]], path: ResourcePath): MatchResult[Either[Throwable, QueryResult[IO]]] = {
-      ds.flatMap(_ {_.evaluate(iRead(path)) }).attempt.unsafeRunSync() must beLike(pathNotFound(path))
+    def assertPathNotFound(ds: Resource[IO, MongoDataSource[IO]], path: ResourcePath): MatchResult[Either[Throwable, QueryResult[IO]]] = {
+      ds.use(_.evaluate(iRead(path))).attempt.unsafeRunSync() must beLike(pathNotFound(path))
     }
 
-    def assertConnectionFailed(ds: IO[Disposable[IO, MongoDataSource[IO]]], path: ResourcePath): MatchResult[Either[Throwable, QueryResult[IO]]] =
-      ds.flatMap(_ {_.evaluate(iRead(path)) }).attempt.unsafeRunSync() must beLike(connFailed)
+    def assertConnectionFailed(ds: Resource[IO, MongoDataSource[IO]], path: ResourcePath): MatchResult[Either[Throwable, QueryResult[IO]]] =
+      ds.use(_.evaluate(iRead(path))).attempt.unsafeRunSync() must beLike(connFailed)
 
     "root raises path not found" >>
       assertPathNotFound(mkDataSource, ResourcePath.root())
@@ -96,11 +96,11 @@ class MongoDataSourceSpec extends EffectfulQSpec[IO] {
               (bson.asDocument().get(coll.name).asString().getValue() === coll.database.name).isSuccess
             case _ => false
           }
-          mkDataSource.flatMap(_ { ds =>
+          mkDataSource use { ds =>
             val fStream: IO[Stream[IO, Any]] = ds.evaluate(iRead(coll.resourcePath)).map(_.data)
             val fList: IO[List[Any]] = Stream.force(fStream).compile.toList
             fList.map(checkBson(coll, _))
-          })
+          }
         })
 
     "non-existing collection raises path not found" >>
@@ -115,28 +115,23 @@ class MongoDataSourceSpec extends EffectfulQSpec[IO] {
   }
 
   "prefixedChildPaths" >> {
-    def assertPrefixed(datasource: IO[Disposable[IO, MongoDataSource[IO]]], path: ResourcePath, expected: List[(ResourceName, ResourcePathType.Physical)]): IO[MatchResult[Set[(ResourceName, ResourcePathType.Physical)]]] = {
-      datasource.flatMap(_ { ds => {
+    def assertPrefixed(datasource: Resource[IO, MongoDataSource[IO]], path: ResourcePath, expected: List[(ResourceName, ResourcePathType.Physical)]): IO[MatchResult[Set[(ResourceName, ResourcePathType.Physical)]]] =
+      datasource use { ds =>
         val fStream = ds.prefixedChildPaths(path).map(_ getOrElse Stream.empty)
         Stream.force(fStream).compile.toList.map(_.toSet must contain(expected.toSet))
-      }})
-    }
+      }
 
-    def assertConnectionFailed(datasource: IO[Disposable[IO, MongoDataSource[IO]]], path: ResourcePath) =
-      datasource.flatMap(_ { ds => {
+    def assertConnectionFailed(datasource: Resource[IO, MongoDataSource[IO]], path: ResourcePath) =
+      datasource.use(ds => {
         val fStream = ds.prefixedChildPaths(path).map(_ getOrElse Stream.empty)
         Stream.force(fStream).compile.toList
-      }}).attempt.unsafeRunSync() must beLike(connFailed)
+      }).attempt.unsafeRunSync() must beLike(connFailed)
 
-    def assertNone(datasource: IO[Disposable[IO, MongoDataSource[IO]]], path: ResourcePath) =
-      datasource.flatMap(_ { ds => {
-        ds.prefixedChildPaths(path).map(_ must_=== None)
-      }})
+    def assertNone(datasource: Resource[IO, MongoDataSource[IO]], path: ResourcePath) =
+      datasource.use(_.prefixedChildPaths(path).map(_ must_=== None))
 
-    def assertEmptyStream(datasource: IO[Disposable[IO, MongoDataSource[IO]]], path: ResourcePath) =
-      datasource.flatMap(_ { ds => {
-        ds.prefixedChildPaths(path).map(_ must_=== Some(Stream.empty))
-      }})
+    def assertEmptyStream(datasource: Resource[IO, MongoDataSource[IO]], path: ResourcePath) =
+      datasource.use(_.prefixedChildPaths(path).map(_ must_=== Some(Stream.empty)))
 
     "children of root are databases" >>*
       assertPrefixed(
@@ -179,14 +174,14 @@ class MongoDataSourceSpec extends EffectfulQSpec[IO] {
   }
 
   "pathIsResource" >> {
-    def assertNoResource(datasource: IO[Disposable[IO, MongoDataSource[IO]]], path: ResourcePath) =
-      datasource.flatMap(_ { ds => ds.pathIsResource(path).map(!_) })
+    def assertNoResource(datasource: Resource[IO, MongoDataSource[IO]], path: ResourcePath) =
+      datasource.use(_.pathIsResource(path).map(!_))
 
-    def assertResource(datasource: IO[Disposable[IO, MongoDataSource[IO]]], path: ResourcePath) =
-      datasource.flatMap(_ { ds => ds.pathIsResource(path) })
+    def assertResource(datasource: Resource[IO, MongoDataSource[IO]], path: ResourcePath) =
+      datasource.use(_.pathIsResource(path))
 
-    def assertConnectionFailed(datasource: IO[Disposable[IO, MongoDataSource[IO]]], path: ResourcePath) =
-      datasource.flatMap(_ (_.pathIsResource(path))).attempt.unsafeRunSync() must beLike(connFailed)
+    def assertConnectionFailed(datasource: Resource[IO, MongoDataSource[IO]], path: ResourcePath) =
+      datasource.use(_.pathIsResource(path)).attempt.unsafeRunSync() must beLike(connFailed)
 
     "returns false for root" >>* assertNoResource(mkDataSource, ResourcePath.root())
 
