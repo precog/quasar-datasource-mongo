@@ -29,7 +29,7 @@ import quasar.physical.mongo.MongoResource.{Collection, Database}
 import quasar.EffectfulQSpec
 
 import org.bson.{Document => _, _}
-import org.mongodb.scala.{Completed, Document, MongoClient, MongoSecurityException, MongoTimeoutException}
+import org.mongodb.scala.{Completed, Document, MongoClient, MongoSecurityException} //, MongoTimeoutException}
 import org.specs2.specification.core._
 import org.specs2.execute.AsResult
 import scala.io.Source
@@ -44,7 +44,7 @@ class MongoSpec extends EffectfulQSpec[IO] {
 
   "can create client from valid connection string" >>*
     mkMongo.use(IO.pure).attempt.map(_ must beRight)
-
+/*
   "can't create client from incorrect connection string" >> {
     "for incorrect protocol" >> {
       Mongo[IO](
@@ -62,7 +62,7 @@ class MongoSpec extends EffectfulQSpec[IO] {
         .unsafeRunSync() must throwA[MongoTimeoutException]
     }
   }
-
+ */
   "getting databases works correctly" >>* mkMongo.use { mongo =>
     mongo.databases.compile.toList.map { evaluatedDbs =>
       MongoSpec.correctDbs.toSet.subsetOf(evaluatedDbs.toSet)
@@ -168,12 +168,12 @@ class MongoSpec extends EffectfulQSpec[IO] {
       })
     }
   )
-/*
+
   "tunnels" >> {
     "via key identity" >>* keyTunneledMongo.use(IO.pure).attempt.map(_ must beRight)
     "via user/password pair" >>* passwordTunneledMongo.use(IO.pure).attempt.map(_ must beRight)
   }
- */
+
 }
 
 object MongoSpec {
