@@ -24,7 +24,7 @@ import cats.syntax.apply._
 import cats.syntax.traverse._
 
 import quasar.concurrent.BlockingContext
-//import quasar.connector.ResourceError
+import quasar.connector.ResourceError
 import quasar.physical.mongo.MongoResource.{Collection, Database}
 import quasar.EffectfulQSpec
 
@@ -145,7 +145,7 @@ class MongoSpec extends EffectfulQSpec[IO] {
       }
     }
   )
-/*
+
   "evaluteImpl works falls back if there is an exception" >> Fragment.foreach(MongoSpec.correctCollections)(col =>
     s"checking ${col.database.name} :: ${col.name}" >>* mkMongo.use { mongo =>
       mongo.evaluateImpl(col, incorrectPipeline, mongo.findAll(col)).flatMap { case (_, stream) =>
@@ -168,6 +168,7 @@ class MongoSpec extends EffectfulQSpec[IO] {
       })
     }
   )
+/*
   "tunnels" >> {
     "via key identity" >>* keyTunneledMongo.use(IO.pure).attempt.map(_ must beRight)
     "via user/password pair" >>* passwordTunneledMongo.use(IO.pure).attempt.map(_ must beRight)
