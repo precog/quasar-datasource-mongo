@@ -163,7 +163,7 @@ class MongoSpec extends EffectfulQSpec[IO] {
 
   "findAll raises path not found for nonexistent collections" >> Fragment.foreach(MongoSpec.incorrectCollections)(col =>
     s"checking ${col.database.name} :: ${col.name}" >>* mkMongo.use { mongo =>
-      IO.delay(mongo.findAll(col).attempt.unsafeRunSync() must beLike {
+      mongo.findAll(col).attempt.map(_ must beLike {
         case Left(t) => ResourceError.throwableP.getOption(t) must_=== Some(ResourceError.pathNotFound(col.resourcePath))
       })
     }
