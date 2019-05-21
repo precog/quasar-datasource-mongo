@@ -29,7 +29,7 @@ import quasar.physical.mongo.MongoResource.{Collection, Database}
 import quasar.EffectfulQSpec
 
 import org.bson.{Document => _, _}
-import org.mongodb.scala.{Completed, Document, MongoClient, MongoSecurityException} //, MongoTimeoutException}
+import org.mongodb.scala.{Completed, Document, MongoClient} //, MongoSecurityException} //, MongoTimeoutException}
 import org.specs2.specification.core._
 import org.specs2.execute.AsResult
 import scala.io.Source
@@ -62,7 +62,7 @@ class MongoSpec extends EffectfulQSpec[IO] {
         .unsafeRunSync() must throwA[MongoTimeoutException]
     }
   }
- */
+
   "getting databases works correctly" >>* mkMongo.use { mongo =>
     mongo.databases.compile.toList.map { evaluatedDbs =>
       MongoSpec.correctDbs.toSet.subsetOf(evaluatedDbs.toSet)
@@ -80,7 +80,7 @@ class MongoSpec extends EffectfulQSpec[IO] {
   "it's impossible to make mongo with incorrect auth" >> {
     mkInvalidAMongo.use(IO.pure).unsafeRunSync() must throwA[MongoSecurityException]
   }
-
+ */
   "databaseExists returns true for existing dbs" >> Fragment.foreach(MongoSpec.correctDbs)(db =>
       s"checking ${db.name}" >>* mkMongo.use { mongo =>
         mongo.databaseExists(db).compile.lastOrError
