@@ -24,14 +24,14 @@ import cats.syntax.apply._
 import cats.syntax.traverse._
 
 import quasar.concurrent.BlockingContext
-import quasar.connector.ResourceError
+//import quasar.connector.ResourceError
 import quasar.physical.mongo.MongoResource.{Collection, Database}
 import quasar.EffectfulQSpec
 
 import org.bson.{Document => _, _}
-import org.mongodb.scala.{Completed, Document, MongoClient/*, MongoSecurityException, MongoTimeoutException*/}
-import org.specs2.specification.core._
-import org.specs2.execute.AsResult
+import org.mongodb.scala.{Completed, Document, MongoClient/*, MongoSecurityException*/, MongoTimeoutException}
+//import org.specs2.specification.core._
+//import org.specs2.execute.AsResult
 import scala.io.Source
 
 import shims._
@@ -44,7 +44,7 @@ class MongoSpec extends EffectfulQSpec[IO] {
 
   "can create client from valid connection string" >>*
     mkMongo.use(IO.pure).attempt.map(_ must beRight)
-/*
+
   "can't create client from incorrect connection string" >> {
     "for incorrect protocol" >> {
       Mongo[IO](
@@ -62,24 +62,24 @@ class MongoSpec extends EffectfulQSpec[IO] {
         .unsafeRunSync() must throwA[MongoTimeoutException]
     }
   }
- */
+
   "getting databases works correctly" >>* mkMongo.use { mongo =>
     mongo.databases.compile.toList.map { evaluatedDbs =>
       MongoSpec.correctDbs.toSet.subsetOf(evaluatedDbs.toSet)
     }
   }
+/*
+  "getting databases for constrained role works correctly A" >>* mkAMongo.use { mongo =>
+    mongo.databases.compile.toList.map { _ === List(Database("A")) }
+  }
 
-//  "getting databases for constrained role works correctly A" >>* mkAMongo.use { mongo =>
-//    mongo.databases.compile.toList.map { _ === List(Database("A")) }
-//  }
+  "getting databases for constrained role works correctly B" >>* mkBMongo.use { mongo =>
+    mongo.databases.compile.toList.map { _ === List(Database("B")) }
+  }
 
-//  "getting databases for constrained role works correctly B" >>* mkBMongo.use { mongo =>
-//    mongo.databases.compile.toList.map { _ === List(Database("B")) }
-//  }
-
-//  "it's impossible to make mongo with incorrect auth" >> {
-//    mkInvalidAMongo.use(IO.pure).unsafeRunSync() must throwA[MongoSecurityException]
-//  }
+  "it's impossible to make mongo with incorrect auth" >> {
+    mkInvalidAMongo.use(IO.pure).unsafeRunSync() must throwA[MongoSecurityException]
+  }
 
   "databaseExists returns true for existing dbs" >> Fragment.foreach(MongoSpec.correctDbs)(db =>
       s"checking ${db.name}" >>* mkMongo.use { mongo =>
@@ -102,7 +102,7 @@ class MongoSpec extends EffectfulQSpec[IO] {
         .lastOrError
     }
   )
-/*
+
   "collections returns correct collection lists for constrained roles B" >> {
     "B" >>* mkBMongo.use { mongo =>
       mongo.collections(Database("B")).compile.toList.map { _ === List() }
@@ -112,7 +112,7 @@ class MongoSpec extends EffectfulQSpec[IO] {
       mongo.collections(Database("B")).compile.toList.map { _ == List(Collection(Database("B"), "b")) }
     }
   }
- */
+
   "collections return empty stream for non-existing databases" >> Fragment.foreach(MongoSpec.incorrectDbs)(db =>
     s"checking ${db.name}" >>* mkMongo.use { mongo =>
       mongo.collections(db).compile.toList.map(_ === List[Collection]())
@@ -172,7 +172,7 @@ class MongoSpec extends EffectfulQSpec[IO] {
     "via key identity" >>* keyTunneledMongo.use(IO.pure).attempt.map(_ must beRight)
     "via user/password pair" >>* passwordTunneledMongo.use(IO.pure).attempt.map(_ must beRight)
   }
-
+ */
 }
 
 object MongoSpec {
