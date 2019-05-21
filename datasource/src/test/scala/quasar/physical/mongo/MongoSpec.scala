@@ -31,7 +31,7 @@ import quasar.EffectfulQSpec
 import org.bson.{Document => _, _}
 import org.mongodb.scala.{Completed, Document, MongoClient, MongoSecurityException, MongoTimeoutException}
 import org.specs2.specification.core._
-//import org.specs2.execute.AsResult
+import org.specs2.execute.AsResult
 import scala.io.Source
 
 import shims._
@@ -92,7 +92,7 @@ class MongoSpec extends EffectfulQSpec[IO] {
       mongo.databaseExists(db).map(!_).compile.lastOrError
     }
   )
-/*
+
   "collections returns correct collection lists" >> Fragment.foreach(MongoSpec.correctDbs)(db =>
     s"checking ${db.name}" >>* mkMongo.use { mongo =>
       mongo.collections(db)
@@ -145,7 +145,7 @@ class MongoSpec extends EffectfulQSpec[IO] {
       }
     }
   )
-
+/*
   "evaluteImpl works falls back if there is an exception" >> Fragment.foreach(MongoSpec.correctCollections)(col =>
     s"checking ${col.database.name} :: ${col.name}" >>* mkMongo.use { mongo =>
       mongo.evaluateImpl(col, incorrectPipeline, mongo.findAll(col)).flatMap { case (_, stream) =>
