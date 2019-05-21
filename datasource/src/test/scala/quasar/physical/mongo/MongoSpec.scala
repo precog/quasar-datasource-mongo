@@ -29,8 +29,8 @@ import quasar.physical.mongo.MongoResource.{Collection, Database}
 import quasar.EffectfulQSpec
 
 import org.bson.{Document => _, _}
-import org.mongodb.scala.{Completed, Document, MongoClient/*, MongoSecurityException*/, MongoTimeoutException}
-//import org.specs2.specification.core._
+import org.mongodb.scala.{Completed, Document, MongoClient, MongoSecurityException, MongoTimeoutException}
+import org.specs2.specification.core._
 //import org.specs2.execute.AsResult
 import scala.io.Source
 
@@ -68,7 +68,7 @@ class MongoSpec extends EffectfulQSpec[IO] {
       MongoSpec.correctDbs.toSet.subsetOf(evaluatedDbs.toSet)
     }
   }
-/*
+
   "getting databases for constrained role works correctly A" >>* mkAMongo.use { mongo =>
     mongo.databases.compile.toList.map { _ === List(Database("A")) }
   }
@@ -92,7 +92,7 @@ class MongoSpec extends EffectfulQSpec[IO] {
       mongo.databaseExists(db).map(!_).compile.lastOrError
     }
   )
-
+/*
   "collections returns correct collection lists" >> Fragment.foreach(MongoSpec.correctDbs)(db =>
     s"checking ${db.name}" >>* mkMongo.use { mongo =>
       mongo.collections(db)
