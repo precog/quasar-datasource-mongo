@@ -24,24 +24,24 @@ import cats.syntax.apply._
 import cats.syntax.traverse._
 
 import quasar.concurrent.BlockingContext
-import quasar.connector.ResourceError
+//import quasar.connector.ResourceError
 import quasar.physical.mongo.MongoResource.{Collection, Database}
 import quasar.EffectfulQSpec
 
 import org.bson.{Document => _, _}
-import org.mongodb.scala.{Completed, Document, MongoClient, MongoSecurityException, MongoTimeoutException}
-import org.specs2.specification.core._
-import org.specs2.execute.AsResult
+import org.mongodb.scala.{Completed, Document, MongoClient} //, MongoSecurityException, MongoTimeoutException}
+//import org.specs2.specification.core._
+//import org.specs2.execute.AsResult
 import scala.io.Source
 
 import shims._
 import testImplicits._
 
 class MongoSpec extends EffectfulQSpec[IO] {
-  import MongoSpec._
+//  import MongoSpec._
 
   step(MongoSpec.setupDB.unsafeRunSync())
-
+/*
   "can create client from valid connection string" >>*
     mkMongo.use(IO.pure).attempt.map(_ must beRight)
 
@@ -173,6 +173,7 @@ class MongoSpec extends EffectfulQSpec[IO] {
     "via key identity" >>* keyTunneledMongo.use(IO.pure).attempt.map(_ must beRight)
     "via user/password pair" >>* passwordTunneledMongo.use(IO.pure).attempt.map(_ must beRight)
   }
+ */
 }
 
 object MongoSpec {
