@@ -24,7 +24,7 @@ import cats.syntax.apply._
 import cats.syntax.traverse._
 
 import quasar.concurrent.BlockingContext
-import quasar.connector.ResourceError
+//import quasar.connector.ResourceError
 import quasar.physical.mongo.MongoResource.{Collection, Database}
 import quasar.EffectfulQSpec
 
@@ -160,7 +160,7 @@ class MongoSpec extends EffectfulQSpec[IO] {
       }
     }
   )
-
+/*
   "findAll raises path not found for nonexistent collections" >> Fragment.foreach(MongoSpec.incorrectCollections)(col =>
     s"checking ${col.database.name} :: ${col.name}" >>* mkMongo.use { mongo =>
       IO.delay(mongo.findAll(col).attempt.unsafeRunSync() must beLike {
@@ -168,12 +168,13 @@ class MongoSpec extends EffectfulQSpec[IO] {
       })
     }
   )
-/*
+ */
+
   "tunnels" >> {
     "via key identity" >>* keyTunneledMongo.use(IO.pure).attempt.map(_ must beRight)
     "via user/password pair" >>* passwordTunneledMongo.use(IO.pure).attempt.map(_ must beRight)
   }
- */
+
 }
 
 object MongoSpec {
