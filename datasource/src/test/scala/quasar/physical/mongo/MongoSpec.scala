@@ -41,10 +41,10 @@ class MongoSpec extends EffectfulQSpec[IO] {
   import MongoSpec._
 
   step(MongoSpec.setupDB.unsafeRunSync())
-/*
+
   "can create client from valid connection string" >>*
     mkMongo.use(IO.pure).attempt.map(_ must beRight)
-
+/*
   "can't create client from incorrect connection string" >> {
     "for incorrect protocol" >> {
       Mongo[IO](
