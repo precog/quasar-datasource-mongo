@@ -29,7 +29,7 @@ import quasar.physical.mongo.MongoResource.{Collection, Database}
 import quasar.EffectfulQSpec
 
 import org.bson.{Document => _, _}
-import org.mongodb.scala.{Completed, Document, MongoClient} //, MongoSecurityException} //, MongoTimeoutException}
+import org.mongodb.scala.{Completed, Document, MongoClient, MongoSecurityException, MongoTimeoutException}
 import org.specs2.specification.core._
 import org.specs2.execute.AsResult
 import scala.io.Source
@@ -39,12 +39,12 @@ import testImplicits._
 
 class MongoSpec extends EffectfulQSpec[IO] {
   import MongoSpec._
-
+/*
   step(MongoSpec.setupDB.unsafeRunSync())
-
+ */
   "can create client from valid connection string" >>*
     mkMongo.use(IO.pure).attempt.map(_ must beRight)
-/*
+
   "can't create client from incorrect connection string" >> {
     "for incorrect protocol" >> {
       Mongo[IO](
@@ -80,7 +80,7 @@ class MongoSpec extends EffectfulQSpec[IO] {
   "it's impossible to make mongo with incorrect auth" >> {
     mkInvalidAMongo.use(IO.pure).unsafeRunSync() must throwA[MongoSecurityException]
   }
- */
+
   "databaseExists returns true for existing dbs" >> Fragment.foreach(MongoSpec.correctDbs)(db =>
       s"checking ${db.name}" >>* mkMongo.use { mongo =>
         mongo.databaseExists(db).compile.lastOrError
