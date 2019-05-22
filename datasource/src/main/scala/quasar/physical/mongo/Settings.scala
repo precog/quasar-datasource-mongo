@@ -28,7 +28,6 @@ import com.jcraft.jsch._
 import com.mongodb.connection.ClusterSettings
 import com.mongodb.{ConnectionString, ServerAddress}
 
-import quasar.Disposable
 import quasar.concurrent.BlockingContext
 
 import scalaz.syntax.tag._
@@ -40,16 +39,12 @@ object Settings {
 
   val SessionName: String = "default"
 
-  def apply[F[_]: Sync: ContextShift](config: MongoConfig, blockingPool: BlockingContext): F[Disposable[F, ClusterSettings]] =
-    connectionString[F](config.connectionString) flatMap { (conn: ConnectionString) =>
+  def apply[F[_]: Sync: ContextShift](config: MongoConfig, blockingPool: BlockingContext): Resource[F, ClusterSettings] =
+    Resource.suspend(connectionString[F](config.connectionString) map { (conn: ConnectionString) =>
       val settings: ClusterSettings = ClusterSettings.builder.applyConnectionString(conn).build
-      config.tunnelConfig match {
-        case None =>
-          Disposable(settings, Sync[F].unit).pure[F]
-        case Some(tcfg) =>
-          viaTunnel(tcfg, settings, blockingPool)
-      }
-    }
+
+      config.tunnelConfig.fold(settings.pure[Resource[F, ?]])(viaTunnel(_, settings, blockingPool))
+    })
 
   def connectionString[F[_]: Sync](s: String): F[ConnectionString] = Sync[F].delay {
     new ConnectionString(s)
@@ -126,12 +121,13 @@ object Settings {
       config: TunnelConfig,
       settings: ClusterSettings,
       blockingPool: BlockingContext)
-      : F[Disposable[F, ClusterSettings]] = ContextShift[F].evalOn(blockingPool.unwrap) { for {
-    jsch <- mkJSch
-    sess <- mkSession(jsch, config)
-    _ <- setUserInfo(sess, userInfo(config))
-    address <- serverAddress(settings)
-    tunnel <- openTunnel(sess, address)
-    result <- tunneledSettings(settings, tunnel)
-  } yield Disposable(result, ContextShift[F].evalOn(blockingPool.unwrap)(closeTunnel(sess, tunnel))) }
+      : Resource[F, ClusterSettings] =
+    Resource(ContextShift[F].evalOn(blockingPool.unwrap)(for {
+      jsch <- mkJSch
+      sess <- mkSession(jsch, config)
+      _ <- setUserInfo(sess, userInfo(config))
+      address <- serverAddress(settings)
+      tunnel <- openTunnel(sess, address)
+      result <- tunneledSettings(settings, tunnel)
+    } yield (result, ContextShift[F].evalOn(blockingPool.unwrap)(closeTunnel(sess, tunnel)))))
 }

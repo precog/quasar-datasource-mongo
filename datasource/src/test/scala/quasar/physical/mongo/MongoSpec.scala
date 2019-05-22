@@ -18,7 +18,7 @@ package quasar.physical.mongo
 
 import slamdata.Predef._
 
-import cats.effect.IO
+import cats.effect.{IO, Resource}
 import cats.instances.list._
 import cats.syntax.apply._
 import cats.syntax.traverse._
@@ -26,7 +26,7 @@ import cats.syntax.traverse._
 import quasar.concurrent.BlockingContext
 import quasar.connector.ResourceError
 import quasar.physical.mongo.MongoResource.{Collection, Database}
-import quasar.{Disposable, EffectfulQSpec}
+import quasar.EffectfulQSpec
 
 import org.bson.{Document => _, _}
 import org.mongodb.scala.{Completed, Document, MongoClient, MongoSecurityException, MongoTimeoutException}
@@ -40,96 +40,99 @@ import testImplicits._
 class MongoSpec extends EffectfulQSpec[IO] {
   import MongoSpec._
 
-  step(MongoSpec.setupDB)
+  step(MongoSpec.setupDB.unsafeRunSync())
 
   "can create client from valid connection string" >>*
-    mkMongo.map(_ must not(throwA[Throwable]))
+    mkMongo.use(IO.pure).attempt.map(_ must beRight)
 
   "can't create client from incorrect connection string" >> {
     "for incorrect protocol" >> {
-      Mongo[IO](MongoConfig(
-        "http://localhost",
-        128,
-        PushdownLevel.Disabled,
-        None),
-      BlockingContext.cached("not-used")).unsafeRunSync() must throwA[java.lang.IllegalArgumentException]
+      Mongo[IO](
+        MongoConfig("http://localhost", 128, PushdownLevel.Disabled, None),
+        BlockingContext.cached("not-used"))
+        .use(IO.pure)
+        .unsafeRunSync() must throwA[java.lang.IllegalArgumentException]
     }
 
     "for unreachable config" >> {
-      Mongo[IO](MongoConfig(
-        "mongodb://unreachable",
-        128,
-        PushdownLevel.Disabled,
-        None),
-      BlockingContext.cached("not-used")).unsafeRunSync() must throwA[MongoTimeoutException]
+      Mongo[IO](
+        MongoConfig("mongodb://unreachable", 128, PushdownLevel.Disabled, None),
+        BlockingContext.cached("not-used"))
+        .use(IO.pure)
+        .unsafeRunSync() must throwA[MongoTimeoutException]
     }
   }
 
-  "getting databases works correctly" >>* mkMongo.flatMap(_ { mongo =>
+  "getting databases works correctly" >>* mkMongo.use { mongo =>
     mongo.databases.compile.toList.map { evaluatedDbs =>
       MongoSpec.correctDbs.toSet.subsetOf(evaluatedDbs.toSet)
     }
-  })
+  }
 
-  "getting databases for constrained role works correctly A" >>* mkAMongo.flatMap(_ { mongo =>
-    mongo.databases.compile.toList.map { _ === List(Database("A")) }})
+  "getting databases for constrained role works correctly A" >>* mkAMongo.use { mongo =>
+    mongo.databases.compile.toList.map { _ === List(Database("A")) }
+  }
 
-  "getting databases for constrained role works correctly B" >>* mkBMongo.flatMap(_ { mongo =>
-    mongo.databases.compile.toList.map { _ === List(Database("B")) }})
+  "getting databases for constrained role works correctly B" >>* mkBMongo.use { mongo =>
+    mongo.databases.compile.toList.map { _ === List(Database("B")) }
+  }
 
   "it's impossible to make mongo with incorrect auth" >> {
-    mkInvalidAMongo.unsafeRunSync() must throwA[MongoSecurityException]
+    mkInvalidAMongo.use(IO.pure).unsafeRunSync() must throwA[MongoSecurityException]
   }
 
   "databaseExists returns true for existing dbs" >> Fragment.foreach(MongoSpec.correctDbs)(db =>
-      s"checking ${db.name}" >>* mkMongo.flatMap(_ { mongo =>
+      s"checking ${db.name}" >>* mkMongo.use { mongo =>
         mongo.databaseExists(db).compile.lastOrError
-      })
+      }
   )
 
   "databaseExists returns false for non-existing dbs" >> Fragment.foreach(MongoSpec.incorrectDbs)(db =>
-    s"checking ${db.name}" >>* mkMongo.flatMap(_ { mongo =>
+    s"checking ${db.name}" >>* mkMongo.use { mongo =>
       mongo.databaseExists(db).map(!_).compile.lastOrError
-    })
+    }
   )
 
   "collections returns correct collection lists" >> Fragment.foreach(MongoSpec.correctDbs)(db =>
-    s"checking ${db.name}" >>* mkMongo.flatMap(_ { mongo =>
+    s"checking ${db.name}" >>* mkMongo.use { mongo =>
       mongo.collections(db)
         .fold(List[Collection]())((lst, coll) => coll :: lst)
         .map(collectionList => collectionList.toSet === MongoSpec.cols.map(c => Collection(db, c)).toSet)
         .compile
         .lastOrError
-    })
+    }
   )
 
   "collections returns correct collection lists for constrained roles B" >> {
-    "B" >>* mkBMongo.flatMap(_ { mongo =>
-      mongo.collections(Database("B")).compile.toList.map { _ === List() }})
-    "B.b" >>* mkBBMongo.flatMap(_ { mongo =>
-      mongo.collections(Database("B")).compile.toList.map { _ == List(Collection(Database("B"), "b")) }})
+    "B" >>* mkBMongo.use { mongo =>
+      mongo.collections(Database("B")).compile.toList.map { _ === List() }
+    }
+
+    "B.b" >>* mkBBMongo.use { mongo =>
+      mongo.collections(Database("B")).compile.toList.map { _ == List(Collection(Database("B"), "b")) }
+    }
   }
 
   "collections return empty stream for non-existing databases" >> Fragment.foreach(MongoSpec.incorrectDbs)(db =>
-    s"checking ${db.name}" >>* mkMongo.flatMap(_ { mongo =>
+    s"checking ${db.name}" >>* mkMongo.use { mongo =>
       mongo.collections(db).compile.toList.map(_ === List[Collection]())
-    })
+    }
   )
 
   "collectionExists returns true for existent collections" >> Fragment.foreach(MongoSpec.correctCollections)(col =>
-    s"checking ${col.database.name} :: ${col.name}" >>* mkMongo.flatMap(_ { mongo =>
+    s"checking ${col.database.name} :: ${col.name}" >>* mkMongo.use { mongo =>
       mongo.collectionExists(col).compile.lastOrError
-    })
+    }
   )
 
   "collectionExists returns false for non-existent collections" >> Fragment.foreach(MongoSpec.incorrectCollections)(col =>
-    s"checking ${col.database.name} :: ${col.name}" >>* mkMongo.flatMap(_ { mongo =>
+    s"checking ${col.database.name} :: ${col.name}" >>* mkMongo.use { mongo =>
       mongo.collectionExists(col).map(!_).compile.lastOrError
-    })
+    }
   )
 
   "findAll returns correct results for existing collections" >> Fragment.foreach(MongoSpec.correctCollections)(col =>
-    s"checking ${col.database.name} :: ${col.name}" >>* mkMongo.flatMap(_ { mongo =>
+    s"checking ${col.database.name} :: ${col.name}" >>* mkMongo.use { mongo =>
       mongo.findAll(col).flatMap { stream =>
         stream
           .fold(List[BsonValue]())((lst, col) => col :: lst)
@@ -140,11 +143,11 @@ class MongoSpec extends EffectfulQSpec[IO] {
           .compile
           .lastOrError
       }
-    })
+    }
   )
 
   "evaluteImpl works falls back if there is an exception" >> Fragment.foreach(MongoSpec.correctCollections)(col =>
-    s"checking ${col.database.name} :: ${col.name}" >>* mkMongo.flatMap(_ { mongo =>
+    s"checking ${col.database.name} :: ${col.name}" >>* mkMongo.use { mongo =>
       mongo.evaluateImpl(col, incorrectPipeline, mongo.findAll(col)).flatMap { case (_, stream) =>
         stream
           .fold(List[BsonValue]())((lst, col) => col :: lst)
@@ -155,20 +158,20 @@ class MongoSpec extends EffectfulQSpec[IO] {
           .compile
           .lastOrError
       }
-    })
+    }
   )
 
   "findAll raises path not found for nonexistent collections" >> Fragment.foreach(MongoSpec.incorrectCollections)(col =>
-    s"checking ${col.database.name} :: ${col.name}" >>* mkMongo.flatMap(_ { mongo =>
-      IO.delay(mongo.findAll(col).attempt.unsafeRunSync() must beLike {
+    s"checking ${col.database.name} :: ${col.name}" >>* mkMongo.use { mongo =>
+      mongo.findAll(col).attempt.map(_ must beLike {
         case Left(t) => ResourceError.throwableP.getOption(t) must_=== Some(ResourceError.pathNotFound(col.resourcePath))
       })
-    })
+    }
   )
 
   "tunnels" >> {
-    "via key identity" >>* keyTunneledMongo.map(_ must not(throwA[Throwable]))
-    "via user/password pair" >>* passwordTunneledMongo.map(_ must not(throwA[Throwable]))
+    "via key identity" >>* keyTunneledMongo.use(IO.pure).attempt.map(_ must beRight)
+    "via user/password pair" >>* passwordTunneledMongo.use(IO.pure).attempt.map(_ must beRight)
   }
 }
 
@@ -178,7 +181,7 @@ object MongoSpec {
   import Mongo._
   import TunnelConfig.Pass._
 
-  private val blockingPool: BlockingContext = BlockingContext.cached("mongo-datasource")
+  private lazy val blockingPool: BlockingContext = BlockingContext.cached("mongo-datasource")
 
   val dbs = List("A", "B", "C", "D")
   val cols = List("a", "b", "c", "d")
@@ -199,7 +202,7 @@ object MongoSpec {
 
   val BatchSize: Int = 64
 
-  def mkMongo: IO[Disposable[IO, Mongo[IO]]] =
+  def mkMongo: Resource[IO, Mongo[IO]] =
     Mongo[IO](MongoConfig(connectionString, BatchSize, PushdownLevel.Full, None), blockingPool)
 
   def privateKey: IO[String] = IO.delay {
@@ -214,7 +217,7 @@ object MongoSpec {
   val TunnelHost: String = "localhost"
   val TunnelPort: Int = 22222
 
-  def passwordTunneledMongo: IO[Disposable[IO, Mongo[IO]]] =
+  def passwordTunneledMongo: Resource[IO, Mongo[IO]] =
     Mongo[IO](MongoConfig(
       TunneledURL,
       BatchSize,
@@ -223,37 +226,41 @@ object MongoSpec {
         Some(Password(TunnelPassword))))),
       blockingPool)
 
-  def keyTunneledMongo: IO[Disposable[IO, Mongo[IO]]] = privateKey flatMap { key =>
-    Mongo[IO](MongoConfig(
-      TunneledURL,
-      BatchSize,
-      PushdownLevel.Full,
-      Some(TunnelConfig(TunnelHost, TunnelPort, TunnelUser,
-        Some(Identity(key, TunnelPassphrase))))),
-      blockingPool)
-  }
+  def keyTunneledMongo: Resource[IO, Mongo[IO]] =
+    Resource.liftF(privateKey) flatMap { key =>
+      Mongo[IO](MongoConfig(
+        TunneledURL,
+        BatchSize,
+        PushdownLevel.Full,
+        Some(TunnelConfig(TunnelHost, TunnelPort, TunnelUser,
+          Some(Identity(key, TunnelPassphrase))))),
+        blockingPool)
+    }
 
-  def mkAMongo: IO[Disposable[IO, Mongo[IO]]] =
+  def mkAMongo: Resource[IO, Mongo[IO]] =
     Mongo[IO](MongoConfig(aConnectionString, BatchSize, PushdownLevel.Full, None), blockingPool)
 
-  def mkInvalidAMongo: IO[Disposable[IO, Mongo[IO]]] =
+  def mkInvalidAMongo: Resource[IO, Mongo[IO]] =
     Mongo[IO](MongoConfig(invalidAConnectionString, BatchSize, PushdownLevel.Full, None), blockingPool)
 
   // create an invalid Mongo to test error scenarios, bypassing the ping check that's done in Mongo.apply
-  def mkMongoInvalidPort: IO[Disposable[IO, Mongo[IO]]] =
+  def mkMongoInvalidPort: Resource[IO, Mongo[IO]] =
     for {
-      clientDisposable <- Mongo.mkClient[IO](MongoConfig(connectionStringInvalidPort, 64, PushdownLevel.Full, None), blockingPool)
+      client <- Mongo.mkClient[IO](
+        MongoConfig(connectionStringInvalidPort, 64, PushdownLevel.Full, None),
+        blockingPool)
+
       interpreter = new Interpreter(Version(0, 0, 0), "redundant", PushdownLevel.Full)
-    } yield clientDisposable flatMap { (c: MongoClient) =>
-      val mongo = new Mongo[IO](c, BatchSize.toLong, PushdownLevel.Full, interpreter, None)
-      Disposable(mongo, IO.unit)
+    } yield {
+      new Mongo[IO](
+        client, BatchSize.toLong, PushdownLevel.Full, interpreter, None)
     }
 
-  def mkBMongo: IO[Disposable[IO, Mongo[IO]]] =
+  def mkBMongo: Resource[IO, Mongo[IO]] =
     Mongo[IO](MongoConfig(bConnectionString, BatchSize, PushdownLevel.Full, None), blockingPool)
-  def mkBBMongo: IO[Disposable[IO, Mongo[IO]]] =
-    Mongo[IO](MongoConfig(bbConnectionString, BatchSize, PushdownLevel.Full, None), blockingPool)
 
+  def mkBBMongo: Resource[IO, Mongo[IO]] =
+    Mongo[IO](MongoConfig(bbConnectionString, BatchSize, PushdownLevel.Full, None), blockingPool)
 
   def incorrectCollections: List[Collection] = {
     val incorrectDbStream =
@@ -279,9 +286,11 @@ object MongoSpec {
 
   val incorrectPipeline: List[BsonDocument] = List(new BsonDocument("$incorrect", new BsonInt32(0)))
 
-  def setupDB(): Unit = {
-    val ioSetup = for {
-      client <- IO.delay(MongoClient(connectionString))
+  def setupDB(): IO[Unit] = {
+    val clientR =
+      Resource.make(IO(MongoClient(connectionString)))(c => IO(c.close()))
+
+    clientR.use(client => for {
       _ <- correctCollections.traverse { col => for {
         mongoCollection <- IO.delay(client.getDatabase(col.database.name).getCollection(col.name))
         _ <- singleObservableAsF[IO, Completed](mongoCollection.drop).attempt
@@ -300,8 +309,6 @@ object MongoSpec {
           "roles" -> List(Document("role" -> "userAdmin", "db" -> "B"))))).attempt
         } yield ()
       }
-      _ <- IO.delay(client.close())
-    } yield ()
-    ioSetup.unsafeRunSync()
+    } yield ())
   }
 }

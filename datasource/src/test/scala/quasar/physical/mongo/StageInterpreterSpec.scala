@@ -114,14 +114,14 @@ trait StageInterpreterSpec extends JsonSpec {
   }
 
   def interpret(stages: ScalarStages, inp: JsonStream, mapper: (BsonValue => BsonValue)): JsonStream = {
-    mkMongo.flatMap(_ { mongo => for {
+    mkMongo.use(mongo => for {
       c <- uniqueCollection
       _ <- dropCollection(c, mongo)
       _ <- insertValues(c, mongo, inp map mapper)
       stream <- mongo.evaluate(c, stages)
       actual <- stream._2.compile.toList
       _ <- dropCollection(c, mongo)
-    } yield actual }).unsafeRunSync()
+    } yield actual).unsafeRunSync()
   }
 
   protected def ldjson(str: String): JsonStream = {

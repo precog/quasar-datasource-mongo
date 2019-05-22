@@ -34,8 +34,7 @@ import quasar.concurrent.BlockingContext
 import quasar.connector.{MonadResourceErr, ResourceError}
 import quasar.physical.mongo.MongoResource.{Collection, Database}
 import quasar.physical.mongo.expression.Mapper
-import quasar.{Disposable, IdStatus, ScalarStages}
-import quasar.fp.ski._
+import quasar.{IdStatus, ScalarStages}
 
 import org.bson.{Document => _, _}
 import com.mongodb.{Block, ConnectionString}
@@ -252,24 +251,29 @@ object Mongo {
       })
     } guarantee ContextShift[F].shift
 
-  def mkClient[F[_]: ContextShift](config: MongoConfig, blockingPool: BlockingContext)(implicit F: Sync[F]): F[Disposable[F, MongoClient]] =
-    Settings[F](config, blockingPool) flatMap { (disposable: Disposable[F, ClusterSettings]) => for {
-      conn <- F.delay { new ConnectionString(config.connectionString) }
-      rawSettings <- F.delay {
-        val updateCluster: Block[ClusterSettings.Builder] = new Block[ClusterSettings.Builder] {
-          def apply(t: ClusterSettings.Builder): Unit = {
-            val _ = t.applySettings(disposable.unsafeValue); ()
+  def mkClient[F[_]: ContextShift](config: MongoConfig, blockingPool: BlockingContext)(implicit F: Sync[F]): Resource[F, MongoClient] =
+    Settings[F](config, blockingPool) flatMap { clusterSettings =>
+      Resource(for {
+        conn <- F.delay { new ConnectionString(config.connectionString) }
+
+        rawSettings <- F.delay {
+          val updateCluster: Block[ClusterSettings.Builder] = new Block[ClusterSettings.Builder] {
+            def apply(t: ClusterSettings.Builder): Unit = {
+              val _ = t.applySettings(clusterSettings); ()
+            }
           }
+          MongoClientSettings.builder.applyConnectionString(conn).applyToClusterSettings(updateCluster).build
         }
-        MongoClientSettings.builder.applyConnectionString(conn).applyToClusterSettings(updateCluster).build
-      }
-      settings <- F.delay {
-        if (rawSettings.getSslSettings.isEnabled)
-          MongoClientSettings.builder(rawSettings).streamFactoryFactory(NettyStreamFactoryFactory()).build
-        else rawSettings
-      }
-      client <- F.delay(MongoClient(settings))
-    } yield disposable flatMap (κ(Disposable(client, close(client)))) }
+
+        settings <- F.delay {
+          if (rawSettings.getSslSettings.isEnabled)
+            MongoClientSettings.builder(rawSettings).streamFactoryFactory(NettyStreamFactoryFactory()).build
+          else rawSettings
+        }
+
+        client <- F.delay(MongoClient(settings))
+      } yield (client, close(client)))
+    }
 
   def close[F[_]](client: MongoClient)(implicit F: Sync[F]): F[Unit] =
     F.delay(client.close())
@@ -277,7 +281,7 @@ object Mongo {
   def apply[F[_]: ConcurrentEffect: ContextShift: MonadResourceErr](
       config: MongoConfig,
       blockingPool: BlockingContext)
-      : F[Disposable[F, Mongo[F]]] = {
+      : Resource[F, Mongo[F]] = {
     val F = ConcurrentEffect[F]
 
     def buildInfo(client: MongoClient): F[Document] =
@@ -308,13 +312,11 @@ object Mongo {
         getVersionString(x) map (_.split("\\.")) flatMap mkVersion getOrElse Version.zero
       }
 
-    mkClient(config, blockingPool) flatMap { (disposable: Disposable[F, MongoClient]) => {
-      val client = disposable.unsafeValue
-      val mongoF = for {
+    mkClient(config, blockingPool) evalMap { client =>
+      for {
         version <- getVersion(client)
         interpreter <- Interpreter(version, config.pushdownLevel)
       } yield new Mongo[F](client, scala.math.max(1L, config.batchSize.toLong), config.pushdownLevel, interpreter, config.accessedResource)
-      mongoF map { (m: Mongo[F]) => disposable map (κ(m)) }
-    }}
+    }
   }
 }
