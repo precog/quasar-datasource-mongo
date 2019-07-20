@@ -26,7 +26,7 @@ val jschVersion = "0.1.55"
 
 lazy val core = project
   .in(file("datasource"))
-  .settings(addCompilerPlugin("com.olegpy" %% "better-monadic-for" % "0.3.0"))
+  .settings(addCompilerPlugin("com.olegpy" %% "better-monadic-for" % "0.3.1"))
   .settings(parallelExecution in Test := false)
   .settings(
     name := "quasar-datasource-mongo",
