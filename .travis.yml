@@ -50,6 +50,7 @@ jobs:
       - ssh-keygen -t rsa -N "passphrase" -f key_for_docker
       - sshpass -p root ssh-copy-id -i key_for_docker -o StrictHostKeyChecking=no root@localhost -p 22222
       - set -e
+      - "$SBT ++$TRAVIS_SCALA_VERSION datasourceAssemblePlugin"
       - "$SBT ++$TRAVIS_SCALA_VERSION test"
   - stage: publish
     script:
