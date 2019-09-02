@@ -42,6 +42,8 @@ jobs:
     script:
       # plain machine with mongodb on 27018 port
       - docker run -d -p 127.0.0.1:27018:27017 --name mongodb -e MONGODB_ROOT_PASSWORD=secret bitnami/mongodb:4.1.4
+      # ssl enabled docker machine
+      - docker run -d -p 127.0.0.1:27019:27107 -v $(HOME)/quasar-datasource-mongo/certs/:/etc/ssl --name mongodb-ssl -e MONGODB_ROOT_PASSWORD=secret -e MONGODB_EXTRA_FLAGS='--sslMode requireSSL --sslPEMKeyFile /etc/ssl/quasar-mongo-travis.pem' bitnami/mongodb:4.1.4
       # sshd can look at 27017 using `mng` host name, used to create tunnel like
       # ssh -f -N -L 33333:mng:27017 root@localhost -p 22222
       - docker-compose up -d

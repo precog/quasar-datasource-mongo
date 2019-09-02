@@ -29,7 +29,7 @@ import quasar.physical.mongo.MongoResource.{Collection, Database}
 import quasar.EffectfulQSpec
 
 import org.bson.{Document => _, _}
-import org.mongodb.scala.{Completed, Document, MongoClient, MongoSecurityException, MongoTimeoutException}
+import org.mongodb.scala.{Completed, Document, MongoSecurityException, MongoTimeoutException}
 import org.specs2.specification.core._
 import org.specs2.execute.AsResult
 import scala.io.Source
@@ -39,11 +39,9 @@ import testImplicits._
 
 class MongoSpec extends EffectfulQSpec[IO] {
   import MongoSpec._
-
   step(MongoSpec.setupDB.unsafeRunSync())
 
-  "can create client from valid connection string" >>*
-    mkMongo.use(IO.pure).attempt.map(_ must beRight)
+  "can create client from valid connection string" >>* mkMongo.use(IO.pure).attempt.map(_ must beRight)
 
   "can't create client from incorrect connection string" >> {
     "for incorrect protocol" >> {
@@ -169,6 +167,82 @@ class MongoSpec extends EffectfulQSpec[IO] {
     }
   )
 
+  "ssl" >> {
+    "can't connect w/o any ssl configuration" >>* {
+      Mongo[IO](MongoConfig(insecuredConnectionString, BatchSize, PushdownLevel.Full, None, None), blockingPool)
+        .use(IO.pure)
+        .attempt
+        .map(_ must beLeft)
+    }
+
+    "can connect when ssl enabled" >>* {
+      val sslConfig = SSLConfig(None, None, true, None)
+      Mongo[IO](MongoConfig(securedConnectionString, BatchSize, PushdownLevel.Full, None, Some(sslConfig)), blockingPool)
+        .use(IO.pure)
+        .attempt
+        .map(_ must beRight)
+    }
+
+    "can connect when ssl enabled via connectionString only" >>* {
+      Mongo[IO](MongoConfig(securedConnectionString, BatchSize, PushdownLevel.Full, None, None), blockingPool)
+        .use(IO.pure)
+        .attempt
+        .map(_ must beRight)
+    }
+
+    "can connect with certificate authority provided" >>* {
+      val certString = """
+-----BEGIN CERTIFICATE-----
+MIIGFTCCA/2gAwIBAgIJAJjzUnLXxIlrMA0GCSqGSIb3DQEBCwUAMIGgMQswCQYD
+VQQGEwJVUzELMAkGA1UECAwCQ08xITAfBgNVBAoMGEludGVybmV0IFdpZGdpdHMg
+UHR5IEx0ZDExMC8GA1UECwwoVHJhdmlzIHRlc3RzIGZvciBxdWFzYXItZGF0YXNv
+dXJjZS1tb25nbzENMAsGA1UEAwwEcm9vdDEfMB0GCSqGSIb3DQEJARYQYm90QHNs
+YW1kYXRhLmNvbTAeFw0xOTA5MDIxMjMyMTZaFw0yMjA2MjIxMjMyMTZaMIGgMQsw
+CQYDVQQGEwJVUzELMAkGA1UECAwCQ08xITAfBgNVBAoMGEludGVybmV0IFdpZGdp
+dHMgUHR5IEx0ZDExMC8GA1UECwwoVHJhdmlzIHRlc3RzIGZvciBxdWFzYXItZGF0
+YXNvdXJjZS1tb25nbzENMAsGA1UEAwwEcm9vdDEfMB0GCSqGSIb3DQEJARYQYm90
+QHNsYW1kYXRhLmNvbTCCAiIwDQYJKoZIhvcNAQEBBQADggIPADCCAgoCggIBAMkN
+PLjWunQbKHJ93W+gT/UdpkYqp/N1bv8uxZiYhUjE+xm2dfRa8IJJRuxxx6RjJVhL
+9WL4/pruGY0lrQPj4K/rqOWtGyzkLMQAvUBft0hgtVg9h/Eig7IiPQpyhBPQfu73
+gSCIfviZX0jlcbC/HhhIO/wG185lMXG2Jpvztu6uFWISdoQn/WKnkzv6w9TcUTjS
+ZEhiklXlRIj4S/65x7l0PJdjZM86BF1cWipHwcHwmkHJxVReZky0o5psRApLUBzy
+aNKcmGBbLtdgdTQKTZhNhfYH1GxCqNopUeBE84/XvKx/8WFFf6LQ6e2lN1+qzM7U
+0zg0iqYrYgyiHWWQJaIY0rksmfQWyaNimvNKRA1HfEzHW9aFmgkt2K4ncQ8BwNm7
+dFPiToKQWCyK2vvYof/QUcb/f9JFlhcFaoHxdjvbV52pxnEEqBo8l9J94opRcx94
+PuTByYYs+MLLO1vuqeilVAp+8bUfvQtsR/4Ri8vgd/Egy18nUPCDyLePj4WnuIKH
+QEGQwzVR6nmkwQlPrDMPa0HGvQk5HevePcTErP98SjE6MkyzACO+a96A5w9QF8X/
+TiNTXI28ieTbRvog9q+oSW1GBEEDVOMrBm+WubA5NpNLc9HGrBYFhi4XYzXRM7RX
+BLeqChZrcOP/79Ym9J22MfHLmZH1hdkWKY1ralIRAgMBAAGjUDBOMB0GA1UdDgQW
+BBSLuYAnqAU5BRzxjU5EDzymFejknjAfBgNVHSMEGDAWgBSLuYAnqAU5BRzxjU5E
+DzymFejknjAMBgNVHRMEBTADAQH/MA0GCSqGSIb3DQEBCwUAA4ICAQBvGo6DgfNc
+/dQJ0ROZVtW4TPa0Pa+t8SydtPS3533wdZmqlDZWNhRPvENVKyowMhyDCmmdcTpn
+X9FOdVMHf9WMeH1BDedjrqHpcLWHnOk/RMh6kJ95Qg15rdMTFUmLPv4XbWhh1Sof
+SNZB2QXMG9G9Lu8Vg1DRrKs8TCcuaCZfnKERA4CiL0G6DTLd1os6QxZcOdrI+0PR
++9zErCvxTgRjO8cVLvLnkjBScrsEVXRX7KhHJQAv/jHlZHCW44IpXicEHGHGZn0F
+QAHMb92NEaF10+GbZAoXi0Q2emDP+R4YDBNjG+wk2gcHLAnxDjbrhtPRrjUkPpiV
+GdiNNFkplIJnCZepHiGc1Lhc477lP+MRFjfBdjAksPn4ECd902JdjUI4wFqnIU/y
+mRp+TykVv9NmFWkhbf+T1gzt4S1eaWZT5BLp4x3jimOQvkEFXYLkfVwWRT/e3oJp
+TtZYRyUgo/772y6/WwUoC7JVtDrAP4c78EyjY3tB2D5F4ruDQWN2s48ziautg7cM
+KogCnn7keHB3k1PxmM+y8L4FLB8QG+54z9uMO9Q2bSIjB1PPHmY3GKLqOljmN3pz
+Il6xnf3gHCMdRqP+++aZhIwtWGECD57n5CoP25iPelSVp9CmBKuu8HGFTEajofFK
+B8nj9xIMi13bXa9zlWQquzo5WofYVSJxjw==
+-----END CERTIFICATE-----
+"""
+      val sslConfig = SSLConfig(Some(certString), None, true, None)
+      Mongo[IO](MongoConfig(securedConnectionString, BatchSize, PushdownLevel.Full, None, Some(sslConfig)), blockingPool)
+        .use(IO.pure)
+        .attempt
+        .map(_ must beRight)
+    }
+    "can't connect with incorrect certificate" >>* {
+      val sslConfig = SSLConfig(Some("incorrect certificate"), None, true, None)
+      Mongo[IO](MongoConfig(securedConnectionString, BatchSize, PushdownLevel.Full, None, Some(sslConfig)), blockingPool)
+        .use(IO.pure)
+        .attempt
+        .map(_ must beLeft)
+    }
+
+  }
   "tunnels" >> {
     "via key identity" >>* keyTunneledMongo.use(IO.pure).attempt.map(_ must beRight)
     "via user/password pair" >>* passwordTunneledMongo.use(IO.pure).attempt.map(_ must beRight)
@@ -191,10 +265,14 @@ object MongoSpec {
   val host = Source.fromResource("mongo-host").mkString.trim
 
   val port: String = "27018"
+  val securePort: String = "27019"
+
   val connectionString: String = s"mongodb://root:secret@${host}:${port}"
+  val insecuredConnectionString: String = s"mongodb://${host}:${securePort}/?serverSelectionTimeoutMS=1000"
+  val securedConnectionString: String = s"${insecuredConnectionString}&ssl=true"
   val connectionStringInvalidPort: String = s"mongodb://root:secret@${host}:27000/?serverSelectionTimeoutMS=1000"
   val aConnectionString: String = s"mongodb://aUser:aPassword@${host}:${port}/A.a"
-  val invalidAConnectionString: String = s"mongodb://aUser:aPassword@${host}:${port}"
+  val invalidAConnectionString: String = s"mongodb://aUser:aPassword@${host}:${port}/"
   // Note, there is no collection, only db
   val bConnectionString: String = s"mongodb://bUser:bPassword@${host}:${port}/B"
   // And, there we have collection .b
@@ -288,7 +366,7 @@ object MongoSpec {
 
   def setupDB(): IO[Unit] = {
     val clientR =
-      Resource.make(IO(MongoClient(connectionString)))(c => IO(c.close()))
+      Mongo.mkClient[IO](MongoConfig(connectionString, BatchSize, PushdownLevel.Full, None), blockingPool)
 
     clientR.use(client => for {
       _ <- correctCollections.traverse { col => for {

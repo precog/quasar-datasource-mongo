@@ -23,6 +23,7 @@ val refinedVersion = "0.9.9"
 val nettyVersion = "4.1.38.Final"
 val jsrVersion = "3.0.2"
 val jschVersion = "0.1.55"
+val argonautVersion = "6.2.3"
 
 lazy val core = project
   .in(file("datasource"))

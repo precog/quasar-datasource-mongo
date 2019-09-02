@@ -28,7 +28,9 @@ final case class MongoConfig(
     connectionString: String,
     batchSize: Int,
     pushdownLevel: PushdownLevel,
-    tunnelConfig: Option[TunnelConfig]) {
+    tunnelConfig: Option[TunnelConfig],
+    sslConfig: Option[SSLConfig] = None)
+    extends Product with Serializable {
   def accessedResource: Option[MongoResource] = {
     val connString = new ConnectionString(connectionString)
     val dbStr = Option(connString.getDatabase())
@@ -49,7 +51,8 @@ object MongoConfig {
       "connectionString" := config.connectionString,
       "batchSize" := config.batchSize,
       "pushdownLevel" := config.pushdownLevel,
-      "tunnelConfig" := config.tunnelConfig)
+      "tunnelConfig" := config.tunnelConfig,
+      "sslConfig" := config.sslConfig)
   }
 
   implicit val decodeJsonMongoConfig: DecodeJson[MongoConfig] = DecodeJson { c =>
@@ -58,11 +61,13 @@ object MongoConfig {
       batchSize <- (c --\ "batchSize").as[Option[Int]]
       pushdownLevel <- (c --\ "pushdownLevel").as[Option[PushdownLevel]]
       tunnelConfig <- (c --\ "tunnelConfig").as[Option[TunnelConfig]]
+      sslConfig <- (c --\ "sslConfig").as[Option[SSLConfig]]
     } yield MongoConfig(
       connectionString,
       batchSize getOrElse Migration1to2BatchSize,
       pushdownLevel getOrElse Migration1to2PushdownLevel,
-      tunnelConfig)
+      tunnelConfig,
+      sslConfig)
   }
 
   private val credentialsRegex = "://[^@+]+@".r
@@ -72,7 +77,8 @@ object MongoConfig {
     case Right(cfg) => {
       val newConnectionString = credentialsRegex.replaceFirstIn(cfg.connectionString, "://<REDACTED>:<REDACTED>@")
       val newTunnelConfig = cfg.tunnelConfig map TunnelConfig.sanitize
-      cfg.copy(connectionString = newConnectionString, tunnelConfig = newTunnelConfig).asJson
+      val newSSLConfig = cfg.sslConfig map SSLConfig.sanitize
+      cfg.copy(connectionString = newConnectionString, tunnelConfig = newTunnelConfig, sslConfig = newSSLConfig).asJson
     }
   }
 }
