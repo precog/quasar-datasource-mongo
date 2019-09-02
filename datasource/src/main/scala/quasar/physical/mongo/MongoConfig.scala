@@ -24,6 +24,7 @@ import com.mongodb.ConnectionString
 
 import quasar.physical.mongo.MongoResource.{Database, Collection}
 
+@SuppressWarnings(Array("org.wartremover.warts.DefaultArguments"))
 final case class MongoConfig(
     connectionString: String,
     batchSize: Int,
