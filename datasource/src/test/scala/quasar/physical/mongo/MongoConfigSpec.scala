@@ -179,7 +179,7 @@ class MongoConfigSpec extends Specification with ScalaCheck {
         "batchSize" -> jNumber(12),
         "pushdownLevel" -> jString("disabled"))
       input.as[MongoConfig].toEither ===
-        Right(MongoConfig.basic("mongodb://user:password@anyhost:1234").withBatchSize(128).withPushdown(PushdownLevel.Disabled))
+        Right(MongoConfig.basic("mongodb://user:password@anyhost:1234").withBatchSize(12).withPushdown(PushdownLevel.Disabled))
     }
     "light provided" >> {
       val input = Json.obj(
@@ -187,7 +187,7 @@ class MongoConfigSpec extends Specification with ScalaCheck {
         "batchSize" -> jNumber(142),
         "pushdownLevel" -> jString("light"))
       input.as[MongoConfig].toEither ===
-        Right(MongoConfig.basic("mongodb://user:password@anyhost:1234").withBatchSize(128).withPushdown(PushdownLevel.Light))
+        Right(MongoConfig.basic("mongodb://user:password@anyhost:1234").withBatchSize(142).withPushdown(PushdownLevel.Light))
     }
     "incorrect provided" >> {
       val input = Json.obj(
