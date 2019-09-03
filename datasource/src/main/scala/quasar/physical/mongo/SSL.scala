@@ -37,7 +37,7 @@ object SSL {
   } yield ctx
 
   @SuppressWarnings(Array("org.wartremover.warts.Null"))
-  def keyManagers[F[_]: Sync](config: SSLConfig): F[Array[KeyManager]] = config.clientPEM match {
+  private def keyManagers[F[_]: Sync](config: SSLConfig): F[Array[KeyManager]] = config.clientPEM match {
     case None => Sync[F].delay(null)
     case Some(prv) => for {
       // FIXME: this doesn't work yet
@@ -51,7 +51,7 @@ object SSL {
   }
 
   @SuppressWarnings(Array("org.wartremover.warts.Null"))
-  def trustManagers[F[_]: Sync](config: SSLConfig): F[Array[TrustManager]] = config.serverCA match {
+  private def trustManagers[F[_]: Sync](config: SSLConfig): F[Array[TrustManager]] = config.serverCA match {
     case None =>
       val fTM: F[TrustManager] = Sync[F].delay { new X509TrustManager {
         def getAcceptedIssuers(): Array[X509Certificate] = Array()
