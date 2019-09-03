@@ -38,9 +38,8 @@ import quasar.{IdStatus, ScalarStages}
 
 import org.bson.{Document => _, _}
 import com.mongodb.{Block, ConnectionString}
-import com.mongodb.connection.ClusterSettings
+import com.mongodb.connection.{ClusterSettings, SslSettings}
 import org.mongodb.scala._
-import org.mongodb.scala.connection.NettyStreamFactoryFactory
 
 import shims._
 
@@ -102,7 +101,6 @@ class Mongo[F[_]: MonadResourceErr : ConcurrentEffect : ContextShift] private[mo
   }
 
   def databases: Stream[F, Database] = {
-
     val fallbackDb = accessedResource.map(MongoResource.getDatabase)
 
     def emitFallbackOr(ifEmpty: => Stream[F, Database]) =
@@ -265,12 +263,38 @@ object Mongo {
           MongoClientSettings.builder.applyConnectionString(conn).applyToClusterSettings(updateCluster).build
         }
 
-        settings <- F.delay {
-          if (rawSettings.getSslSettings.isEnabled)
-            MongoClientSettings.builder(rawSettings).streamFactoryFactory(NettyStreamFactoryFactory()).build
-          else rawSettings
+        rawSslSettings <- F.delay(SslSettings.builder.applyConnectionString(conn).build)
+        sslConfig = if (rawSslSettings.isEnabled) {
+          config.sslConfig.orElse(Some(SSLConfig(None, None, true, None)))
+        } else config.sslConfig
+        sslSettings <- sslConfig match {
+          case None => F.delay(rawSslSettings)
+          case Some(cfg) => for {
+            context <- SSL.context[F](cfg)
+          } yield {
+            SslSettings
+              .builder
+              .applySettings(rawSslSettings)
+              .context(context)
+              .invalidHostNameAllowed(cfg.allowInvalidHostnames)
+              .build
+          }
         }
 
+        updateSsl: Block[SslSettings.Builder] = new Block[SslSettings.Builder] {
+          def apply(t: SslSettings.Builder): Unit = {
+            val _ = t.applySettings(sslSettings); ()
+          }
+        }
+
+        settings <- F.delay {
+          if (sslSettings.isEnabled)
+            MongoClientSettings
+              .builder(rawSettings)
+              .applyToSslSettings(updateSsl)
+              .build
+          else rawSettings
+        }
         client <- F.delay(MongoClient(settings))
       } yield (client, close(client)))
     }

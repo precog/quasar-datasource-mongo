@@ -20,7 +20,12 @@ import slamdata.Predef._
 
 import argonaut._, Argonaut._
 
-final case class TunnelConfig(host: String, port: Int, user: String, pass: Option[TunnelConfig.Pass])
+final case class TunnelConfig(
+    host: String,
+    port: Int,
+    user: String,
+    pass: Option[TunnelConfig.Pass])
+    extends Product with Serializable
 
 object TunnelConfig {
   import Pass._
