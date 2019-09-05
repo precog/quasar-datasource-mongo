@@ -18,17 +18,22 @@ package quasar.physical.mongo
 
 import slamdata.Predef._
 
+import cats.data.OptionT
 import cats.effect.Sync
 import cats.syntax.functor._
 import cats.syntax.flatMap._
+import cats.syntax.traverse._
+import cats.instances.option._
 
 import java.io.ByteArrayInputStream
 import java.security.{SecureRandom, KeyStore, KeyFactory}
 import java.security.cert.{X509Certificate, CertificateFactory}
-import javax.net.ssl.{SSLContext, KeyManager, TrustManager, X509TrustManager, KeyManagerFactory, TrustManagerFactory}
 import java.security.spec.{X509EncodedKeySpec, PKCS8EncodedKeySpec, RSAPrivateCrtKeySpec, KeySpec}
+import javax.crypto.{Cipher, EncryptedPrivateKeyInfo, SecretKeyFactory}
+import javax.crypto.spec.PBEKeySpec
+import javax.net.ssl.{SSLContext, KeyManager, TrustManager, X509TrustManager, KeyManagerFactory, TrustManagerFactory}
 
-import sun.security.util.{DerInputStream, DerValue}
+import sun.security.util.DerInputStream
 
 object SSL {
   def context[F[_]: Sync](config: SSLConfig): F[SSLContext] = for {
@@ -40,82 +45,34 @@ object SSL {
   } yield ctx
 
   @SuppressWarnings(Array("org.wartremover.warts.Null"))
-  private def keyManagers[F[_]: Sync](config: SSLConfig): F[Array[KeyManager]] = config.clientPEM match {
-    case None => Sync[F].delay(null)
-    case Some(prv) =>
-      val beginCertificate: String = "-----BEGIN CERTIFICATE-----"
-      val endCertificate: String = "-----END CERTIFICATE-----"
-      val beginRSAKey: String = "-----BEGIN RSA PRIVATE KEY-----"
-      val endRSAKey: String = "-----END RSA PRIVATE KEY-----"
-      val beginPKCS8: String = "-----BEGIN PRIVATE KEY-----"
-      val endPKCS8: String = "-----END PRIVATE KEY-----"
-
-      def between(start: String, end: String, hay: String): Option[String] = {
-        val startIx: Int = hay.indexOfSlice(start)
-        val endIx: Int = hay.indexOfSlice(end)
-        if (startIx < 0 || endIx < 0) None
-        else Some(prv.substring(startIx, endIx + end.length))
-
+  private def keyManagers[F[_]: Sync](config: SSLConfig): F[Array[KeyManager]] = {
+    val F = Sync[OptionT[F, ?]]
+    val optT = for {
+      prv <- OptionT.fromOption[F](config.clientPEM)
+      certificate <- OptionT.fromOption[F] {
+        val begin: String = "-----BEGIN CERTIFICATE-----"
+        val end: String = "-----END CERTIFICATE-----"
+        between(begin, end, prv)
       }
-
-      val certificate: String = between(beginCertificate, endCertificate, prv).get
-
-      def getKey(start: String, end: String, hay: String): Option[Array[Byte]] = between(start, end, hay).map { (x: String) =>
-        java.util.Base64.getDecoder.decode(x.replace("\r", "").replace("\n", "").replace(start, "").replace(end, ""))
+      key <- OptionT(PrivateKey.mkKey(prv))
+      spec <- PrivateKey.keySpec[OptionT[F, ?]](key, config.passphrase.getOrElse(""))
+      certificate <- F.delay {
+        CertificateFactory.getInstance("X509").generateCertificate(new ByteArrayInputStream(certificate.getBytes("UTF-8")))
       }
-
-      val rsaKey = getKey(beginRSAKey, endRSAKey, prv)
-
-      val pkcs8Key = getKey(beginPKCS8, endPKCS8, prv)
-
-      val keySpec: F[Option[KeySpec]] = rsaKey match {
-        case Some(bytes) => for {
-          derReader <- Sync[F].delay(new DerInputStream(bytes))
-          (ders: Array[DerValue]) <- Sync[F].delay(derReader.getSequence(0))
-          keySpec <- Sync[F].delay {
-            new RSAPrivateCrtKeySpec(
-              ders(1).getBigInteger,
-              ders(2).getBigInteger,
-              ders(3).getBigInteger,
-              ders(4).getBigInteger,
-              ders(5).getBigInteger,
-              ders(6).getBigInteger,
-              ders(7).getBigInteger,
-              ders(8).getBigInteger)
-          }
-        } yield Some(keySpec)
-        case None => pkcs8Key match {
-          case None => Sync[F].delay(None)
-          case Some(bytes) => Sync[F].delay(Some(new PKCS8EncodedKeySpec(bytes)))
-        }
-      }
-
-      for {
-        spec <- keySpec
-        result <- spec match {
-          case None => Sync[F].delay(null)
-          case Some(s) => for {
-            certificate <- Sync[F].delay {
-              CertificateFactory.getInstance("X509").generateCertificate(new ByteArrayInputStream(certificate.getBytes("UTF-8")))
-            }
-            ks <- Sync[F].delay(KeyStore.getInstance(KeyStore.getDefaultType()))
-            pwd = "password".toCharArray
-            _ <- Sync[F].delay(ks.load(null, pwd))
-            keyFactory <- Sync[F].delay {
-              KeyFactory.getInstance("RSA")
-            }
-            key <- Sync[F].delay {
-              keyFactory.generatePrivate(s)
-            }
-            _ <- Sync[F].delay {
-              ks.setKeyEntry("default", key, pwd, Array(certificate))
-            }
-            km <- Sync[F].delay(KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm()))
-            _ <- Sync[F].delay(km.init(ks, pwd))
-            res <- Sync[F].delay(km.getKeyManagers())
-          } yield res
-        }
-      } yield result
+      ks <- F.delay(KeyStore.getInstance(KeyStore.getDefaultType()))
+      pwd = "password".toCharArray
+      _ <- F.delay(ks.load(null, pwd))
+      keyFactory <- F.delay(KeyFactory.getInstance("RSA"))
+      key <- F.delay(keyFactory.generatePrivate(spec))
+      _ <- F.delay(ks.setKeyEntry("default", key, pwd, Array(certificate)))
+      km <- F.delay(KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm()))
+      _ <- F.delay(km.init(ks, pwd))
+      res <- F.delay(km.getKeyManagers())
+    } yield res
+    optT.value.map {
+      case None => null
+      case Some(a) => a
+    }
   }
 
   @SuppressWarnings(Array("org.wartremover.warts.Null"))
@@ -139,5 +96,70 @@ object SSL {
       _ <- Sync[F].delay(ts.init(ks))
       res <- Sync[F].delay(ts.getTrustManagers())
     } yield res
+  }
+
+  private def between(start: String, end: String, hay: String): Option[String] = {
+    val startIx: Int = hay.indexOfSlice(start)
+    val endIx: Int = hay.indexOfSlice(end)
+    if (startIx < 0 || endIx < 0) None
+    else Some(hay.substring(startIx, endIx + end.length))
+  }
+
+  trait PrivateKey extends Product with Serializable
+  object PrivateKey {
+    final case class PKCS1(bytes: Array[Byte]) extends PrivateKey
+    final case class PKCS8(bytes: Array[Byte]) extends PrivateKey
+    final case class EncryptedPKCS8(bytes: Array[Byte]) extends PrivateKey
+
+    val PKCS1Tag: String = "RSA PRIVATE KEY"
+    val PKCS8Tag: String = "PRIVATE KEY"
+    val EncryptedPKCS8Tag: String = "ENCRYPTED PRIVATE KEY"
+
+    private def taggedBytes[F[_]: Sync](tag: String, hay: String): F[Option[Array[Byte]]] = {
+      val start = s"-----BEGIN $tag-----"
+      val end = s"-----END $tag-----"
+      between(start, end, hay).traverse { (x: String) => Sync[F].delay {
+        java.util.Base64.getDecoder.decode(x.replace("\r", "").replace("\n", "").replace(start, "").replace(end, ""))
+      }}
+    }
+    def mkKey[F[_]: Sync](inp: String): F[Option[PrivateKey]] = for {
+      pkcs1Bytes <- taggedBytes(PKCS1Tag, inp)
+      pkcs8Bytes <- taggedBytes(PKCS8Tag, inp)
+      encBytes <- taggedBytes(EncryptedPKCS8Tag, inp)
+    } yield {
+      pkcs1Bytes.map(PKCS1(_)) orElse pkcs8Bytes.map(PKCS8(_)) orElse encBytes.map(EncryptedPKCS8(_))
+    }
+
+    def keySpec[F[_]: Sync](key: PrivateKey, pwd: String): F[KeySpec] = {
+      val F = Sync[F]
+      key match {
+        case PKCS1(bytes) => for {
+          reader <- F.delay(new DerInputStream(bytes))
+          ders <- F.delay(reader.getSequence(0))
+        } yield {
+          new RSAPrivateCrtKeySpec(
+            ders(1).getBigInteger,
+            ders(2).getBigInteger,
+            ders(3).getBigInteger,
+            ders(4).getBigInteger,
+            ders(5).getBigInteger,
+            ders(6).getBigInteger,
+            ders(7).getBigInteger,
+            ders(8).getBigInteger)
+        }
+        case PKCS8(bytes) =>
+          F.delay(new PKCS8EncodedKeySpec(bytes))
+        case EncryptedPKCS8(bytes) => for {
+          info <- F.delay(new EncryptedPrivateKeyInfo(bytes))
+          cipher <- F.delay(Cipher.getInstance(info.getAlgName()))
+          pbeKeySpec <- F.delay(new PBEKeySpec(pwd.toCharArray))
+          secretFactory <- F.delay(SecretKeyFactory.getInstance(info.getAlgName()))
+          pbeKey <- F.delay(secretFactory.generateSecret(pbeKeySpec))
+          algParams <- F.delay(info.getAlgParameters())
+          _ <- F.delay(cipher.init(Cipher.DECRYPT_MODE, pbeKey, algParams))
+          result <- F.delay(info.getKeySpec(cipher))
+        } yield result
+      }
+    }
   }
 }
