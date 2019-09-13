@@ -249,7 +249,11 @@ object Mongo {
       })
     } guarantee ContextShift[F].shift
 
-  def mkClient[F[_]: ContextShift](config: MongoConfig, blockingPool: BlockingContext)(implicit F: Sync[F]): Resource[F, MongoClient] =
+  def mkClient[F[_]: ContextShift](
+      config: MongoConfig,
+      blockingPool: BlockingContext)(
+      implicit F: Sync[F])
+      : Resource[F, MongoClient] =
     Settings[F](config, blockingPool) flatMap { clusterSettings =>
       Resource(for {
         conn <- F.delay { new ConnectionString(config.connectionString) }
@@ -269,15 +273,17 @@ object Mongo {
         } else config.sslConfig
         sslSettings <- sslConfig match {
           case None => F.delay(rawSslSettings)
-          case Some(cfg) => for {
-            context <- SSL.context[F](cfg)
-          } yield {
-            SslSettings
-              .builder
-              .applySettings(rawSslSettings)
-              .context(context)
-              .invalidHostNameAllowed(cfg.allowInvalidHostnames)
-              .build
+          case Some(cfg) =>
+            SSL.context[F](cfg).value.flatMap {
+              case None => F.delay(rawSslSettings)
+              case Some(context) => F.delay {
+                SslSettings
+                  .builder
+                  .applySettings(rawSslSettings)
+                  .context(context)
+                  .invalidHostNameAllowed(cfg.allowInvalidHostnames)
+                  .build
+              }
           }
         }
 

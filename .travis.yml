@@ -45,7 +45,12 @@ jobs:
       # ssl enabled docker machine
       - docker create -p 127.0.0.1:27019:27017 --name mongodb-ssl -e MONGODB_EXTRA_FLAGS="--sslMode requireSSL --sslPEMKeyFile /cert.pem" bitnami/mongodb:4.1.4
       - docker cp ./certs/quasar-mongo-travis.pem mongodb-ssl:/cert.pem
+      # ssl enabled docker machine, this one requires client to have key
+      - docker create -p 127.0.0.1:27020:27017 --name mongodb-ssl-client -e MONGODB_EXTRA_FLAGS="--sslMode requireSSL --sslPEMKeyFile /cert.pem --sslCAFile /ca.pem" bitnami/mongodb:4.1.4
+      - docker cp ./certs/quasar-mongo-travis.pem mongodb-ssl-client:/cert.pem
+      - docker cp ./certs/client.crt mongodb-ssl-client:/ca.pem
       - docker start mongodb-ssl
+      - docker start mongodb-ssl-client
       # sshd can look at 27017 using `mng` host name, used to create tunnel like
       # ssh -f -N -L 33333:mng:27017 root@localhost -p 22222
       - docker-compose up -d
