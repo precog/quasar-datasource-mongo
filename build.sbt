@@ -14,7 +14,7 @@ lazy val root = project
   .aggregate(core)
 
 val quasarVersion = IO.read(file("./quasar-version")).trim
-val mongoVersion = "2.6.0"
+val mongoVersion = "2.7.0"
 val catsEffectVersion = "1.4.0"
 val shimsVersion = "1.7.0"
 val slf4jVersion = "1.7.25"
