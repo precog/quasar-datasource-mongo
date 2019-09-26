@@ -97,7 +97,12 @@ class MongoDataSourceSpec extends EffectfulQSpec[IO] {
             case _ => false
           }
           mkDataSource use { ds =>
-            val fStream: IO[Stream[IO, Any]] = ds.evaluate(iRead(coll.resourcePath)).map(_.data)
+            val fStream: IO[Stream[IO, Any]] = ds.evaluate(iRead(coll.resourcePath)) map {
+              case QueryResult.Parsed(_, data, _) => data
+              case QueryResult.Typed(_, data, _) => data
+              case QueryResult.Stateful(_, _, _, _, _) => Stream.empty
+            }
+
             val fList: IO[List[Any]] = Stream.force(fStream).compile.toList
             fList.map(checkBson(coll, _))
           }
