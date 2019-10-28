@@ -15,10 +15,10 @@ lazy val root = project
 
 val quasarVersion = IO.read(file("./quasar-version")).trim
 val mongoVersion = "2.7.0"
-val catsEffectVersion = "1.4.0"
-val shimsVersion = "1.7.0"
+val catsEffectVersion = "2.0.0"
+val shimsVersion = "2.0.0"
 val slf4jVersion = "1.7.25"
-val specsVersion = "4.6.0"
+val specsVersion = "4.7.1"
 val refinedVersion = "0.9.9"
 val nettyVersion = "4.1.38.Final"
 val jsrVersion = "3.0.2"
