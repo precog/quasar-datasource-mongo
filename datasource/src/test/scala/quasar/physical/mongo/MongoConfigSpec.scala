@@ -37,19 +37,21 @@ class MongoConfigSpec extends Specification with ScalaCheck {
   }
 
   "works for mongodb protocol" >> {
-    val expected1 = MongoConfig.basic("mongodb://localhost").withBatchSize(64).withPushdown(PushdownLevel.Light)
+    val expected1 = MongoConfig.basic("mongodb://localhost")
+      .withBatchSize(64)
+      .withPushdown(PushdownLevel.Disabled)
     val expected2 = MongoConfig.basic("mongodb://user:password@anyhost:2980/database?a=b&c=d")
       .withBatchSize(0)
-      .withPushdown(PushdownLevel.Full)
+      .withPushdown(PushdownLevel.Disabled)
     Json.obj(
       "connectionString" -> jString("mongodb://localhost"),
       "batchSize" -> jNumber(64),
-      "pushdownLevel" -> jString("light"))
+      "pushdownLevel" -> jString("disabled"))
       .as[MongoConfig].toEither === Right(expected1)
     Json.obj(
       "connectionString" -> jString("mongodb://user:password@anyhost:2980/database?a=b&c=d"),
       "batchSize" -> jNumber(0),
-      "pushdownLevel" -> jString("full"))
+      "pushdownLevel" -> jString("disabled"))
       .as[MongoConfig].toEither === Right(expected2)
   }
 
@@ -57,12 +59,12 @@ class MongoConfigSpec extends Specification with ScalaCheck {
     val input = Json.obj(
       "connectionString" -> jString("mongodb://user:password@anyhost:2980/database"),
       "batchSize" -> jNumber(128),
-      "pushdownLevel" -> jString("light"))
+      "pushdownLevel" -> jString("disabled"))
 
     val expected = Json.obj(
       "connectionString" -> jString("mongodb://<REDACTED>:<REDACTED>@anyhost:2980/database"),
       "batchSize" -> jNumber(128),
-      "pushdownLevel" -> jString("light"),
+      "pushdownLevel" -> jString("disabled"),
       "tunnelConfig" -> jNull,
       "sslConfig" -> jNull)
 
@@ -73,7 +75,7 @@ class MongoConfigSpec extends Specification with ScalaCheck {
     val input = Json.obj(
       "connectionString" -> jString("mongodb://host:1234/db?foo=bar"),
       "batchSize" -> jNumber(234),
-      "pushdownLevel" -> jString("full"),
+      "pushdownLevel" -> jString("disabled"),
       "tunnelConfig" -> jNull,
       "sslConfig" -> jNull)
     MongoConfig.sanitize(input) === input
@@ -172,7 +174,8 @@ class MongoConfigSpec extends Specification with ScalaCheck {
         "pushdownLevel" -> jString("full"))
       input.as[MongoConfig].toEither ===
         Right(MongoConfig.basic("mongodb://user:password@anyhost:1234").withBatchSize(128).withPushdown(PushdownLevel.Full))
-    }
+    }.pendingUntilFixed("Pushdown disabled")
+
     "disabled provided" >> {
       val input = Json.obj(
         "connectionString" -> jString("mongodb://user:password@anyhost:1234"),
@@ -181,6 +184,7 @@ class MongoConfigSpec extends Specification with ScalaCheck {
       input.as[MongoConfig].toEither ===
         Right(MongoConfig.basic("mongodb://user:password@anyhost:1234").withBatchSize(12).withPushdown(PushdownLevel.Disabled))
     }
+
     "light provided" >> {
       val input = Json.obj(
         "connectionString" -> jString("mongodb://user:password@anyhost:1234"),
@@ -188,7 +192,8 @@ class MongoConfigSpec extends Specification with ScalaCheck {
         "pushdownLevel" -> jString("light"))
       input.as[MongoConfig].toEither ===
         Right(MongoConfig.basic("mongodb://user:password@anyhost:1234").withBatchSize(142).withPushdown(PushdownLevel.Light))
-    }
+    }.pendingUntilFixed("Pushdown disabled")
+
     "incorrect provided" >> {
       val input = Json.obj(
         "connectionString" -> jString("mongodb://user:password@anyhost:1234"),

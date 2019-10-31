@@ -55,7 +55,11 @@ object PushdownLevel {
     }
   }
   implicit val decodePushdownLevel: DecodeJson[PushdownLevel] = new DecodeJson[PushdownLevel] {
-    def decode(j: HCursor): DecodeResult[PushdownLevel] =
-      DecodeResult.ok(Disabled)
+    def decode(j: HCursor): DecodeResult[PushdownLevel] = j.as[String] flatMap {
+      case "disabled" => DecodeResult.ok(Disabled)
+      case "light" => DecodeResult.ok(Disabled)
+      case "full" => DecodeResult.ok(Disabled)
+      case _ => DecodeResult.fail("This is not PushdownLevel", j.history)
+    }
   }
 }
