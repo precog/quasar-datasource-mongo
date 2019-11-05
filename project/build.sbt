@@ -1,6 +1,6 @@
 disablePlugins(TravisCiPlugin)
 
-libraryDependencies += "org.kohsuke" % "github-api" % "1.95" exclude("org.jenkins-ci", "annotation-indexer")
+libraryDependencies += "org.kohsuke" % "github-api" % "1.99" exclude("org.jenkins-ci", "annotation-indexer")
 
 // used to fetch dependencies to form a coursier cache,
 // for packaging the datasource.
