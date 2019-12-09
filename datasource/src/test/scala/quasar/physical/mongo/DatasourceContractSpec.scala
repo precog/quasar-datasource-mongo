@@ -17,6 +17,8 @@
 package quasar.physical.mongo
 
 import slamdata.Predef._
+
+import quasar.RateLimiter
 import quasar.api.resource.{ResourceName, ResourcePath, ResourcePathType}
 import quasar.connector.LightweightDatasourceModule.DS
 import quasar.connector.DatasourceSpec
@@ -25,7 +27,7 @@ import scala.io.Source
 
 import argonaut.Argonaut.jString
 import argonaut.Json
-import cats.effect.IO
+import cats.effect.{IO, Resource}
 import cats.instances.tuple._
 import cats.syntax.bifunctor._
 import fs2.Stream
@@ -42,7 +44,8 @@ class DatasourceContractSpec extends DatasourceSpec[IO, Stream[IO, ?], ResourceP
     "pushdownLevel" -> jString("full"))
 
   lazy val ds: (DS[IO], IO[Unit]) =
-    MongoDataSourceModule.lightweightDatasource[IO](cfg)
+    Resource.liftF(RateLimiter[IO](1.0))
+      .flatMap(rl => MongoDataSourceModule.lightweightDatasource[IO](cfg, rl))
       .allocated
       .unsafeRunSync()
       .leftMap(_.getOrElse(throw new RuntimeException("Unexpected error")))

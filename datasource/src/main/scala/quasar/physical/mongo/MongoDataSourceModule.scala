@@ -18,19 +18,20 @@ package quasar.physical.mongo
 
 import slamdata.Predef._
 
-import argonaut._
-
-import cats.ApplicativeError
-import cats.effect.{ConcurrentEffect, ContextShift, Resource, Timer}
-import cats.syntax.applicative._
-import cats.syntax.either._
-
+import quasar.RateLimiter
 import quasar.api.datasource.{DatasourceError, DatasourceType}, DatasourceError.InitializationError
 import quasar.concurrent.BlockingContext
 import quasar.connector.{LightweightDatasourceModule, MonadResourceErr}, LightweightDatasourceModule.DS
 import quasar.physical.mongo.Mongo.{MongoAccessDenied, MongoConnectionFailed}
 
 import scala.concurrent.ExecutionContext
+
+import argonaut._
+
+import cats.ApplicativeError
+import cats.effect.{ConcurrentEffect, ContextShift, Resource, Timer}
+import cats.syntax.applicative._
+import cats.syntax.either._
 
 import scalaz.NonEmptyList
 
@@ -59,7 +60,8 @@ object MongoDataSourceModule extends LightweightDatasourceModule {
 
   @SuppressWarnings(Array("org.wartremover.warts.ImplicitParameter"))
   def lightweightDatasource[F[_]: ConcurrentEffect: ContextShift: MonadResourceErr: Timer](
-      config: Json)(
+      config: Json,
+      rateLimiter: RateLimiter[F])(
       implicit ec: ExecutionContext)
       : Resource[F, Either[Error, DS[F]]] =
     config.as[MongoConfig].result match {
