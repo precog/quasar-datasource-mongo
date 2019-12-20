@@ -100,6 +100,20 @@ class DecodeSpec extends Specification {
     val cursor = qdataDecoder.getArrayCursor(bsonArr)
     qdataDecoder.hasNextArray(cursor) must beFalse
   }
+
+  "QArray hasNextArray and getArrayAt are idempotent" >> {
+    val bsonArr = new BsonArray(List(new BsonString("foo")).asJava)
+    val cursor = qdataDecoder.getArrayCursor(bsonArr)
+    qdataDecoder.hasNextArray(cursor) must beTrue
+    qdataDecoder.getArrayAt(cursor).asString().getValue() === "foo"
+    qdataDecoder.hasNextArray(cursor) must beTrue
+    qdataDecoder.getArrayAt(cursor).asString().getValue() === "foo"
+    qdataDecoder.hasNextArray(cursor) must beTrue
+    qdataDecoder.getArrayAt(cursor).asString().getValue() === "foo"
+    val cursor1 = qdataDecoder.stepArray(cursor)
+    qdataDecoder.hasNextArray(cursor1) must beFalse
+  }
+
   "QArray works for nonempty arrays" >> {
     val bsonArr = new BsonArray(List(
       new BsonString("foo"),
