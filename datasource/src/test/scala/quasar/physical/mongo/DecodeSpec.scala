@@ -125,6 +125,22 @@ class DecodeSpec extends Specification {
     qdataDecoder.hasNextObject(cursor) must beFalse
   }
 
+  "QObject hasNextObject and getX are idempotent" >> {
+    val bsonDoc = new BsonDocument(List(new BsonElement("a", new BsonString("foo"))).asJava)
+    val cursor = qdataDecoder.getObjectCursor(bsonDoc)
+    qdataDecoder.hasNextObject(cursor) must beTrue
+    qdataDecoder.getObjectKeyAt(cursor) === "a"
+    qdataDecoder.getObjectValueAt(cursor).asString().getValue() === "foo"
+    qdataDecoder.hasNextObject(cursor) must beTrue
+    qdataDecoder.getObjectKeyAt(cursor) === "a"
+    qdataDecoder.getObjectValueAt(cursor).asString().getValue() === "foo"
+    qdataDecoder.hasNextObject(cursor) must beTrue
+    qdataDecoder.getObjectKeyAt(cursor) === "a"
+    qdataDecoder.getObjectValueAt(cursor).asString().getValue() === "foo"
+    val cursor1 = qdataDecoder.stepObject(cursor)
+    qdataDecoder.hasNextObject(cursor1) must beFalse
+  }
+
   "QObject works for nonempty documents" >> {
     val bsonDoc = new BsonDocument(List(
       new BsonElement("a", new BsonString("foo")),

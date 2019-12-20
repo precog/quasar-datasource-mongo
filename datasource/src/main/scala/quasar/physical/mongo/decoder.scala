@@ -37,29 +37,35 @@ import scala.collection.JavaConverters._
 import spire.math.Real
 
 object decoder {
-  @SuppressWarnings(Array("org.wartremover.warts.Var"))
-  class BsonDocumentCursor(document: BsonDocument) {
+  // This is heavily mutable, `stepObject` changes internal state, not creating new cursor
+  @SuppressWarnings(Array("org.wartremover.warts.Var", "org.wartremover.warts.Null"))
+  class BsonDocumentCursor(
+      iterator: Iterator[Map.Entry[String, BsonValue]],
+      var entry: Map.Entry[String, BsonValue]) {
 
-    val iterator: Iterator[Map.Entry[String, BsonValue]] =
-      document.entrySet().iterator()
+    def hasNext(): Boolean = entry != null
 
-    var entry: Option[Map.Entry[String, BsonValue]] = None
-
-    def hasNext(): Boolean = {
+    def stepObject(): BsonDocumentCursor = {
       if (iterator.hasNext()) {
-        entry = Some(iterator.next())
-        true
+        entry = iterator.next()
       } else {
-        false
+        entry = null
       }
+      this
     }
 
-    def stepObject(): BsonDocumentCursor = this
+    def getObjectKeyAt(): String = entry.getKey()
 
-    def getObjectKeyAt(): String = entry.getOrElse(errorImpossible).getKey()
+    def getObjectValueAt(): BsonValue = entry.getValue()
 
-    def getObjectValueAt(): BsonValue = entry.getOrElse(errorImpossible).getValue()
-
+  }
+  @SuppressWarnings(Array("org.wartremover.warts.Null"))
+  object BsonDocumentCursor {
+    def apply(document: BsonDocument) = {
+      val iterator = document.entrySet().iterator()
+      val initial = if (iterator.hasNext()) { iterator.next() } else null
+      new BsonDocumentCursor(iterator, initial)
+    }
   }
 
 
@@ -117,7 +123,7 @@ object decoder {
     type ObjectCursor = BsonDocumentCursor
 
     override def getObjectCursor(bson: BsonValue): ObjectCursor = bson match {
-      case obj: BsonDocument => new BsonDocumentCursor(obj)
+      case obj: BsonDocument => BsonDocumentCursor(obj)
     }
     override def getObjectKeyAt(cursor: ObjectCursor): String =
       cursor.getObjectKeyAt()
