@@ -37,31 +37,49 @@ import scala.collection.JavaConverters._
 import spire.math.Real
 
 object decoder {
+  // This is heavily mutable, `stepObject` changes internal state, not creating new cursor
   @SuppressWarnings(Array("org.wartremover.warts.Var"))
-  class BsonDocumentCursor(document: BsonDocument) {
+  sealed class BsonCursor[A](iterator: Iterator[A], var entry: Option[A]) { self =>
+    def hasNext(): Boolean = entry.nonEmpty
 
-    val iterator: Iterator[Map.Entry[String, BsonValue]] =
-      document.entrySet().iterator()
-
-    var entry: Option[Map.Entry[String, BsonValue]] = None
-
-    def hasNext(): Boolean = {
+    def step(): self.type = {
       if (iterator.hasNext()) {
         entry = Some(iterator.next())
-        true
       } else {
-        false
+        entry = None
       }
+      self
     }
-
-    def stepObject(): BsonDocumentCursor = this
-
-    def getObjectKeyAt(): String = entry.getOrElse(errorImpossible).getKey()
-
-    def getObjectValueAt(): BsonValue = entry.getOrElse(errorImpossible).getValue()
-
   }
 
+  final class BsonDocumentCursor(
+      iterator: Iterator[Map.Entry[String, BsonValue]],
+      pair: Option[Map.Entry[String, BsonValue]])
+      extends BsonCursor[Map.Entry[String, BsonValue]](iterator, pair) { self =>
+    def getObjectKeyAt(): String = self.entry.get.getKey()
+    def getObjectValueAt(): BsonValue = self.entry.get.getValue()
+  }
+
+  final class BsonArrayCursor(
+      iterator: Iterator[BsonValue],
+      pair: Option[BsonValue])
+      extends BsonCursor[BsonValue](iterator, pair) { self =>
+    def get(): BsonValue = self.entry.get
+  }
+
+  @SuppressWarnings(Array("org.wartremover.warts.Null"))
+  object BsonCursor {
+    def document(document: BsonDocument): BsonDocumentCursor = {
+      val iterator = document.entrySet().iterator()
+      val initial = if (iterator.hasNext()) { Some(iterator.next()) } else None
+      new BsonDocumentCursor(iterator, initial)
+    }
+    def array(array: BsonArray): BsonArrayCursor = {
+      val iterator = array.iterator()
+      val initial = if (iterator.hasNext()) { Some(iterator.next()) } else None
+      new BsonArrayCursor(iterator, initial)
+    }
+  }
 
   val qdataDecoder: QDataDecode[BsonValue] = new QDataDecode[BsonValue] {
     override def tpe(bson: BsonValue): QType = bson.getBsonType() match {
@@ -102,22 +120,22 @@ object decoder {
       case BsonType.MIN_KEY => QMeta
       case BsonType.END_OF_DOCUMENT => QNull
     }
-    type ArrayCursor = Iterator[BsonValue]
+    type ArrayCursor = BsonArrayCursor
 
     override def getArrayCursor(bson: BsonValue): ArrayCursor = bson match {
-      case arr: BsonArray => arr.getValues().iterator()
+      case arr: BsonArray => BsonCursor.array(arr)
     }
     override def getArrayAt(cursor: ArrayCursor): BsonValue =
-      cursor.next()
+      cursor.get()
     override def hasNextArray(cursor: ArrayCursor): Boolean =
       cursor.hasNext()
     override def stepArray(cursor: ArrayCursor): ArrayCursor =
-      cursor
+      cursor.step()
 
     type ObjectCursor = BsonDocumentCursor
 
     override def getObjectCursor(bson: BsonValue): ObjectCursor = bson match {
-      case obj: BsonDocument => new BsonDocumentCursor(obj)
+      case obj: BsonDocument => BsonCursor.document(obj)
     }
     override def getObjectKeyAt(cursor: ObjectCursor): String =
       cursor.getObjectKeyAt()
@@ -126,7 +144,7 @@ object decoder {
     override def hasNextObject(cursor: ObjectCursor): Boolean =
       cursor.hasNext()
     override def stepObject(cursor: ObjectCursor): ObjectCursor =
-      cursor.stepObject()
+      cursor.step()
 
     override def getBoolean(bson: BsonValue): Boolean = bson match {
       case bool: BsonBoolean => bool.getValue()

@@ -100,6 +100,20 @@ class DecodeSpec extends Specification {
     val cursor = qdataDecoder.getArrayCursor(bsonArr)
     qdataDecoder.hasNextArray(cursor) must beFalse
   }
+
+  "QArray hasNextArray and getArrayAt are idempotent" >> {
+    val bsonArr = new BsonArray(List(new BsonString("foo")).asJava)
+    val cursor = qdataDecoder.getArrayCursor(bsonArr)
+    qdataDecoder.hasNextArray(cursor) must beTrue
+    qdataDecoder.getArrayAt(cursor).asString().getValue() === "foo"
+    qdataDecoder.hasNextArray(cursor) must beTrue
+    qdataDecoder.getArrayAt(cursor).asString().getValue() === "foo"
+    qdataDecoder.hasNextArray(cursor) must beTrue
+    qdataDecoder.getArrayAt(cursor).asString().getValue() === "foo"
+    val cursor1 = qdataDecoder.stepArray(cursor)
+    qdataDecoder.hasNextArray(cursor1) must beFalse
+  }
+
   "QArray works for nonempty arrays" >> {
     val bsonArr = new BsonArray(List(
       new BsonString("foo"),
@@ -123,6 +137,22 @@ class DecodeSpec extends Specification {
     val bsonDoc = new BsonDocument()
     val cursor = qdataDecoder.getObjectCursor(bsonDoc)
     qdataDecoder.hasNextObject(cursor) must beFalse
+  }
+
+  "QObject hasNextObject and getX are idempotent" >> {
+    val bsonDoc = new BsonDocument(List(new BsonElement("a", new BsonString("foo"))).asJava)
+    val cursor = qdataDecoder.getObjectCursor(bsonDoc)
+    qdataDecoder.hasNextObject(cursor) must beTrue
+    qdataDecoder.getObjectKeyAt(cursor) === "a"
+    qdataDecoder.getObjectValueAt(cursor).asString().getValue() === "foo"
+    qdataDecoder.hasNextObject(cursor) must beTrue
+    qdataDecoder.getObjectKeyAt(cursor) === "a"
+    qdataDecoder.getObjectValueAt(cursor).asString().getValue() === "foo"
+    qdataDecoder.hasNextObject(cursor) must beTrue
+    qdataDecoder.getObjectKeyAt(cursor) === "a"
+    qdataDecoder.getObjectValueAt(cursor).asString().getValue() === "foo"
+    val cursor1 = qdataDecoder.stepObject(cursor)
+    qdataDecoder.hasNextObject(cursor1) must beFalse
   }
 
   "QObject works for nonempty documents" >> {
