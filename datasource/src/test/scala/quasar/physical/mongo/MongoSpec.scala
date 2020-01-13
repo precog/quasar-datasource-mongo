@@ -18,12 +18,12 @@ package quasar.physical.mongo
 
 import slamdata.Predef._
 
-import cats.effect.{IO, Resource}
+import cats.effect.{Blocker, IO, Resource}
 import cats.instances.list._
 import cats.syntax.apply._
 import cats.syntax.traverse._
 
-import quasar.concurrent.BlockingContext
+import quasar.{concurrent => qt}
 import quasar.connector.ResourceError
 import quasar.physical.mongo.MongoResource.{Collection, Database}
 import quasar.EffectfulQSpec
@@ -36,7 +36,6 @@ import scala.io.Source
 
 import fs2.io.file
 import java.nio.file.Paths
-import scalaz.syntax.tag._
 
 import shims._
 import testImplicits._
@@ -54,7 +53,7 @@ class MongoSpec extends EffectfulQSpec[IO] {
     "for incorrect protocol" >> {
       Mongo[IO](
         MongoConfig.basic("http://localhost"),
-        BlockingContext.cached("not-used"))
+        qt.Blocker.cached("not-used"))
         .use(IO.pure)
         .unsafeRunSync() must throwA[java.lang.IllegalArgumentException]
     }
@@ -62,7 +61,7 @@ class MongoSpec extends EffectfulQSpec[IO] {
     "for unreachable config" >> {
       Mongo[IO](
         MongoConfig.basic("mongodb://unreachable"),
-        BlockingContext.cached("not-used"))
+        qt.Blocker.cached("not-used"))
         .use(IO.pure)
         .unsafeRunSync() must throwA[MongoTimeoutException]
     }
@@ -175,16 +174,16 @@ class MongoSpec extends EffectfulQSpec[IO] {
   )
 
   "ssl" >> {
-    val fileReadContext: BlockingContext = BlockingContext.cached("fs2-io-file")
+    val fileReadBlocker: Blocker = qt.Blocker.cached("fs2-io-file")
     def fileInCerts(name: String): Resource[IO, String] =
-      file.readAll[IO](Paths.get("certs", name), fileReadContext.unwrap, 1024).compile.resource.toVector.map { (x: Vector[Byte]) =>
+      file.readAll[IO](Paths.get("certs", name), fileReadBlocker, 1024).compile.resource.toVector.map { (x: Vector[Byte]) =>
         new String(x.toArray, "UTF-8")
       }
 
     def rCA: Resource[IO, String] = fileInCerts("client.crt")
 
     "can't connect w/o any ssl configuration" >>* {
-      Mongo[IO](MongoConfig.basic(insecuredConnectionString), blockingPool)
+      Mongo[IO](MongoConfig.basic(insecuredConnectionString), blocker)
         .use(IO.pure)
         .attempt
         .map(_ must beLeft)
@@ -192,14 +191,14 @@ class MongoSpec extends EffectfulQSpec[IO] {
 
     "can connect when ssl enabled" >>* {
       val sslConfig = SSLConfig(None, None, true, None)
-      Mongo[IO](MongoConfig.basic(securedConnectionString).useSSL(sslConfig), blockingPool)
+      Mongo[IO](MongoConfig.basic(securedConnectionString).useSSL(sslConfig), blocker)
         .use(IO.pure)
         .attempt
         .map(_ must beRight)
     }
 
     "can connect when ssl enabled via connectionString only" >>* {
-      Mongo[IO](MongoConfig.basic(securedConnectionString), blockingPool)
+      Mongo[IO](MongoConfig.basic(securedConnectionString), blocker)
         .use(IO.pure)
         .attempt
         .map(_ must beRight)
@@ -207,7 +206,7 @@ class MongoSpec extends EffectfulQSpec[IO] {
 
     "can connect with certificate authority provided" >>* {
       val sslConfig = rCA.map { x => SSLConfig(Some(x), None, true, None) }
-      sslConfig.flatMap(x => Mongo[IO](MongoConfig.basic(securedConnectionString).useSSL(x), blockingPool))
+      sslConfig.flatMap(x => Mongo[IO](MongoConfig.basic(securedConnectionString).useSSL(x), blocker))
         .use(IO.pure)
         .attempt
         .map(_ must beRight)
@@ -215,7 +214,7 @@ class MongoSpec extends EffectfulQSpec[IO] {
 
     "can't connect with incorrect certificate" >>* {
       val sslConfig = SSLConfig(Some("incorrect certificate"), None, true, None)
-      Mongo[IO](MongoConfig.basic(securedConnectionString).useSSL(sslConfig), blockingPool)
+      Mongo[IO](MongoConfig.basic(securedConnectionString).useSSL(sslConfig), blocker)
         .use(IO.pure)
         .attempt
         .map(_ must beLeft)
@@ -223,7 +222,7 @@ class MongoSpec extends EffectfulQSpec[IO] {
 
     "can't connect without key when key is demanded by server" >>* {
       val sslConfig = rCA.map { x => SSLConfig(Some(x), None, true, None) }
-      sslConfig.flatMap(x => Mongo[IO](MongoConfig.basic(pemedConnectionString).useSSL(x), blockingPool))
+      sslConfig.flatMap(x => Mongo[IO](MongoConfig.basic(pemedConnectionString).useSSL(x), blocker))
         .use(IO.pure)
         .attempt
         .map(_ must beLeft)
@@ -235,7 +234,7 @@ class MongoSpec extends EffectfulQSpec[IO] {
         pem <- fileInCerts("client.pkcs1")
       } yield SSLConfig(Some(ca), Some(pem), true, None)
 
-      sslConfig.flatMap(x => Mongo[IO](MongoConfig.basic(pemedConnectionString).useSSL(x), blockingPool))
+      sslConfig.flatMap(x => Mongo[IO](MongoConfig.basic(pemedConnectionString).useSSL(x), blocker))
         .use(IO.pure)
         .attempt
         .map(_ must beRight)
@@ -246,7 +245,7 @@ class MongoSpec extends EffectfulQSpec[IO] {
         pem <- fileInCerts("client.pkcs8")
       } yield SSLConfig(Some(ca), Some(pem), true, None)
 
-      sslConfig.flatMap(x => Mongo[IO](MongoConfig.basic(pemedConnectionString).useSSL(x), blockingPool))
+      sslConfig.flatMap(x => Mongo[IO](MongoConfig.basic(pemedConnectionString).useSSL(x), blocker))
         .use(IO.pure)
         .attempt
         .map(_ must beRight)
@@ -258,7 +257,7 @@ class MongoSpec extends EffectfulQSpec[IO] {
         pem <- fileInCerts("client.pkcs8.enc")
       } yield SSLConfig(Some(ca), Some(pem), true, Some("secret"))
 
-      sslConfig.flatMap(x => Mongo[IO](MongoConfig.basic(pemedConnectionString).useSSL(x), blockingPool))
+      sslConfig.flatMap(x => Mongo[IO](MongoConfig.basic(pemedConnectionString).useSSL(x), blocker))
         .use(IO.pure)
         .attempt
         .map(_ must beRight)
@@ -279,7 +278,7 @@ object MongoSpec {
   import Mongo._
   import TunnelConfig.Pass._
 
-  private lazy val blockingPool: BlockingContext = BlockingContext.cached("mongo-datasource")
+  private lazy val blocker: Blocker = qt.Blocker.cached("mongo-datasource")
 
   val dbs = List("A", "B", "C", "D")
   val cols = List("a", "b", "c", "d")
@@ -307,7 +306,7 @@ object MongoSpec {
   val BatchSize: Int = 64
 
   def mkMongo: Resource[IO, Mongo[IO]] =
-    Mongo[IO](MongoConfig.basic(connectionString).withPushdown(PushdownLevel.Full), blockingPool)
+    Mongo[IO](MongoConfig.basic(connectionString).withPushdown(PushdownLevel.Full), blocker)
 
   def privateKey: IO[String] = IO.delay {
     val path = Paths.get("key_for_docker")
@@ -325,28 +324,28 @@ object MongoSpec {
     Mongo[IO](MongoConfig.basic(TunneledURL)
       .withPushdown(PushdownLevel.Full)
       .viaTunnel(TunnelConfig(TunnelHost, TunnelPort, TunnelUser, Some(Password(TunnelPassword)))),
-      blockingPool)
+      blocker)
 
   def keyTunneledMongo: Resource[IO, Mongo[IO]] =
     Resource.liftF(privateKey) flatMap { key =>
       Mongo[IO](MongoConfig.basic(TunneledURL)
         .withPushdown(PushdownLevel.Full)
         .viaTunnel(TunnelConfig(TunnelHost, TunnelPort, TunnelUser, Some(Identity(key, TunnelPassphrase)))),
-        blockingPool)
+        blocker)
     }
 
   def mkAMongo: Resource[IO, Mongo[IO]] =
-    Mongo[IO](MongoConfig.basic(aConnectionString).withPushdown(PushdownLevel.Full), blockingPool)
+    Mongo[IO](MongoConfig.basic(aConnectionString).withPushdown(PushdownLevel.Full), blocker)
 
   def mkInvalidAMongo: Resource[IO, Mongo[IO]] =
-    Mongo[IO](MongoConfig.basic(invalidAConnectionString).withPushdown(PushdownLevel.Full), blockingPool)
+    Mongo[IO](MongoConfig.basic(invalidAConnectionString).withPushdown(PushdownLevel.Full), blocker)
 
   // create an invalid Mongo to test error scenarios, bypassing the ping check that's done in Mongo.apply
   def mkMongoInvalidPort: Resource[IO, Mongo[IO]] =
     for {
       client <- Mongo.mkClient[IO](
         MongoConfig(connectionStringInvalidPort, 64, PushdownLevel.Full, None, None),
-        blockingPool)
+        blocker)
 
       interpreter = new Interpreter(Version(0, 0, 0), "redundant", PushdownLevel.Full)
     } yield {
@@ -355,10 +354,10 @@ object MongoSpec {
     }
 
   def mkBMongo: Resource[IO, Mongo[IO]] =
-    Mongo[IO](MongoConfig(bConnectionString, BatchSize, PushdownLevel.Full, None, None), blockingPool)
+    Mongo[IO](MongoConfig(bConnectionString, BatchSize, PushdownLevel.Full, None, None), blocker)
 
   def mkBBMongo: Resource[IO, Mongo[IO]] =
-    Mongo[IO](MongoConfig(bbConnectionString, BatchSize, PushdownLevel.Full, None, None), blockingPool)
+    Mongo[IO](MongoConfig(bbConnectionString, BatchSize, PushdownLevel.Full, None, None), blocker)
 
   def incorrectCollections: List[Collection] = {
     val incorrectDbStream =
@@ -386,7 +385,7 @@ object MongoSpec {
 
   def setupDB(): IO[Unit] = {
     val clientR =
-      Mongo.mkClient[IO](MongoConfig(connectionString, BatchSize, PushdownLevel.Full, None, None), blockingPool)
+      Mongo.mkClient[IO](MongoConfig(connectionString, BatchSize, PushdownLevel.Full, None, None), blocker)
 
     clientR.use(client => for {
       _ <- correctCollections.traverse { col => for {

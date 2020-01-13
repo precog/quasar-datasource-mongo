@@ -28,10 +28,6 @@ import com.jcraft.jsch._
 import com.mongodb.connection.ClusterSettings
 import com.mongodb.{ConnectionString, ServerAddress}
 
-import quasar.concurrent.BlockingContext
-
-import scalaz.syntax.tag._
-
 import scala.collection.JavaConverters._
 
 object Settings {
@@ -39,11 +35,11 @@ object Settings {
 
   val SessionName: String = "default"
 
-  def apply[F[_]: Sync: ContextShift](config: MongoConfig, blockingPool: BlockingContext): Resource[F, ClusterSettings] =
+  def apply[F[_]: Sync: ContextShift](config: MongoConfig, blocker: Blocker): Resource[F, ClusterSettings] =
     Resource.suspend(connectionString[F](config.connectionString) map { (conn: ConnectionString) =>
       val settings: ClusterSettings = ClusterSettings.builder.applyConnectionString(conn).build
 
-      config.tunnelConfig.fold(settings.pure[Resource[F, ?]])(viaTunnel(_, settings, blockingPool))
+      config.tunnelConfig.fold(settings.pure[Resource[F, ?]])(viaTunnel(_, settings, blocker))
     })
 
   def connectionString[F[_]: Sync](s: String): F[ConnectionString] = Sync[F].delay {
@@ -120,14 +116,14 @@ object Settings {
   def viaTunnel[F[_]: Sync: ContextShift](
       config: TunnelConfig,
       settings: ClusterSettings,
-      blockingPool: BlockingContext)
+      blocker: Blocker)
       : Resource[F, ClusterSettings] =
-    Resource(ContextShift[F].evalOn(blockingPool.unwrap)(for {
+    Resource(ContextShift[F].blockOn(blocker)(for {
       jsch <- mkJSch
       sess <- mkSession(jsch, config)
       _ <- setUserInfo(sess, userInfo(config))
       address <- serverAddress(settings)
       tunnel <- openTunnel(sess, address)
       result <- tunneledSettings(settings, tunnel)
-    } yield (result, ContextShift[F].evalOn(blockingPool.unwrap)(closeTunnel(sess, tunnel)))))
+    } yield (result, ContextShift[F].blockOn(blocker)(closeTunnel(sess, tunnel)))))
 }
