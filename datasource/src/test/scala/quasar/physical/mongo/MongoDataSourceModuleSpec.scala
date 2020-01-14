@@ -18,32 +18,36 @@ package quasar.physical.mongo
 
 import slamdata.Predef._
 
-import quasar.{EffectfulQSpec, RateLimiter}
+import quasar.{EffectfulQSpec, RateLimiter, NoopRateLimitUpdater}
 import quasar.api.datasource.DatasourceError
 import quasar.physical.mongo.testImplicits._
 
 import argonaut._, Argonaut._
 import cats.effect.IO
+import cats.kernel.instances.uuid._
 import scalaz.NonEmptyList
+
+import java.util.UUID
 
 class MongoDataSourceModuleSpec extends EffectfulQSpec[IO] {
   "Using incorrect config leads to Left invalid configuration" >>* {
     val config = Json.obj("foo" -> Json.jString("bar"), "batchSize" -> Json.jNumber(64), "pushdownLevel" -> Json.jString("full"))
 
-    RateLimiter[IO](1.0).flatMap(rl =>
-      MongoDataSourceModule.lightweightDatasource[IO](config, rl).use(r =>
+    RateLimiter[IO, UUID](1.0, IO.delay(UUID.randomUUID()), NoopRateLimitUpdater[IO, UUID]).flatMap(rl =>
+      MongoDataSourceModule.lightweightDatasource[IO, UUID](config, rl).use(r =>
         IO(r must_=== Left(DatasourceError.InvalidConfiguration(MongoDataSource.kind, config, NonEmptyList("Attempt to decode value on failed cursor."))))))
   }
 
   "Using correct config produces Right Disposable" >>* {
     val config = MongoConfig.basic(MongoSpec.connectionString).withBatchSize(12).withPushdown(PushdownLevel.Full).asJson
-    RateLimiter[IO](1.0).flatMap(rl => MongoDataSourceModule.lightweightDatasource[IO](config, rl).use(r => IO(r must beRight)))
+    RateLimiter[IO, UUID](1.0, IO.delay(UUID.randomUUID()), NoopRateLimitUpdater[IO, UUID]).flatMap(rl =>
+      MongoDataSourceModule.lightweightDatasource[IO, UUID](config, rl).use(r => IO(r must beRight)))
   }
 
   "Using unreachable config produces Left invalid configuration" >>* {
     val config = MongoConfig.basic("mongodb://unreachable/?serverSelectionTimeoutMS=1000").withBatchSize(1).asJson
-    RateLimiter[IO](1.0).flatMap(rl =>
-      MongoDataSourceModule.lightweightDatasource[IO](config, rl).use(r =>
+    RateLimiter[IO, UUID](1.0, IO.delay(UUID.randomUUID()), NoopRateLimitUpdater[IO, UUID]).flatMap(rl =>
+      MongoDataSourceModule.lightweightDatasource[IO, UUID](config, rl).use(r =>
         IO(r must beLike {
           case Left(DatasourceError.ConnectionFailed(MongoDataSource.kind, cfg, _)) =>
             cfg must_=== config

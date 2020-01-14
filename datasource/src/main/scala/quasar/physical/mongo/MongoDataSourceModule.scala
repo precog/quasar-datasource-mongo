@@ -18,7 +18,7 @@ package quasar.physical.mongo
 
 import slamdata.Predef._
 
-import quasar.RateLimiter
+import quasar.RateLimiting
 import quasar.api.datasource.{DatasourceError, DatasourceType}, DatasourceError.InitializationError
 import quasar.concurrent.BlockingContext
 import quasar.connector.{LightweightDatasourceModule, MonadResourceErr}, LightweightDatasourceModule.DS
@@ -30,6 +30,7 @@ import argonaut._
 
 import cats.ApplicativeError
 import cats.effect.{ConcurrentEffect, ContextShift, Resource, Timer}
+import cats.kernel.Hash
 import cats.syntax.applicative._
 import cats.syntax.either._
 
@@ -59,9 +60,9 @@ object MongoDataSourceModule extends LightweightDatasourceModule {
     }
 
   @SuppressWarnings(Array("org.wartremover.warts.ImplicitParameter"))
-  def lightweightDatasource[F[_]: ConcurrentEffect: ContextShift: MonadResourceErr: Timer](
+  def lightweightDatasource[F[_]: ConcurrentEffect: ContextShift: MonadResourceErr: Timer, A: Hash](
       config: Json,
-      rateLimiter: RateLimiter[F])(
+      rateLimiter: RateLimiting[F, A])(
       implicit ec: ExecutionContext)
       : Resource[F, Either[Error, DS[F]]] =
     config.as[MongoConfig].result match {
