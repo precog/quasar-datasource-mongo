@@ -21,7 +21,7 @@ import slamdata.Predef._
 import quasar.RateLimiting
 import quasar.api.datasource.{DatasourceError, DatasourceType}, DatasourceError.InitializationError
 import quasar.concurrent.BlockingContext
-import quasar.connector.{LightweightDatasourceModule, MonadResourceErr}, LightweightDatasourceModule.DS
+import quasar.connector.{ByteStore, LightweightDatasourceModule, MonadResourceErr}, LightweightDatasourceModule.DS
 import quasar.physical.mongo.Mongo.{MongoAccessDenied, MongoConnectionFailed}
 
 import scala.concurrent.ExecutionContext
@@ -62,7 +62,8 @@ object MongoDataSourceModule extends LightweightDatasourceModule {
   @SuppressWarnings(Array("org.wartremover.warts.ImplicitParameter"))
   def lightweightDatasource[F[_]: ConcurrentEffect: ContextShift: MonadResourceErr: Timer, A: Hash](
       config: Json,
-      rateLimiter: RateLimiting[F, A])(
+      rateLimiter: RateLimiting[F, A],
+      byteStore: ByteStore[F])(
       implicit ec: ExecutionContext)
       : Resource[F, Either[Error, DS[F]]] =
     config.as[MongoConfig].result match {

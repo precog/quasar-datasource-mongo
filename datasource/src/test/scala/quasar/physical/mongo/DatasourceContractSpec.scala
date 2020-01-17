@@ -21,7 +21,7 @@ import slamdata.Predef._
 import quasar.{RateLimiter, NoopRateLimitUpdater}
 import quasar.api.resource.{ResourceName, ResourcePath, ResourcePathType}
 import quasar.connector.LightweightDatasourceModule.DS
-import quasar.connector.DatasourceSpec
+import quasar.connector.{ByteStore, DatasourceSpec}
 
 import java.util.UUID
 import scala.io.Source
@@ -47,7 +47,7 @@ class DatasourceContractSpec extends DatasourceSpec[IO, Stream[IO, ?], ResourceP
 
   lazy val ds: (DS[IO], IO[Unit]) =
     Resource.liftF(RateLimiter[IO, UUID](1.0, IO.delay(UUID.randomUUID()), NoopRateLimitUpdater[IO, UUID]))
-      .flatMap(rl => MongoDataSourceModule.lightweightDatasource[IO, UUID](cfg, rl))
+      .flatMap(rl => MongoDataSourceModule.lightweightDatasource[IO, UUID](cfg, rl, ByteStore.void[IO]))
       .allocated
       .unsafeRunSync()
       .leftMap(_.getOrElse(throw new RuntimeException("Unexpected error")))
