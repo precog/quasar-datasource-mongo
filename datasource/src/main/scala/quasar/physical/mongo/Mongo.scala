@@ -58,9 +58,11 @@ class Mongo[F[_]: MonadResourceErr : ConcurrentEffect : ContextShift] private[mo
 
     def handler(subVar: MVar[F, Subscription], cb: Option[Either[Throwable, A]] => Unit): Unit = {
       obs.subscribe(new Observer[A] {
-        override def onSubscribe(sub: Subscription): Unit = {
-          run(subVar.put(sub))
-          sub.request(queueSize)
+        override def onSubscribe(sub: Subscription): Unit = run {
+          for {
+            _ <- subVar.put(sub)
+            _ <- request(sub, queueSize)
+          } yield ()
         }
 
         override def onNext(result: A): Unit =
@@ -82,12 +84,19 @@ class Mongo[F[_]: MonadResourceErr : ConcurrentEffect : ContextShift] private[mo
         : Stream[F, Unit] =
       Stream.eval(F.delay(handler(subVar, { x => run(obsQ.enqueue1(x)) })))
 
+    // This is necessary because `.request(size)` depends on internal driver state
+    // that might be changed by threads that we can't control, and `.request` can throw an error.
+    // We can't rely on `MVar[F, Option[Subscription]]` because actual change of internal state happens
+    // in java driver depth and it might happen even during flatMap.
+    def request(s: Subscription, size: Long): F[Unit] =
+      F.attempt(F.delay(s.request(size))).void
+
     (for {
       obsQ <- Stream.eval(Queue.boundedNoneTerminated[F, Either[Throwable, A]](queueSize.toInt))
       subVar <- Stream.eval(MVar[F].empty[Subscription])
       _ <- enqueueObservable(obsQ, subVar)
       res <- obsQ.dequeue.chunks.flatMap( c =>
-        Stream.evalUnChunk(subVar.read.map(_.request(c.size.toLong)).as(c))
+        Stream.evalUnChunk(subVar.read.flatMap(request(_, c.size.toLong)).as(c))
       ).rethrow.onFinalize(subVar.take.flatMap(unsubscribe))
     } yield res)
   }
