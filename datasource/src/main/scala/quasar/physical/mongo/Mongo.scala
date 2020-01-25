@@ -30,7 +30,6 @@ import fs2.concurrent.{NoneTerminatedQueue, Queue}
 import fs2.Stream
 
 import quasar.api.resource.ResourcePath
-import quasar.concurrent.BlockingContext
 import quasar.connector.{MonadResourceErr, ResourceError}
 import quasar.physical.mongo.MongoResource.{Collection, Database}
 import quasar.physical.mongo.expression.Mapper
@@ -260,10 +259,10 @@ object Mongo {
 
   def mkClient[F[_]: ContextShift](
       config: MongoConfig,
-      blockingPool: BlockingContext)(
+      blocker: Blocker)(
       implicit F: Sync[F])
       : Resource[F, MongoClient] =
-    Settings[F](config, blockingPool) flatMap { clusterSettings =>
+    Settings[F](config, blocker) flatMap { clusterSettings =>
       Resource(for {
         conn <- F.delay { new ConnectionString(config.connectionString) }
 
@@ -319,7 +318,7 @@ object Mongo {
 
   def apply[F[_]: ConcurrentEffect: ContextShift: MonadResourceErr](
       config: MongoConfig,
-      blockingPool: BlockingContext)
+      blocker: Blocker)
       : Resource[F, Mongo[F]] = {
     val F = ConcurrentEffect[F]
 
@@ -351,7 +350,7 @@ object Mongo {
         getVersionString(x) map (_.split("\\.")) flatMap mkVersion getOrElse Version.zero
       }
 
-    mkClient(config, blockingPool) evalMap { client =>
+    mkClient(config, blocker) evalMap { client =>
       for {
         version <- getVersion(client)
         interpreter <- Interpreter(version, config.pushdownLevel)

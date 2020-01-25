@@ -20,7 +20,7 @@ import slamdata.Predef._
 
 import quasar.RateLimiting
 import quasar.api.datasource.{DatasourceError, DatasourceType}, DatasourceError.InitializationError
-import quasar.concurrent.BlockingContext
+import quasar.{concurrent => qt}
 import quasar.connector.{ByteStore, LightweightDatasourceModule, MonadResourceErr}, LightweightDatasourceModule.DS
 import quasar.physical.mongo.Mongo.{MongoAccessDenied, MongoConnectionFailed}
 
@@ -29,7 +29,7 @@ import scala.concurrent.ExecutionContext
 import argonaut._
 
 import cats.ApplicativeError
-import cats.effect.{ConcurrentEffect, ContextShift, Resource, Timer}
+import cats.effect.{Blocker, ConcurrentEffect, ContextShift, Resource, Timer}
 import cats.kernel.Hash
 import cats.syntax.applicative._
 import cats.syntax.either._
@@ -39,7 +39,7 @@ import scalaz.NonEmptyList
 object MongoDataSourceModule extends LightweightDatasourceModule {
   type Error = InitializationError[Json]
 
-  private lazy val blockingPool: BlockingContext = BlockingContext.cached("mongo-datasource")
+  private lazy val blocker: Blocker = qt.Blocker.cached("mongo-datasource")
 
   private def mkInvalidCfgError[F[_]](config: Json, msg: String): Error =
     DatasourceError.invalidConfiguration[Json, Error](
@@ -74,7 +74,7 @@ object MongoDataSourceModule extends LightweightDatasourceModule {
 
       case Right(mongoConfig) =>
         ApplicativeError[Resource[F, ?], Throwable]
-          .attempt(Mongo(mongoConfig, blockingPool))
+          .attempt(Mongo(mongoConfig, blocker))
           .map(_.bimap(mkError(config, _), new MongoDataSource(_): DS[F]))
     }
 
