@@ -22,6 +22,7 @@ import cats.syntax.eq._
 import cats.instances.string._
 
 import java.lang.ArithmeticException
+import java.nio.charset.StandardCharsets
 import java.time.{Instant, OffsetDateTime, ZoneOffset}
 import java.util.{Map, Iterator}
 
@@ -203,7 +204,7 @@ object decoder {
     override def getMetaValue(bson: BsonValue): BsonValue = bson match {
       case objId: BsonObjectId => new BsonString(objId.getValue().toHexString())
       case dbPointer: BsonDbPointer => new BsonString(dbPointer.getId().toHexString())
-      case binary: BsonBinary => new BsonString(new String(binary.getData()))
+      case binary: BsonBinary => new BsonString(new String(binary.getData(), StandardCharsets.UTF_8))
       case symbol: BsonSymbol => new BsonString(symbol.getSymbol())
       case regex: BsonRegularExpression => new BsonString(regex.getPattern())
       case js: BsonJavaScript => new BsonString(js.getCode())
