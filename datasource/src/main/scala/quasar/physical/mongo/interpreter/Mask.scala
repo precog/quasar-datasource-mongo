@@ -26,6 +26,8 @@ import quasar.physical.mongo.utils.optToAlternative
 
 import scalaz.{MonadState, Scalaz, PlusEmpty, Reader, MonadReader}, Scalaz._
 
+import shims.orderToScalaz
+
 object Mask {
   final case class TypeTree(types: Set[ColumnType], obj: Map[String, TypeTree], list: Map[Int, TypeTree])
 
