@@ -20,7 +20,7 @@ import slamdata.Predef._
 
 import org.specs2.mutable.Specification
 
-import quasar.api.table.ColumnType
+import quasar.api.ColumnType
 import quasar.physical.mongo.expression._
 import quasar.IdStatus
 

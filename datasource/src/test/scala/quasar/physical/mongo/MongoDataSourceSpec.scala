@@ -18,6 +18,7 @@ package quasar.physical.mongo
 
 import slamdata.Predef._
 
+import cats.data.OptionT
 import cats.effect.{IO, Resource}
 
 import fs2.Stream
@@ -60,12 +61,12 @@ class MongoDataSourceSpec extends EffectfulQSpec[IO] {
     res must beLike(expected)
 
   "evaluation of" >> {
-    def assertPathNotFound(ds: Resource[IO, MongoDataSource[IO]], path: ResourcePath): MatchResult[Either[Throwable, QueryResult[IO]]] = {
-      ds.use(_.evaluate(iRead(path))).attempt.unsafeRunSync() must beLike(pathNotFound(path))
+    def assertPathNotFound(ds: Resource[IO, MongoDataSource[IO]], path: ResourcePath): MatchResult[Either[Throwable, Option[QueryResult[IO]]]] = {
+      ds.use(_.loadFull(iRead(path)).value).attempt.unsafeRunSync() must beLike(pathNotFound(path))
     }
 
-    def assertConnectionFailed(ds: Resource[IO, MongoDataSource[IO]], path: ResourcePath): MatchResult[Either[Throwable, QueryResult[IO]]] =
-      ds.use(_.evaluate(iRead(path))).attempt.unsafeRunSync() must beLike(connFailed)
+    def assertConnectionFailed(ds: Resource[IO, MongoDataSource[IO]], path: ResourcePath): MatchResult[Either[Throwable, Option[QueryResult[IO]]]] =
+      ds.use(_.loadFull(iRead(path)).value).attempt.unsafeRunSync() must beLike(connFailed)
 
     "root raises path not found" >>
       assertPathNotFound(mkDataSource, ResourcePath.root())
@@ -96,15 +97,18 @@ class MongoDataSourceSpec extends EffectfulQSpec[IO] {
               (bson.asDocument().get(coll.name).asString().getValue() === coll.database.name).isSuccess
             case _ => false
           }
-          mkDataSource use { ds =>
-            val fStream: IO[Stream[IO, Any]] = ds.evaluate(iRead(coll.resourcePath)) map {
-              case QueryResult.Parsed(_, data, _) => data
-              case QueryResult.Typed(_, data, _) => data
-              case QueryResult.Stateful(_, _, _, _, _) => Stream.empty
-            }
 
-            val fList: IO[List[Any]] = Stream.force(fStream).compile.toList
-            fList.map(checkBson(coll, _))
+          mkDataSource use { ds =>
+            val fStream: OptionT[IO, Stream[IO, Any]] =
+              ds.loadFull(iRead(coll.resourcePath)) map {
+                case QueryResult.Parsed(_, data, _) => data
+                case QueryResult.Typed(_, data, _) => data
+                case QueryResult.Stateful(_, _, _, _, _) => Stream.empty
+              }
+
+            Stream.force(fStream getOrElse Stream.empty)
+              .compile.toList
+              .map(checkBson(coll, _))
           }
         })
 

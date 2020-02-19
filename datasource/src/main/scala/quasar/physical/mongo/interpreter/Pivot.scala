@@ -18,9 +18,9 @@ package quasar.physical.mongo.interpreter
 
 import slamdata.Predef._
 
-import quasar.api.table.ColumnType
-import quasar.physical.mongo.expression._
 import quasar.IdStatus
+import quasar.api.ColumnType
+import quasar.physical.mongo.expression._
 
 import scalaz.{MonadState, Scalaz}, Scalaz._
 
