@@ -20,7 +20,7 @@ import slamdata.Predef._
 
 import org.bson.{Document => _, _}
 
-import quasar.api.table.ColumnType
+import quasar.api.ColumnType
 import quasar.common.{CPath, CPathField}
 import quasar.{IdStatus, ScalarStageSpec => Spec, ScalarStage, ScalarStages}
 

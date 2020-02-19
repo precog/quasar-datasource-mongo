@@ -18,6 +18,7 @@ package quasar.physical.mongo
 
 import slamdata.Predef._
 
+import cats.data.NonEmptyList
 import cats.effect._
 import cats.syntax.applicative._
 import cats.syntax.flatMap._
@@ -31,7 +32,7 @@ import fs2.Stream
 import quasar.api.datasource.DatasourceType
 import quasar.api.resource.{ResourceName, ResourcePath, ResourcePathType}
 import quasar.connector.{MonadResourceErr, QueryResult, ResourceError}
-import quasar.connector.datasource.LightweightDatasource
+import quasar.connector.datasource._
 import quasar.physical.mongo.decoder.qdataDecoder
 import quasar.physical.mongo.MongoResource.{Collection, Database}
 import quasar.qscript.InterpretedRead
@@ -43,7 +44,7 @@ class MongoDataSource[F[_]: ConcurrentEffect: ContextShift: MonadResourceErr: Ti
 
   val kind = MongoDataSource.kind
 
-  override def evaluate(iRead: InterpretedRead[ResourcePath]): F[QueryResult[F]] = {
+  val loaders = NonEmptyList.of(Loader.Batch(BatchLoader.Full { (iRead: InterpretedRead[ResourcePath]) =>
     val path = iRead.path
     val errored =
       MonadResourceErr.raiseError(ResourceError.pathNotFound(path))
@@ -57,10 +58,11 @@ class MongoDataSource[F[_]: ConcurrentEffect: ContextShift: MonadResourceErr: Ti
           mongo.evaluate(collection, iRead.stages)
       }
     }
+
     fStreamPair map {
       case (insts, stream) => QueryResult.parsed(qdataDecoder, stream, insts)
     }
-  }
+  }))
 
   override def pathIsResource(path: ResourcePath): F[Boolean] = path match {
     case ResourcePath.Root => false.pure[F]

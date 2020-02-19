@@ -21,7 +21,8 @@ import slamdata.Predef._
 import quasar.RateLimiting
 import quasar.api.datasource.{DatasourceError, DatasourceType}, DatasourceError.InitializationError
 import quasar.{concurrent => qt}
-import quasar.connector.{ByteStore, LightweightDatasourceModule, MonadResourceErr}, LightweightDatasourceModule.DS
+import quasar.connector.{ByteStore, MonadResourceErr}
+import quasar.connector.datasource.LightweightDatasourceModule
 import quasar.physical.mongo.Mongo.{MongoAccessDenied, MongoConnectionFailed}
 
 import scala.concurrent.ExecutionContext
@@ -65,17 +66,17 @@ object MongoDataSourceModule extends LightweightDatasourceModule {
       rateLimiter: RateLimiting[F, A],
       byteStore: ByteStore[F])(
       implicit ec: ExecutionContext)
-      : Resource[F, Either[Error, DS[F]]] =
+      : Resource[F, Either[Error, LightweightDatasourceModule.DS[F]]] =
     config.as[MongoConfig].result match {
       case Left((msg, _)) =>
         mkInvalidCfgError[F](config, msg)
-          .asLeft[DS[F]]
+          .asLeft[LightweightDatasourceModule.DS[F]]
           .pure[Resource[F, ?]]
 
       case Right(mongoConfig) =>
         ApplicativeError[Resource[F, ?], Throwable]
           .attempt(Mongo(mongoConfig, blocker))
-          .map(_.bimap(mkError(config, _), new MongoDataSource(_): DS[F]))
+          .map(_.bimap(mkError(config, _), new MongoDataSource(_): LightweightDatasourceModule.DS[F]))
     }
 
   def kind: DatasourceType = MongoDataSource.kind

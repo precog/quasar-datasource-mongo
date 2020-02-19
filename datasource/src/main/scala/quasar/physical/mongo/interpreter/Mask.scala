@@ -19,7 +19,7 @@ package quasar.physical.mongo.interpreter
 import slamdata.Predef._
 
 import quasar.common.CPath
-import quasar.api.table.ColumnType
+import quasar.api.ColumnType
 
 import quasar.physical.mongo.expression._
 import quasar.physical.mongo.utils.optToAlternative
