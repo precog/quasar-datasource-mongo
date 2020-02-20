@@ -1,0 +1,143 @@
+name: build
+
+on:
+  pull_request:
+    branches: [master]
+  push:
+    branches: [master]
+
+env:
+  SBT: ./sbt
+  JDK: 1.8
+  REPO_SLUG: ${{ github.repository }}
+  ENCRYPTION_PASSWORD: ${{ secrets.ENCRYPTION_PASSWORD }}
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+jobs:
+  build:
+    name: Build
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest]
+        scala: [2.12.10]
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v2
+      - name: Set up JDK ${{ env.JDK }}
+        uses: actions/setup-java@v1
+        with:
+          java-version: ${{ env.JDK }}
+      - name: Setup Git Actor
+        run: git config github.actor slamdata-bot
+      - name: plain mongodb on port 27018
+        run: docker run -d -p 127.0.0.1:27018:27017 --name mongodb -e MONGODB_ROOT_PASSWORD=secret bitnami/mongodb:4.1.4
+      - name: ssl enabled container
+        run: |
+          docker create -p 127.0.0.1:27019:27017 --name mongodb-ssl -e MONGODB_EXTRA_FLAGS="--sslMode requireSSL --sslPEMKeyFile /cert.pem" bitnami/mongodb:4.1.4
+          docker cp ./certs/quasar-mongo-travis.pem mongodb-ssl:/cert.pem
+          docker start mongodb-ssl
+      - name: ssl enabled container with client required key
+        run: |
+          docker create -p 127.0.0.1:27020:27017 --name mongodb-ssl-client -e MONGODB_EXTRA_FLAGS="--sslMode requireSSL --sslPEMKeyFile /cert.pem --sslCAFile /ca.pem" bitnami/mongodb:4.1.4
+          docker cp ./certs/quasar-mongo-travis.pem mongodb-ssl-client:/cert.pem
+          docker cp ./certs/client.crt mongodb-ssl-client:/ca.pem
+          docker start mongodb-ssl-client
+      - name: ssh tunnel to mongo container
+        run: docker-compose up -d
+      - name: Install sshpass
+        run: |
+          sudo apt-get update
+          sudo apt-get install sshpass
+          ssh-keygen -t rsa -N "passphrase" -f key_for_docker
+          sshpass -p root ssh-copy-id -i key_for_docker -o StrictHostKeyChecking=no root@localhost -p 22222
+      - name: Run datasourceAssemblePlugin
+        run: $SBT ++${{ matrix.scala }} datasourceAssemblePlugin
+      - name: Compile and test
+        run: $SBT ++${{ matrix.scala }} test
+      - name: Upload working directory
+        uses: actions/upload-artifact@v1
+        with:
+          name: working-dir
+          path: .
+
+  publish-and-tag:
+    name: Publish and Tag
+    if: github.event_name != 'pull_request' && (contains(github.ref, 'backport/v.*') || contains(github.ref, 'master'))
+    needs: [build]
+    runs-on: [ubuntu-latest]
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v2
+      - name: Download working directory
+        uses: actions/download-artifact@v1
+        with:
+          name: working-dir
+      - name: Setup Git Actor
+        run: git config github.actor slamdata-bot
+      - name: Set up JDK ${{ env.JDK }}
+        uses: actions/setup-java@v1
+        with:
+          java-version: ${{ env.JDK }}
+      - name: Install ruby
+        uses: actions/setup-ruby@v1
+        with:
+          ruby-version: '2.6'
+      - name: Create scripts dir
+        run: mkdir ./scripts
+      - name: Transfer Common Resources
+        run: $SBT transferCommonResources
+      - name: Export common secrets
+        run: $SBT exportSecretsForActions
+      - name: Common setup
+        run: ./scripts/commonSetup
+      - name: Publish and Tag
+        run: ./scripts/publishAndTag 'slamdata/quasar-datasource-mongo'
+      - name: Bump Downstream
+        run: |
+          TRAVIS_JOB_NUMBER=1 scripts/publishAndTag 'slamdata/quasar-datasource-mongo'
+          bumpInDownstream() { echo $1 > slamdata-mongo-version; }
+          bumpInDownstreamBench() { echo $1 > mongo-datasource-version; }
+          export -f bumpInDownstream
+          export -f bumpInDownstreamBench
+          scripts/bumpDependentProject slamdata slamx bumpInDownstream
+          scripts/bumpDependentProject slamdata benchmarks bumpInDownstreamBench
+
+  auto-merge:
+    name: Auto Merge
+    if: github.event_name == 'pull_request' && contains(github.head_ref, 'version-bump')
+    needs: [build]
+    runs-on: [ubuntu-latest]
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v2
+      - name: Download working directory
+        uses: actions/download-artifact@v1
+        with:
+          name: working-dir
+      - name: Setup Git Actor
+        run: git config github.actor slamdata-bot
+      - name: Set up JDK ${{ env.JDK }}
+        uses: actions/setup-java@v1
+        with:
+          java-version: ${{ env.JDK }}
+      - name: Install ruby
+        uses: actions/setup-ruby@v1
+        with:
+          ruby-version: '2.6'
+      - name: Create scripts dir
+        run: mkdir ./scripts
+      - name: Transfer Common Resources
+        run: $SBT transferCommonResources
+      - name: Export Common Secrets
+        run: $SBT exportSecretsForActions
+      - name: Common setup
+        run: ./scripts/commonSetup
+      - name: Set env vars
+        run: |
+          echo ::set-env name=VERSIONS::$(git diff HEAD^1 | grep -e '^[-+][0-9]' | sed 's/^[+\-]//' | sed 's/\.[0-9]*$//' | uniq | wc -l)
+          echo ::set-env name=CLONE_DIR::$(mktemp -d "/tmp/slamdata-bump.XXXXXXXX")
+          echo ::set-env name=IS_REVISION_LABEL::${{ contains(github.event.pull_request.labels.*.name, 'revision') }}
+          echo ::set-env name=PR_NUMBER::$(echo "$GITHUB_REF" | cut -d'/' -f3)
+      - name: Run automerge
+        run: ./scripts/checkAndAutoMerge

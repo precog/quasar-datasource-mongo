@@ -1,5 +1,7 @@
 import scala.collection.Seq
 
+scalaVersion in ThisBuild := "2.12.10"
+
 publishAsOSSProject in ThisBuild := true
 
 homepage in ThisBuild := Some(url("https://github.com/slamdata/quasar-datasource-mongo"))
