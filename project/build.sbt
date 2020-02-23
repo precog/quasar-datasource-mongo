@@ -1,4 +1,4 @@
-libraryDependencies += "org.kohsuke" % "github-api" % "1.101" exclude("org.jenkins-ci", "annotation-indexer")
+libraryDependencies += "org.kohsuke" % "github-api" % "1.107" exclude("org.jenkins-ci", "annotation-indexer")
 
 // used to fetch dependencies to form a coursier cache,
 // for packaging the datasource.
