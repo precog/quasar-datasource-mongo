@@ -15,7 +15,6 @@ lazy val root = project
   .settings(noPublishSettings)
   .aggregate(core)
 
-val quasarVersion = IO.read(file("./quasar-version")).trim
 val mongoVersion = "2.7.0"
 val catsEffectVersion = "2.0.0"
 val shimsVersion = "2.0.0"
@@ -33,7 +32,7 @@ lazy val core = project
   .settings(
     name := "quasar-datasource-mongo",
     datasourceName := "mongo",
-    datasourceQuasarVersion := quasarVersion,
+    datasourceQuasarVersion := managedVersions.value("slamdata-quasar"),
     datasourceModuleFqcn := "quasar.physical.mongo.MongoDataSourceModule$",
     datasourceDependencies ++= Seq(
       "com.codecommit"             %% "shims"                      % shimsVersion,
@@ -43,8 +42,8 @@ lazy val core = project
       "io.netty"                   %  "netty-all"                  % nettyVersion,
       "com.jcraft"                 % "jsch"                        % jschVersion,
 
-      "com.slamdata"               %% "quasar-foundation"          % quasarVersion % Test classifier "tests",
-      "com.slamdata"               %% "quasar-frontend"            % quasarVersion % Test classifier "tests",
+      "com.slamdata"               %% "quasar-foundation"          % managedVersions.value("slamdata-quasar") % Test classifier "tests",
+      "com.slamdata"               %% "quasar-frontend"            % managedVersions.value("slamdata-quasar") % Test classifier "tests",
       "org.slf4j"                  %  "slf4j-log4j12"              % slf4jVersion % Test,
       "org.specs2"                 %% "specs2-core"                % specsVersion % Test,
       "org.specs2"                 %% "specs2-scalaz"              % specsVersion % Test,
