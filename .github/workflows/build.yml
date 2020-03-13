@@ -11,7 +11,7 @@ env:
   JDK: 1.8
   REPO_SLUG: ${{ github.repository }}
   ENCRYPTION_PASSWORD: ${{ secrets.ENCRYPTION_PASSWORD }}
-  GITHUB_ACTOR: slamdata-bot
+  GITHUB_ACTOR: precog-bot
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
 jobs:
@@ -30,7 +30,7 @@ jobs:
         with:
           java-version: ${{ env.JDK }}
       - name: Setup Git Actor
-        run: git config github.actor slamdata-bot
+        run: git config github.actor precog-bot
       - name: plain mongodb on port 27018
         run: docker run -d -p 127.0.0.1:27018:27017 --name mongodb -e MONGODB_ROOT_PASSWORD=secret bitnami/mongodb:4.1.4
       - name: ssl enabled container
@@ -52,8 +52,8 @@ jobs:
           sudo apt-get install sshpass
           ssh-keygen -t rsa -N "passphrase" -f key_for_docker
           sshpass -p root ssh-copy-id -i key_for_docker -o StrictHostKeyChecking=no root@localhost -p 22222
-      - name: Run datasourceAssemblePlugin
-        run: $SBT ++${{ matrix.scala }} datasourceAssemblePlugin
+      - name: Run quasarPluginAssemble
+        run: $SBT ++${{ matrix.scala }} quasarPluginAssemble
       - name: Compile and test
         run: $SBT ++${{ matrix.scala }} test
       - name: Upload working directory
@@ -77,7 +77,7 @@ jobs:
         with:
           name: working-dir
       - name: Setup Git Actor
-        run: git config github.actor slamdata-bot
+        run: git config github.actor precog-bot
       - name: Set up JDK ${{ env.JDK }}
         uses: actions/setup-java@v1
         with:
@@ -97,7 +97,7 @@ jobs:
       - name: Common setup
         run: ./scripts/commonSetup
       - name: Publish and Tag
-        run: ./scripts/publishAndTag 'slamdata/quasar-datasource-mongo'
+        run: ./scripts/publishAndTag 'precog/quasar-datasource-mongo'
 
   auto-merge:
     name: Auto Merge
@@ -114,7 +114,7 @@ jobs:
         with:
           name: working-dir
       - name: Setup Git Actor
-        run: git config github.actor slamdata-bot
+        run: git config github.actor precog-bot
       - name: Set up JDK ${{ env.JDK }}
         uses: actions/setup-java@v1
         with:
@@ -133,7 +133,7 @@ jobs:
         run: ./scripts/commonSetup
       - name: Set env vars
         run: |
-          echo ::set-env name=CLONE_DIR::$(mktemp -d "/tmp/slamdata-bump.XXXXXXXX")
+          echo ::set-env name=CLONE_DIR::$(mktemp -d "/tmp/precog-bump.XXXXXXXX")
           echo ::set-env name=PR_NUMBER::$(echo "$GITHUB_REF" | cut -d'/' -f3)
           echo ::set-env name=PULL_REQUEST::$(echo "true")
       - name: Run automerge

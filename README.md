@@ -1,9 +1,9 @@
-# Quasar Mongo [![Build Status](https://travis-ci.org/slamdata/quasar-datasource-mongo.svg?branch=master)](https://travis-ci.org/slamdata/quasar-datasource-mongo) [![Bintray](https://img.shields.io/bintray/v/slamdata-inc/maven-public/quasar-datasource-mongo.svg)](https://bintray.com/slamdata-inc/maven-public/quasar-datasource-mongo) [![Discord](https://img.shields.io/discord/373302030460125185.svg?logo=discord)](https://discord.gg/QNjwCg6)
+# Quasar Mongo [![Discord](https://img.shields.io/discord/373302030460125185.svg?logo=discord)](https://discord.gg/QNjwCg6)
 
 ## Usage
 
 ```sbt
-libraryDependencies += "com.slamdata" %% "quasar-datasource-mongo" % <version>
+libraryDependencies += "com.precog" %% "quasar-datasource-mongo" % <version>
 ```
 
 Configuration
