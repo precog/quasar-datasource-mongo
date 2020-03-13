@@ -2,13 +2,15 @@ import scala.collection.Seq
 
 scalaVersion in ThisBuild := "2.12.10"
 
+ThisBuild / githubRepository := "quasar-datasource-mongo"
+
 publishAsOSSProject in ThisBuild := true
 
-homepage in ThisBuild := Some(url("https://github.com/slamdata/quasar-datasource-mongo"))
+homepage in ThisBuild := Some(url("https://github.com/precog/quasar-datasource-mongo"))
 
 scmInfo in ThisBuild := Some(ScmInfo(
-  url("https://github.com/slamdata/quasar-datasource-mongo"),
-  "scm:git@github.com:slamdata/quasar-datasource-mongo.git"))
+  url("https://github.com/precog/quasar-datasource-mongo"),
+  "scm:git@github.com:precog/quasar-datasource-mongo.git"))
 
 lazy val root = project
   .in(file("."))
@@ -31,10 +33,10 @@ lazy val core = project
   .settings(parallelExecution in Test := false)
   .settings(
     name := "quasar-datasource-mongo",
-    datasourceName := "mongo",
-    datasourceQuasarVersion := managedVersions.value("slamdata-quasar"),
-    datasourceModuleFqcn := "quasar.physical.mongo.MongoDataSourceModule$",
-    datasourceDependencies ++= Seq(
+    quasarPluginName := "mongo",
+    quasarPluginQuasarVersion := managedVersions.value("precog-quasar"),
+    quasarPluginDatasourceFqcn := Some("quasar.physical.mongo.MongoDataSourceModule$"),
+    quasarPluginDependencies ++= Seq(
       "com.codecommit"             %% "shims"                      % shimsVersion,
       "eu.timepit"                 %% "refined-scalacheck"         % refinedVersion,
       "org.typelevel"              %% "cats-effect"                % catsEffectVersion,
@@ -42,8 +44,8 @@ lazy val core = project
       "io.netty"                   %  "netty-all"                  % nettyVersion,
       "com.jcraft"                 % "jsch"                        % jschVersion,
 
-      "com.slamdata"               %% "quasar-foundation"          % managedVersions.value("slamdata-quasar") % Test classifier "tests",
-      "com.slamdata"               %% "quasar-frontend"            % managedVersions.value("slamdata-quasar") % Test classifier "tests",
+      "com.precog"                 %% "quasar-foundation"          % managedVersions.value("precog-quasar") % Test classifier "tests",
+      "com.precog"                 %% "quasar-frontend"            % managedVersions.value("precog-quasar") % Test classifier "tests",
       "org.slf4j"                  %  "slf4j-log4j12"              % slf4jVersion % Test,
       "org.specs2"                 %% "specs2-core"                % specsVersion % Test,
       "org.specs2"                 %% "specs2-scalaz"              % specsVersion % Test,
@@ -53,4 +55,4 @@ lazy val core = project
       // warnings w/o this dependency
       "com.google.code.findbugs"   %  "jsr305"                      % jsrVersion % Provided
     ))
-  .enablePlugins(AutomateHeaderPlugin, DatasourcePlugin)
+  .enablePlugins(QuasarPlugin)
