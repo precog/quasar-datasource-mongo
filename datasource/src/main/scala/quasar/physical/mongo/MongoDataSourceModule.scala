@@ -76,7 +76,7 @@ object MongoDataSourceModule extends LightweightDatasourceModule {
       case Right(mongoConfig) =>
         ApplicativeError[Resource[F, ?], Throwable]
           .attempt(Mongo(mongoConfig, blocker))
-          .map(_.bimap(mkError(config, _), new MongoDataSource(_): LightweightDatasourceModule.DS[F]))
+          .map(_.bimap(mkError(config, _), MongoDataSource[F](_)))
     }
 
   def kind: DatasourceType = MongoDataSource.kind

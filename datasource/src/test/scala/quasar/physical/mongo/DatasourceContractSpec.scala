@@ -21,22 +21,23 @@ import slamdata.Predef._
 import quasar.{RateLimiter, NoopRateLimitUpdater}
 import quasar.api.resource.{ResourceName, ResourcePath, ResourcePathType}
 import quasar.connector.ByteStore
-import quasar.connector.datasource.{DatasourceSpec, LightweightDatasourceModule}
+import quasar.connector.datasource.{Datasource, DatasourceSpec}
 
 import java.util.UUID
 import scala.io.Source
 
 import argonaut.Argonaut.jString
 import argonaut.Json
+
+import cats.MonadError
 import cats.effect.{IO, Resource}
-import cats.instances.tuple._
 import cats.kernel.instances.uuid._
-import cats.syntax.bifunctor._
+
 import fs2.Stream
-import org.specs2.specification.AfterAll
+
 import testImplicits._
 
-class DatasourceContractSpec extends DatasourceSpec[IO, Stream[IO, ?], ResourcePathType.Physical] with AfterAll {
+class DatasourceContractSpec extends DatasourceSpec[IO, Stream[IO, ?], ResourcePathType.Physical] {
 
   val host = Source.fromResource("mongo-host").mkString.trim
   val port: String = "27018"
@@ -45,18 +46,17 @@ class DatasourceContractSpec extends DatasourceSpec[IO, Stream[IO, ?], ResourceP
     "connectionString" -> jString(s"mongodb://root:secret@${host}:${port}"),
     "pushdownLevel" -> jString("full"))
 
-  lazy val ds: (LightweightDatasourceModule.DS[IO], IO[Unit]) =
+  val datasource =
     Resource.liftF(RateLimiter[IO, UUID](1.0, IO.delay(UUID.randomUUID()), NoopRateLimitUpdater[IO, UUID]))
       .flatMap(rl => MongoDataSourceModule.lightweightDatasource[IO, UUID](cfg, rl, ByteStore.void[IO]))
-      .allocated
-      .unsafeRunSync()
-      .leftMap(_.getOrElse(throw new RuntimeException("Unexpected error")))
+      .flatMap {
+        case Right(ds) =>
+          Resource.pure[IO, Datasource[Resource[IO, ?], Stream[IO, ?], _, _, ResourcePathType.Physical]](ds)
 
-  def afterAll: Unit =
-    ds._2.unsafeRunSync()
-
-  override def datasource: LightweightDatasourceModule.DS[IO] =
-    ds._1
+        case Left(err) =>
+          MonadError[Resource[IO, ?], Throwable].raiseError(
+            new RuntimeException(s"Unexpected error: $err"))
+      }
 
   override val nonExistentPath =
     ResourcePath.root() / ResourceName("doesNotExist")

@@ -18,8 +18,8 @@ package quasar.physical.mongo
 
 import slamdata.Predef._
 
-import cats.data.OptionT
 import cats.effect.{IO, Resource}
+import cats.implicits._
 
 import fs2.Stream
 
@@ -33,15 +33,14 @@ import quasar.connector.{QueryResult, ResourceError}
 import quasar.physical.mongo.MongoResource.Collection
 import quasar.qscript.InterpretedRead
 
-import shims._
 import testImplicits._
 
 class MongoDataSourceSpec extends EffectfulQSpec[IO] {
   def mkDataSource: Resource[IO, MongoDataSource[IO]] =
-    MongoSpec.mkMongo.map(new MongoDataSource[IO](_))
+    MongoSpec.mkMongo.map(MongoDataSource[IO](_))
 
   val mkInaccessibleDataSource: Resource[IO, MongoDataSource[IO]] =
-    MongoSpec.mkMongoInvalidPort.map(new MongoDataSource[IO](_))
+    MongoSpec.mkMongoInvalidPort.map(MongoDataSource[IO](_))
 
   step(MongoSpec.setupDB.unsafeRunSync())
 
@@ -62,11 +61,11 @@ class MongoDataSourceSpec extends EffectfulQSpec[IO] {
 
   "evaluation of" >> {
     def assertPathNotFound(ds: Resource[IO, MongoDataSource[IO]], path: ResourcePath): MatchResult[Either[Throwable, Option[QueryResult[IO]]]] = {
-      ds.use(_.loadFull(iRead(path)).value).attempt.unsafeRunSync() must beLike(pathNotFound(path))
+      ds.flatMap(_.loadFull(iRead(path)).value).use(IO.pure).attempt.unsafeRunSync() must beLike(pathNotFound(path))
     }
 
     def assertConnectionFailed(ds: Resource[IO, MongoDataSource[IO]], path: ResourcePath): MatchResult[Either[Throwable, Option[QueryResult[IO]]]] =
-      ds.use(_.loadFull(iRead(path)).value).attempt.unsafeRunSync() must beLike(connFailed)
+      ds.flatMap(_.loadFull(iRead(path)).value).use(IO.pure).attempt.unsafeRunSync() must beLike(connFailed)
 
     "root raises path not found" >>
       assertPathNotFound(mkDataSource, ResourcePath.root())
@@ -98,15 +97,14 @@ class MongoDataSourceSpec extends EffectfulQSpec[IO] {
             case _ => false
           }
 
-          mkDataSource use { ds =>
-            val fStream: OptionT[IO, Stream[IO, Any]] =
-              ds.loadFull(iRead(coll.resourcePath)) map {
-                case QueryResult.Parsed(_, data, _) => data
-                case QueryResult.Typed(_, data, _) => data
-                case QueryResult.Stateful(_, _, _, _, _) => Stream.empty
-              }
+          mkDataSource.flatMap(_.loadFull(iRead(coll.resourcePath)).value) use { r =>
+            val bsons: Stream[IO, Any] = r match {
+              case Some(QueryResult.Parsed(_, data, _)) => data
+              case Some(QueryResult.Typed(_, data, _)) => data
+              case _ => Stream.empty
+            }
 
-            Stream.force(fStream getOrElse Stream.empty)
+            bsons
               .compile.toList
               .map(checkBson(coll, _))
           }
@@ -125,22 +123,27 @@ class MongoDataSourceSpec extends EffectfulQSpec[IO] {
 
   "prefixedChildPaths" >> {
     def assertPrefixed(datasource: Resource[IO, MongoDataSource[IO]], path: ResourcePath, expected: List[(ResourceName, ResourcePathType.Physical)]): IO[MatchResult[Set[(ResourceName, ResourcePathType.Physical)]]] =
-      datasource use { ds =>
-        val fStream = ds.prefixedChildPaths(path).map(_ getOrElse Stream.empty)
-        Stream.force(fStream).compile.toList.map(_.toSet must contain(expected.toSet))
-      }
+      datasource
+        .flatMap(_.prefixedChildPaths(path))
+        .use(_.getOrElse(Stream.empty).compile.toList)
+        .map(_.toSet must contain(expected.toSet))
 
     def assertConnectionFailed(datasource: Resource[IO, MongoDataSource[IO]], path: ResourcePath) =
-      datasource.use(ds => {
-        val fStream = ds.prefixedChildPaths(path).map(_ getOrElse Stream.empty)
-        Stream.force(fStream).compile.toList
-      }).attempt.unsafeRunSync() must beLike(connFailed)
+      datasource
+        .flatMap(_.prefixedChildPaths(path))
+        .use(_.getOrElse(Stream.empty).compile.toList)
+        .attempt
+        .map(_ must beLike(connFailed))
 
     def assertNone(datasource: Resource[IO, MongoDataSource[IO]], path: ResourcePath) =
-      datasource.use(_.prefixedChildPaths(path).map(_ must_=== None))
+      datasource
+        .flatMap(_.prefixedChildPaths(path))
+        .use(r => IO.pure(r must_=== None))
 
     def assertEmptyStream(datasource: Resource[IO, MongoDataSource[IO]], path: ResourcePath) =
-      datasource.use(_.prefixedChildPaths(path).map(_ must_=== Some(Stream.empty)))
+      datasource
+        .flatMap(_.prefixedChildPaths(path))
+        .use(r => IO.pure(r must_=== Some(Stream.empty)))
 
     "children of root are databases" >>*
       assertPrefixed(
@@ -148,7 +151,7 @@ class MongoDataSourceSpec extends EffectfulQSpec[IO] {
         ResourcePath.root(),
         MongoSpec.correctDbs.map(db => (ResourceName(db.name), ResourcePathType.prefix)))
 
-    "children of inaccessible root raises connection failed" >>
+    "children of inaccessible root raises connection failed" >>*
       assertConnectionFailed(
         mkInaccessibleDataSource,
         ResourcePath.root())
@@ -167,7 +170,7 @@ class MongoDataSourceSpec extends EffectfulQSpec[IO] {
 
     "children of inaccessible database raises connection failed" >>
       Fragment.foreach(MongoSpec.incorrectDbs)(db =>
-        s"checking ${db.name}" >> assertConnectionFailed(mkInaccessibleDataSource, db.resourcePath))
+        s"checking ${db.name}" >>* assertConnectionFailed(mkInaccessibleDataSource, db.resourcePath))
 
     "children of existing collection are empty stream" >>
       Fragment.foreach (MongoSpec.correctCollections)(col =>
@@ -179,18 +182,18 @@ class MongoDataSourceSpec extends EffectfulQSpec[IO] {
 
     "children of inaccessible collection raises connection failed" >>
       Fragment.foreach (MongoSpec.incorrectCollections)(col =>
-        s"checking ${col.database.name} :: ${col.name}" >> assertConnectionFailed(mkInaccessibleDataSource, col.resourcePath))
+        s"checking ${col.database.name} :: ${col.name}" >>* assertConnectionFailed(mkInaccessibleDataSource, col.resourcePath))
   }
 
   "pathIsResource" >> {
-    def assertNoResource(datasource: Resource[IO, MongoDataSource[IO]], path: ResourcePath) =
-      datasource.use(_.pathIsResource(path).map(!_))
-
     def assertResource(datasource: Resource[IO, MongoDataSource[IO]], path: ResourcePath) =
-      datasource.use(_.pathIsResource(path))
+      datasource.flatMap(_.pathIsResource(path)).use(IO.pure)
+
+    def assertNoResource(datasource: Resource[IO, MongoDataSource[IO]], path: ResourcePath) =
+      datasource.flatMap(_.pathIsResource(path)).use(b => IO.pure(!b))
 
     def assertConnectionFailed(datasource: Resource[IO, MongoDataSource[IO]], path: ResourcePath) =
-      datasource.use(_.pathIsResource(path)).attempt.unsafeRunSync() must beLike(connFailed)
+      datasource.flatMap(_.pathIsResource(path)).attempt.use(e => IO.pure(e must beLike(connFailed)))
 
     "returns false for root" >>* assertNoResource(mkDataSource, ResourcePath.root())
 
@@ -217,7 +220,7 @@ class MongoDataSourceSpec extends EffectfulQSpec[IO] {
     }
 
     "raises connection failed for inaccessible collections" >> Fragment.foreach(MongoSpec.incorrectCollections) { col =>
-      s"checking ${col.database.name} :: ${col.name}" >> assertConnectionFailed(mkInaccessibleDataSource, col.resourcePath)
+      s"checking ${col.database.name} :: ${col.name}" >>* assertConnectionFailed(mkInaccessibleDataSource, col.resourcePath)
     }
   }
 }

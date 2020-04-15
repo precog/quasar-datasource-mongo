@@ -40,7 +40,7 @@ import quasar.qscript.InterpretedRead
 import shims._
 
 class MongoDataSource[F[_]: ConcurrentEffect: ContextShift: MonadResourceErr: Timer](mongo: Mongo[F])
-  extends LightweightDatasource[F, Stream[F, ?], QueryResult[F]] {
+    extends LightweightDatasource[Resource[F, ?], Stream[F, ?], QueryResult[F]] {
 
   val kind = MongoDataSource.kind
 
@@ -59,46 +59,52 @@ class MongoDataSource[F[_]: ConcurrentEffect: ContextShift: MonadResourceErr: Ti
       }
     }
 
-    fStreamPair map {
+    Resource.liftF(fStreamPair map {
       case (insts, stream) => QueryResult.parsed(qdataDecoder, stream, insts)
-    }
+    })
   }))
 
-  override def pathIsResource(path: ResourcePath): F[Boolean] = path match {
-    case ResourcePath.Root => false.pure[F]
-    case ResourcePath.Leaf(file) => MongoResource.ofFile(file) match {
-      case Some(Database(_)) => false.pure[F]
-      case Some(coll@Collection(_, _)) => mongo.collectionExists(coll).compile.last.map(_ getOrElse false)
-      case None => false.pure[F]
-    }
-  }
+  def pathIsResource(path: ResourcePath): Resource[F, Boolean] =
+    Resource.liftF(path match {
+      case ResourcePath.Root => false.pure[F]
+      case ResourcePath.Leaf(file) => MongoResource.ofFile(file) match {
+        case Some(Database(_)) => false.pure[F]
+        case Some(coll@Collection(_, _)) => mongo.collectionExists(coll).compile.last.map(_ getOrElse false)
+        case None => false.pure[F]
+      }
+    })
 
   override def prefixedChildPaths(prefixPath: ResourcePath)
-    : F[Option[Stream[F, (ResourceName, ResourcePathType.Physical)]]] = prefixPath match {
+      : Resource[F, Option[Stream[F, (ResourceName, ResourcePathType.Physical)]]] =
+    Resource.liftF(prefixPath match {
+      case ResourcePath.Root =>
+        mongo.databases.map(x => (ResourceName(x.name), ResourcePathType.prefix)).some.pure[F]
 
-    case ResourcePath.Root =>
-      mongo.databases.map(x => (ResourceName(x.name), ResourcePathType.prefix)).some.pure[F]
+      case ResourcePath.Leaf(file) => MongoResource.ofFile(file) match {
+        case None => none.pure[F]
 
-    case ResourcePath.Leaf(file) => MongoResource.ofFile(file) match {
-      case None => none.pure[F]
+        case Some(coll@Collection(_, _)) =>
+          val exists: F[Boolean] = mongo.collectionExists(coll).compile.last.map(_ getOrElse false)
+          exists.ifM(Stream.empty.covary[F].covaryOutput[(ResourceName, ResourcePathType.Physical)].some.pure[F], none.pure[F])
 
-      case Some(coll@Collection(_, _)) =>
-        val exists: F[Boolean] = mongo.collectionExists(coll).compile.last.map(_ getOrElse false)
-        exists.ifM(Stream.empty.covary[F].covaryOutput[(ResourceName, ResourcePathType.Physical)].some.pure[F], none.pure[F])
+        case Some(db@Database(_)) =>
+          val dbExists: F[Boolean] = mongo.databaseExists(db).compile.last.map(_.getOrElse(false))
 
-      case Some(db@Database(_)) =>
-        val dbExists: F[Boolean] = mongo.databaseExists(db).compile.last.map(_.getOrElse(false))
-
-        dbExists.map(exists =>
-          if (exists)
-            mongo.collections(db).map(x => (ResourceName(x.name), ResourcePathType.leafResource)).some
-          else
-            none
-        )
-    }
-  }
+          dbExists map { exists =>
+            if (exists)
+              mongo.collections(db).map(x => (ResourceName(x.name), ResourcePathType.leafResource)).some
+            else
+              none
+          }
+      }
+    })
 }
 
 object MongoDataSource {
   val kind: DatasourceType = DatasourceType("mongo", 1L)
+
+  def apply[F[_]: ConcurrentEffect: ContextShift: MonadResourceErr: Timer](
+      mongo: Mongo[F])
+      : MongoDataSource[F] =
+    new MongoDataSource(mongo)
 }
