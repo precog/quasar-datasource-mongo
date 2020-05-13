@@ -20,10 +20,7 @@ import slamdata.Predef._
 
 import cats.data.NonEmptyList
 import cats.effect._
-import cats.syntax.applicative._
-import cats.syntax.flatMap._
-import cats.syntax.functor._
-import cats.syntax.option._
+import cats.implicits._
 
 import eu.timepit.refined.auto._
 
@@ -36,8 +33,6 @@ import quasar.connector.datasource._
 import quasar.physical.mongo.decoder.qdataDecoder
 import quasar.physical.mongo.MongoResource.{Collection, Database}
 import quasar.qscript.InterpretedRead
-
-import shims._
 
 class MongoDataSource[F[_]: ConcurrentEffect: ContextShift: MonadResourceErr: Timer](mongo: Mongo[F])
     extends LightweightDatasource[Resource[F, ?], Stream[F, ?], QueryResult[F]] {
@@ -84,8 +79,9 @@ class MongoDataSource[F[_]: ConcurrentEffect: ContextShift: MonadResourceErr: Ti
         case None => none.pure[F]
 
         case Some(coll@Collection(_, _)) =>
-          val exists: F[Boolean] = mongo.collectionExists(coll).compile.last.map(_ getOrElse false)
-          exists.ifM(Stream.empty.covary[F].covaryOutput[(ResourceName, ResourcePathType.Physical)].some.pure[F], none.pure[F])
+          mongo.collectionExists(coll)
+            .compile.last
+            .map(_.filter(b => b).as[Stream[F, (ResourceName, ResourcePathType.Physical)]](Stream.empty))
 
         case Some(db@Database(_)) =>
           val dbExists: F[Boolean] = mongo.databaseExists(db).compile.last.map(_.getOrElse(false))
