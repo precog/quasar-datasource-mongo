@@ -55,7 +55,7 @@ val shimsVersion = "2.0.0"
 val slf4jVersion = "1.7.25"
 val specsVersion = "4.7.1"
 val refinedVersion = "0.9.9"
-val nettyVersion = "4.1.38.Final"
+val nettyVersion = "4.1.49.Final"
 val jsrVersion = "3.0.2"
 val jschVersion = "0.1.55"
 
