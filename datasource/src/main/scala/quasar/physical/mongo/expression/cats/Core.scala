@@ -182,7 +182,7 @@ object Core {
   }
 
   trait Optics[A, O] {
-    val basePrism: Prism[O, Core[A]]
+    val core: Prism[O, Core[A]]
 
     val _array =
       Prism.partial[Core[A], List[A]]{case Array(v) => v}(Array(_))
@@ -197,14 +197,14 @@ object Core {
     val _nil =
       Prism.partial[Core[A], Unit]{case Null() => ()}(x => Null())
 
-    val array = basePrism composePrism _array
-    val obj = basePrism composePrism _obj
-    val bool = basePrism composePrism _bool
-    val int = basePrism composePrism _int
-    val str = basePrism composePrism _str
-    val nil = basePrism composePrism _nil
+    val array = core composePrism _array
+    val obj = core composePrism _obj
+    val bool = core composePrism _bool
+    val int = core composePrism _int
+    val str = core composePrism _str
+    val nil = core composePrism _nil
   }
-  def optics[A, O](bp: Prism[O, Core[A]]) = new Optics[A, O] { val basePrism = bp }
+  def optics[A, O](bp: Prism[O, Core[A]]) = new Optics[A, O] { val core = bp }
 }
 
 sealed trait Op[A] extends Product with Serializable
@@ -241,7 +241,7 @@ object Op {
   }
 
   trait Optics[A, O] {
-    val basePrism: Prism[O, Op[A]]
+    val op: Prism[O, Op[A]]
 
     val _let =
       Prism.partial[Op[A], (Map[String, A], A)]{case Let(a, b) => (a, b)}{case (a, b) => Let(a, b)}
@@ -268,21 +268,21 @@ object Op {
     val _not =
       Prism.partial[Op[A], A]{case Not(v) => v}(Not(_))
 
-    val let = basePrism composePrism _let
-    val typ = basePrism composePrism _type
-    val eq = basePrism composePrism _eq
-    val or = basePrism composePrism _or
-    val exists = basePrism composePrism _exists
-    val cond = basePrism composePrism _cond
-    val ne = basePrism composePrism _ne
-    val objectToArray = basePrism composePrism _objectToArray
-    val arrayElemAt = basePrism composePrism _arrayElemAt
-    val reduce = basePrism composePrism _reduce
-    val concatArrays = basePrism composePrism _concatArrays
-    val not = basePrism composePrism _not
+    val let = op composePrism _let
+    val typ = op composePrism _type
+    val eqx = op composePrism _eq
+    val or = op composePrism _or
+    val exists = op composePrism _exists
+    val cond = op composePrism _cond
+    val nex = op composePrism _ne
+    val objectToArray = op composePrism _objectToArray
+    val arrayElemAt = op composePrism _arrayElemAt
+    val reduce = op composePrism _reduce
+    val concatArrays = op composePrism _concatArrays
+    val not = op composePrism _not
   }
 
-  def optics[A, O](bp: Prism[O, Op[A]]): Optics[A, O] = new Optics[A, O] { val basePrism = bp }
+  def optics[A, O](bp: Prism[O, Op[A]]): Optics[A, O] = new Optics[A, O] { val op = bp }
 }
 
 final case class Projection(steps: List[Projection.Step]) {
@@ -337,7 +337,7 @@ object Projection {
 
   trait Grouped extends Product with Serializable
 
-  object Groupped {
+  object Grouped {
     final case class IndexGroup(i: Int) extends Grouped
     final case class FieldGroup(s: List[String]) extends Grouped
 
@@ -358,21 +358,23 @@ object Projection {
   }
 
   trait Optics[A, O] {
-    val basePrism: Prism[O, Const[Projection, A]]
+    val proj: Prism[O, Const[Projection, A]]
 
     val _projection =
       Iso[Const[Projection, A], Projection](_.getConst)(Const(_))
     val projection =
-      basePrism composePrism _projection.asPrism
+      proj composePrism _projection.asPrism
   }
 
-  def optics[A, O](bp: Prism[O, Const[Projection, A]]): Optics[A, O] = new Optics[A, O] { val basePrism = bp }
+  def optics[A, O](bp: Prism[O, Const[Projection, A]]): Optics[A, O] = new Optics[A, O] { val proj = bp }
 }
 
 
 object optics0 {
   import iota._
   import monocle.Prism
+
+
 
   def copkPrism[F[_], G[a] <: ACopK[a], A](implicit I: F :<<: G): Prism[G[A], F[A]] =
     Prism[G[A], F[A]]((x: G[A]) => I.prj(x))((x: F[A]) => I.inj(x))
@@ -385,6 +387,28 @@ object optics0 {
 
   def coattrFPrism[F[_], A, B] =
     Prism.partial[CoattrF[F, A, B], F[B]]{case CoattrF.Roll(f) => f}(CoattrF.roll(_))
+
+  def core[F[a] <: ACopK[a], A, O](bp: Prism[O, F[A]])(implicit c: Core :<<: F): Core.Optics[A, O] = new Core.Optics[A, O] {
+    val core = bp composePrism copkPrism[Core, F, A]
+  }
+
+  def coreOp[F[a] <: ACopK[a], A, O](bp: Prism[O, F[A]])(implicit c: Core :<<: F, o: Op :<<: F): Core.Optics[A, O] with Op.Optics[A, O] =
+    new Core.Optics[A, O] with Op.Optics[A, O] {
+      val core = bp composePrism copkPrism[Core, F, A]
+      val op = bp composePrism copkPrism[Op, F, A]
+    }
+
+  def full[F[a] <: ACopK[a], A, O](bp: Prism[O, F[A]])(
+      implicit
+      c: Core :<<: F,
+      o: Op :<<: F,
+      p: Const[Projection, ?] :<<: F)
+      : Core.Optics[A, O] with Op.Optics[A, O] with Projection.Optics[A, O] =
+  new Core.Optics[A, O] with Op.Optics[A, O] with Projection.Optics[A, O] { self =>
+    val core = bp composePrism copkPrism[Core, F, A]
+    val op = bp composePrism copkPrism[Op, F, A]
+    val proj = bp composePrism copkPrism[Const[Projection, ?], F, A]
+  }
 }
 
 object example {
@@ -406,13 +430,14 @@ object example {
 
   type CoreOp[A] = CopK[Core ::: Op ::: TNilK, A]
   type Core0[A] = CopK[Core ::: TNilK, A]
+  type Expr[A] = CopK[Const[Projection, ?] ::: Core ::: Op ::: TNilK, A]
 
   def nilCoreOp: Fix[CoreOp] = thisNil[CoreOp, Fix[CoreOp]]
   def nilCore: Mu[Core0] = thisNil[Core0, Mu[Core0]]
 //  def nilCoattr: Coattr[Core0, Int] = thisNil[CoattrF[Core0, Int, ?], Coattr[Core0, Int]]
 
   def opsToCore[U: Basis[Core0, ?]]: Algebra[Op, U] = {
-    val core0 = Core.optics(basisPrism[Core0, U] composePrism copkPrism[Core, Core0, U])
+    val core0 = optics0.core(basisPrism[Core0, U])
     import core0._
     Algebra {
       case Op.Let(vars, in) => obj(Map("$let" -> obj(Map("vars" -> obj(vars), "in" -> in))))
@@ -448,19 +473,152 @@ object example {
   def coreOpsToCoreRun[W: Basis[CoreOp, ?], U: Basis[Core0, ?]]: W => U =
     scheme.cata[CoreOp, W, U](coreOpsToCore)
 
+
+  val MissingSuffix = "_missing"
   type Elem = (Projection.Grouped, Int)
-  def unfoldProjection: CVCoalgebra[CoreOp, List[Elem]] = {
+  import Projection.Grouped._
+
+  def unfoldProjectionψ(uuid: String): CVCoalgebra[CoreOp, List[Elem]] = {
     type U = Coattr[CoreOp, List[Elem]]
     type F[X] = CoattrF[CoreOp, List[Elem], X]
-    val core = Core.optics(basisPrism[F, U] composePrism coattrFPrism[CoreOp, List[Elem], U] composePrism copkPrism[Core, CoreOp, U])
-    val op = Op.optics(basisPrism[F, U] composePrism coattrFPrism[CoreOp, List[Elem], U] composePrism copkPrism[Op, CoreOp, U])
-    import core._
-    import op._
 
-    val cf = Core.optics(copkPrism[Core, CoreOp, U])
-    val of = Core.optics(copkPrism[Op, CoreOp, U])
+    val toCopK = basisPrism[F, U] composePrism coattrFPrism[CoreOp, List[Elem], U]
+    val ff = optics0.coreOp(Prism.id: Prism[CoreOp[U], CoreOp[U]])
+    val coreOp = optics0.coreOp(toCopK)
+    import coreOp._
+
     CVCoalgebra {
-      case List() => cf.str("$$ROOT")
+      case List() =>
+        ff.str("$$ROOT")
+      case (FieldGroup(hd :: tail), _) :: List() =>
+        ff.str(tail.foldLeft("$".concat(hd)){ (acc, s) => s"$acc.$s" })
+      case (hd, levelIx) :: tl =>
+        val level = s"level${levelIx.toString}"
+        val levelExp = str("$$".concat(level))
+        val tailCont: U = Coattr.pure(tl)
+        val undefined = str(s"$uuid$MissingSuffix")
+        hd match {
+          case IndexGroup(i) =>
+            ff.let(
+              Map(level -> tailCont),
+              cond(
+                eqx(List(typ(tailCont), str("array"))),
+                arrayElemAt(str("$$".concat(level)), i),
+                undefined))
+          case FieldGroup(steps) =>
+            val expSteps = FieldGroup("$".concat(level) :: steps)
+            val exp: U = Coattr.pure(List((expSteps, 0)))
+            ff.let(
+              Map(level -> tailCont),
+              exp)
+      }
     }
+  }
+
+  def unfoldProjection[U: Basis[CoreOp, ?]](uuid: String): Projection => U = { (prj: Projection) =>
+    val grouped = Projection.Grouped(prj).zipWithIndex
+    val fn: List[Elem] => U = scheme.zoo.futu(unfoldProjectionψ(uuid))
+    fn(grouped)
+  }
+
+  sealed trait Pipeline[+A] extends Product with Serializable
+  sealed trait MongoPipeline[+A] extends Pipeline[A]
+  sealed trait CustomPipeline extends Pipeline[Nothing]
+
+  object Pipeline {
+    final case class Project[A](obj: Map[String, A]) extends MongoPipeline[A]
+    final case class Match[A](a: A) extends MongoPipeline[A]
+    final case class Unwind(path: String, arrayIndex: String) extends MongoPipeline[Nothing]
+
+    final case object Presented extends CustomPipeline
+    final case object Erase extends CustomPipeline
+  }
+
+  def missing[F[a] <: ACopK[a], U](k: String)(implicit I: Core :<<: F, P: Basis[F, U]): U =
+    optics0.core(basisPrism[F, U]).str(k.concat(MissingSuffix))
+
+  import Pipeline._
+  def eraseCustomPipeline[U: Basis[Expr, ?]](uuid: String, pipeline: Pipeline[U]): List[MongoPipeline[U]] = {
+    val o = optics0.full(basisPrism[Expr, U])
+    import o._
+
+    pipeline match {
+      case Presented =>
+        List(Match(obj(Map(uuid -> nex(missing[Expr, U](uuid))))))
+      case Erase =>
+        List(Match(obj(Map(uuid.concat("_erase") -> bool(false)))))
+      case Project(obj) =>
+        List(Project(obj))
+      case Match(obj) =>
+        List(Match(obj))
+      case Unwind(a, i) =>
+        List(Unwind(a, i))
+    }
+  }
+
+  def pipelineObjects[F[a] <: ACopK[a], U](pipe: MongoPipeline[U])(implicit I: Core :<<: F, U: Basis[F, U]): U = {
+    val o = optics0.core(basisPrism[F, U])
+    pipe match {
+      case Match(mp) =>
+        o.obj(Map("$match" -> mp))
+      case Project(mp) =>
+        o.obj(Map("$project" -> o.obj(mp)))
+      case Unwind(path, arrayIndex) =>
+        o.obj(Map("$unwind" -> o.obj(Map(
+          "path" -> o.str("$".concat(path)),
+          "includeArrayIndex" -> o.str(arrayIndex),
+          "preserveNullAndEmptyArrays" -> o.bool(false)))))
+    }
+  }
+
+  def letOpt[W: Basis[CoreOp, ?], U: Basis[CoreOp, ?]]: W => U = {
+    val o = optics0.coreOp(basisPrism[CoreOp, U])
+    val f = optics0.coreOp(Prism.id[CoreOp[U]])
+    import o._
+    scheme.cata[CoreOp, W, U](Algebra {
+      case f.let(vars, in) =>
+        if (vars.size =!= 1) let(vars, in)
+        else in match {
+          case str(k) =>
+            vars.get(k.stripPrefix("$$")) match {
+              case Some(str(v)) if v.stripPrefix("$") =!= v =>
+                str(v.concat(v))
+              case _ =>
+                let(vars, in)
+            }
+        }
+        let(vars, in)
+      case x => x.embed
+    })
+  }
+  def orOpt[W: Basis[CoreOp, ?], U: Basis[CoreOp, ?]]: W => U = {
+    val o = optics0.coreOp(basisPrism[CoreOp, U])
+    val f = optics0.coreOp(Prism.id[CoreOp[U]])
+    import o._
+    scheme.cata[CoreOp, W, U](Algebra {
+      case f.or(lst) => lst match {
+        case List() => bool(false)
+        case List(a) => a
+        case _ => or(lst flatMap {
+          case or(as) => as
+          case x => List(x)
+        })
+      }
+    })
+  }
+  def mapProjection[F[a] <: ACopK[a], W, U](fn: Projection => Projection)(
+      implicit
+      F: Functor[F],
+      I: Const[Projection, ?] :<<: F,
+      Q: Basis[F, W],
+      P: Basis[F, U])
+      : W => U = {
+    val o = Projection.optics(basisPrism[F, U] composePrism copkPrism[Const[Projection, ?], F, U])
+    val f = Projection.optics(copkPrism[Const[Projection, ?], F, U])
+    scheme.cata[F, W, U](Algebra {
+      case f.projection(prj) =>
+        o.projection(fn(prj))
+      case x => x.embed
+    })
   }
 }
