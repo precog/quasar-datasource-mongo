@@ -61,6 +61,7 @@ val catsEffectVersion   = "2.1.0"
 val iotaVersion = "0.3.10"
 val drosteVersion = "0.8.0"
 val monocleVersion = "2.0.4"
+val catsMTLVersion = "0.7.0"
 
 lazy val core = project
   .in(file("datasource"))
@@ -80,8 +81,9 @@ lazy val core = project
       "com.jcraft"                 % "jsch"                        % jschVersion,
       "org.typelevel"              %% "cats-effect"                % catsEffectVersion,
       "org.mongodb.scala"          %% "mongo-scala-driver"         % mongoVersion,
-      "com.github.julien-truffaut" %% "monocle-core"              % monocleVersion,
+      "com.github.julien-truffaut" %% "monocle-core"               % monocleVersion,
       "com.github.julien-truffaut" %% "monocle-macro"              % monocleVersion,
+      "org.typelevel"              %% "cats-mtl-core"              % catsMTLVersion,
 
       "com.precog"                 %% "quasar-foundation"          % managedVersions.value("precog-quasar") % Test classifier "tests",
       "com.precog"                 %% "quasar-frontend"            % managedVersions.value("precog-quasar") % Test classifier "tests",

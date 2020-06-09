@@ -19,14 +19,18 @@ package quasar.physical.mongo.expression.cats
 import slamdata.Predef.{Eq => _, _}
 
 import quasar.common.{CPath, CPathField, CPathIndex}
+import quasar.common.CPath
+import quasar.api.ColumnType
 
 import _root_.iota.TListK.:::
 import _root_.iota.{CopK, TListK, TNilK}
 import _root_.iota.syntax._
 
 import cats._
-import cats.data.Const
+import cats.data._
 import cats.implicits._
+import cats.mtl._
+import cats.mtl.implicits._
 import higherkindness.droste._
 import higherkindness.droste.data._
 import higherkindness.droste.syntax.all._
@@ -35,6 +39,10 @@ import higherkindness.droste.util.DefaultTraverse
 
 import monocle.{Iso, Prism}
 import monocle.macros.{GenLens, GenPrism}
+
+import org.bson._
+import quasar.{ScalarStage, IdStatus}
+import quasar.physical.mongo.Version
 
 object iota {
   type ACopK[α] = CopK[_, α]
@@ -335,6 +343,13 @@ object Projection {
       }
     }
 
+  def fromCPath(cpath: CPath): Option[Projection] =
+    cpath.nodes.foldMapM {
+      case CPathField(str) => safeField(str).map(List(_))
+      case CPathIndex(ix) => Some(List(Index(ix)))
+      case _ => None
+    } map (Projection(_))
+
   trait Grouped extends Product with Serializable
 
   object Grouped {
@@ -410,31 +425,19 @@ object optics0 {
     val proj = bp composePrism copkPrism[Const[Projection, ?], F, A]
   }
 }
+object algebras {
+  type CoreOp[A] = CopK[Core ::: Op ::: TNilK, A]
+  type Core0[A] = CopK[Core ::: TNilK, A]
+  type Expr[A] = CopK[Const[Projection, ?] ::: Core ::: Op ::: TNilK, A]
+}
+
+import algebras._
 
 object example {
   import iota._
   import Core._
   import Op._
   import optics0._
-  def thisNil[F[a] <: ACopK[a], U](implicit I: Core :<<: F, P: Basis[F, U]): U = {
-    val optics = Core.optics(basisPrism[F, U] composePrism copkPrism[Core, F, U])
-    import optics._
-    val a: U = ???
-    a match {
-      case nil(_) => "O"
-      case array(lst) => "lst"
-    }
-    nil()
-  }
-
-
-  type CoreOp[A] = CopK[Core ::: Op ::: TNilK, A]
-  type Core0[A] = CopK[Core ::: TNilK, A]
-  type Expr[A] = CopK[Const[Projection, ?] ::: Core ::: Op ::: TNilK, A]
-
-  def nilCoreOp: Fix[CoreOp] = thisNil[CoreOp, Fix[CoreOp]]
-  def nilCore: Mu[Core0] = thisNil[Core0, Mu[Core0]]
-//  def nilCoattr: Coattr[Core0, Int] = thisNil[CoattrF[Core0, Int, ?], Coattr[Core0, Int]]
 
   def opsToCore[U: Basis[Core0, ?]]: Algebra[Op, U] = {
     val core0 = optics0.core(basisPrism[Core0, U])
@@ -532,10 +535,23 @@ object example {
 
     final case object Presented extends CustomPipeline
     final case object Erase extends CustomPipeline
+
+    implicit val functor: Functor[Pipeline] = new Functor[Pipeline] {
+      def map[A, B](fa: Pipeline[A])(f: A => B): Pipeline[B] = fa match {
+        case Presented => Presented
+        case Erase => Erase
+        case Project(obj) => Project(obj.toList.map({case (k, v) => (k, f(v))}).toMap)
+        case Match(a) => Match(f(a))
+        case Unwind(p, i) => Unwind(p, i)
+      }
+    }
   }
 
   def missing[F[a] <: ACopK[a], U](k: String)(implicit I: Core :<<: F, P: Basis[F, U]): U =
     optics0.core(basisPrism[F, U]).str(k.concat(MissingSuffix))
+
+  def missingKey[F[a] <: ACopK[a], U](key: String)(implicit I: Core :<<: F, U: Basis[F, U]): U =
+    optics0.core(basisPrism[F, U]).str("$".concat(key).concat(MissingSuffix))
 
   import Pipeline._
   def eraseCustomPipeline[U: Basis[Expr, ?]](uuid: String, pipeline: Pipeline[U]): List[MongoPipeline[U]] = {
@@ -620,5 +636,442 @@ object example {
         o.projection(fn(prj))
       case x => x.embed
     })
+  }
+}
+
+
+sealed trait Mapper extends Product with Serializable { self =>
+  import Mapper._
+
+  def inBson(inp: BsonValue): BsonValue = self match {
+    case Unfocus => inp
+    case Focus(str) => inp.asDocument().get(str)
+  }
+  def inProjection(inp: Projection): Projection = self match {
+    case Unfocus => inp
+    case Focus(str) => Projection.key(str) + inp
+  }
+}
+
+object Mapper {
+  final case class Focus(str: String) extends Mapper
+  final case object Unfocus extends Mapper
+
+  implicit val order: Order[Mapper] = new Order[Mapper] {
+    def compare(a: Mapper, b: Mapper): Int = a match {
+      case Unfocus => b match {
+        case Unfocus => 0
+        case Focus(_) => -1
+      }
+      case Focus(afld) => b match {
+        case Unfocus => 1
+        case Focus(bfld) => Order[String].compare(afld, bfld)
+      }
+    }
+  }
+}
+
+object state {
+  final case class InterpretationState(uniqueKey: String, mapper: Mapper)
+  type InState[A] = StateT[Option, InterpretationState, A]
+
+  def focus[F[_]: MonadState[?[_], InterpretationState]]: F[Unit] =
+    MonadState[F, InterpretationState].modify { x => x.copy(mapper = Mapper.Focus(x.uniqueKey)) }
+
+  def unfocus[F[_]: MonadState[?[_], InterpretationState]]: F[Unit] =
+    MonadState[F, InterpretationState].modify { x => x.copy(mapper = Mapper.Unfocus) }
+}
+
+
+object interpreter {
+  object Mask {
+    import Projection._
+    import Projection.Step._
+
+    final case class TypeTree(types: Set[ColumnType], obj: Map[String, TypeTree], list: Map[Int, TypeTree]) { self =>
+      def isEmpty: Boolean =
+        self.types.isEmpty && self.obj.isEmpty && self.list.isEmpty
+      def insert(steps: List[Step], insertee: TypeTree): TypeTree = steps match {
+        case List() =>
+          TypeTree(insertee.types ++ self.types, self.obj ++ insertee.obj, self.list ++ insertee.list)
+        case child :: tail => child match {
+          case Field(str) =>
+            val insertTo = self.obj.get(str) getOrElse emptyTree
+            val inserted = insertTo.insert(tail, insertee)
+            self.copy(obj = self.obj.updated(str, inserted))
+          case Index(ix) =>
+            val insertTo = self.list.lift(ix) getOrElse emptyTree
+            val inserted = insertTo.insert(tail, insertee)
+            self.copy(list = self.list.updated(ix, inserted))
+        }
+      }
+    }
+    val emptyTree = TypeTree(Set.empty, Map.empty, Map.empty)
+
+    object TypeTree {
+      def fromMask(mapper: Mapper, masks: Map[CPath, Set[ColumnType]]): Option[TypeTree] = {
+        masks.toList.foldLeftM(emptyTree) { case (acc, (cpath, types)) =>
+          Projection.fromCPath(cpath)
+            .map(mapper.inProjection(_))
+            .map(p => acc.insert(p.steps, TypeTree(types, Map.empty, Map.empty)))
+        }
+      }
+    }
+    private def parseTypeStrings(parseType: ColumnType): List[String] = parseType match {
+      case ColumnType.Boolean => List("bool")
+      case ColumnType.Null => List("null")
+      case ColumnType.Number => List("double", "long", "int", "decimal")
+      case ColumnType.String => List("string", "objectId")
+      case ColumnType.OffsetDateTime => List("date")
+      case ColumnType.Array => List("array")
+      case ColumnType.Object => List("object")
+      case _ => List()
+    }
+
+
+    import optics0._
+
+    private def typeTreeFilters[U: Basis[Expr, ?]](proj: Projection, tree: TypeTree): U = {
+      val o = full(basisPrism[Expr, U])
+      if (tree.types === ColumnType.Top) {
+        o.not(o.eqx(List(
+          o.typ(o.projection(proj)),
+          o.str("missing"))))
+      } else {
+        val typeExprs: List[U] = tree.types.toList.flatMap(parseTypeStrings(_)).map(o.str(_))
+        val eqExprs: List[U] = typeExprs.map(x => o.eqx(List(o.typ(o.projection(proj)), x)))
+        val listExprs: List[U] =
+          if (tree.types.contains(ColumnType.Array)) List()
+          else tree.list.toList.sortBy(_._1) map {
+            case (i, child) => typeTreeFilters(proj + Projection.index(i), child)
+          }
+        val objExprs: List[U] =
+          if (tree.types.contains(ColumnType.Object)) List()
+          else tree.obj.toList map {
+            case (key, child) => typeTreeFilters(proj + Projection.key(key), child)
+          }
+        o.or(eqExprs ++ listExprs ++ objExprs)
+      }
+    }
+
+    final case class Config[U](uniqueKey: String, undefined: U, mapper: Mapper)
+
+    import example._
+
+    def inArray[F[_]: ApplicativeLocal[?[_], Config[U]], U: Basis[Expr, ?]](action: F[U]): F[U] = {
+      val modify: Config[U] => Config[U] = cfg => cfg.copy(undefined = missing[Expr, U](cfg.uniqueKey))
+      ApplicativeLocal[F, Config[U]].local(modify)(action)
+    }
+
+    def inObject[F[_]: ApplicativeLocal[?[_], Config[U]], U: Basis[Expr, ?]](action: F[U]): F[U] = {
+      val modify: Config[U] => Config[U] = cfg => cfg.copy(undefined = missingKey[Expr, U](cfg.uniqueKey))
+      ApplicativeLocal[F, Config[U]].local(modify)(action)
+    }
+
+    private def rebuildDoc[F[_]: Monad[?[_]]: ApplicativeLocal[?[_], Config[U]], U: Basis[Expr, ?]](proj: Projection, tree: TypeTree): F[U] =
+      ApplicativeAsk[F, Config[U]].ask flatMap { case Config(uniqueKey, undefined, mapper) =>
+        val o = full(basisPrism[Expr, U])
+        val obj: F[U] = {
+          val treeMap = tree.obj.toList.foldLeftM(Map[String, U]()) {
+            case (m, (key, child)) =>
+              rebuildDoc[F, U](proj + Projection.key(key), child) map (m.updated(key, _))
+          }
+          treeMap.map(o.obj(_))
+        }
+        val array: F[U] = inArray[F, U] {
+          for {
+            arr <- tree.list.toList.sortBy(_._1) traverse {
+              case (i, child) => rebuildDoc[F, U](proj + Projection.index(i), child)
+            }
+            undef <- ApplicativeAsk[F, Config[U]].ask map (_.undefined)
+          } yield
+            o.reduce(
+              o.array(arr),
+              o.array(List()),
+              o.cond(
+                o.eqx(List(o.str("$$this"), undef)),
+                o.str("$$value"),
+                o.concatArrays(List(
+                  o.str("$$value"),
+                  o.array(List(o.str("$$this")))))))
+        }
+        val isArray: U => U = { e  => o.eqx(List(o.typ(e), o.str("array"))) }
+        val isObject: U => U = { e =>  o.eqx(List(o.typ(e), o.str("object"))) }
+
+        def arrayOr(e: U): F[U] =
+          if (tree.types.contains(ColumnType.Array) || tree.list.isEmpty) e.pure[F]
+          else array.map(o.cond(isArray(o.projection(proj)), _, e))
+        def objectOr(e: U): F[U] =
+          if (tree.types.contains(ColumnType.Object) || tree.obj.isEmpty) e.pure[F]
+          else inObject(obj).map(o.cond(isObject(o.projection(proj)), _, e))
+        def projectionOr(e: U): U =
+          if (tree.types.isEmpty) e else o.projection(proj)
+
+        def rootWrapper(x: F[U]): F[U] = {
+          if (proj === Projection.key(uniqueKey)) mapper match {
+            case Mapper.Focus(key) if key === uniqueKey => inArray[F, U](x)
+            case _ => x
+          } else x
+        }
+
+        if (proj === Projection(List())) {
+          if (tree.obj.isEmpty) {
+            if (tree.types.contains(ColumnType.Object)) o.str("$$ROOT").pure[F]
+            else undefined.pure[F]
+          } else if (tree.obj.keySet === Set(uniqueKey) && mapper === Mapper.Focus(uniqueKey)) {
+            inArray(obj)
+          } else {
+            inObject(obj)
+          }
+        } else rootWrapper {
+          for {
+            obj <- objectOr(projectionOr(undefined))
+            arr <- arrayOr(obj)
+          } yield o.cond(typeTreeFilters(proj, tree), arr, undefined)
+        }
+      }
+    import state._
+
+    def optToAlternative[F[_]: Applicative: MonoidK]: Option ~> F = new (Option ~> F) {
+      def apply[A](inp: Option[A]): F[A] = inp match {
+        case None => MonoidK[F].empty
+        case Some(a) => a.pure[F]
+      }
+    }
+
+    def appy[F[_]: Monad: MonadState[?[_], InterpretationState]: MonoidK, U: Basis[Expr, ?]](
+        masks: Map[CPath, Set[ColumnType]])
+        : F[List[Pipeline[U]]] = {
+      MonadState[F, InterpretationState].get flatMap { state =>
+        val o = full(basisPrism[Expr, U])
+        val eraseId = Map("_id" -> o.int(0))
+        def projectionObject(tree: TypeTree): Option[Map[String, U]] = {
+          val initialConfig = Config(state.uniqueKey, missing[Expr, U](state.uniqueKey), state.mapper)
+          val rebuilt = rebuildDoc[scala.Function1[Config[U], ?], U](Projection(List()), tree).apply(initialConfig)
+          state.mapper match {
+            case Mapper.Unfocus => Some(Map(state.uniqueKey -> rebuilt))
+            case Mapper.Focus(_) => o.obj.getOption(rebuilt)
+          }
+        }
+        if (masks.isEmpty) {
+          List(Pipeline.Erase: Pipeline[U]).pure[F]
+        }
+        else for {
+          projObj <- optToAlternative[F].apply(for {
+            tree <- TypeTree.fromMask(state.mapper, masks)
+            pObj <- projectionObject(tree)
+          } yield pObj)
+          _ <- focus[F]
+        } yield List(Pipeline.Project(eraseId ++ projObj), Pipeline.Presented)
+      }
+    }
+  }
+
+  object Cartesian {
+    import example._
+    import Projection.Step._
+    import state._
+    import optics0._
+    def apply[F[_]: Monad: MonadState[?[_], InterpretationState]: MonoidK, U: Basis[Expr, ?]](
+        cartouches: Map[Field, (Field, List[ScalarStage.Focused])],
+        interpretStep: ScalarStage => F[List[Pipeline[U]]])
+        : F[List[Pipeline[U]]] = {
+      val o = full(basisPrism[Expr, U])
+      MonadState[F, InterpretationState].get flatMap { state =>
+        val undefinedKey = state.uniqueKey.concat("_cartesian_empty")
+        if (cartouches.isEmpty)
+          unfocus[F] as List(Pipeline.Match(o.obj(Map(undefinedKey -> o.bool(false)))))
+        else {
+          val ns = x => state.uniqueKey.concat(x)
+          val interpretations: F[List[List[Pipeline[U]]]] =
+            cartouches.toList.traverse {
+              case (alias, (_, instructions)) => for {
+                _ <- MonadState[F, InterpretationState].set(InterpretationState(ns(alias.name), Mapper.Focus(ns(alias.name))))
+                res <- instructions foldMapM { x => for {
+                  a <- interpretStep(x)
+                  _ <- focus[F]
+                } yield a }
+              } yield res
+            }
+          interpretations map { is =>
+            val defaultObject = cartouches map {
+              case (alias, _) => ns(alias.name) -> o.str("$".concat(ns(alias.name)))
+            }
+            val initialProjection: Pipeline[U] =
+              Pipeline.Project(
+                Map("_id" -> o.int(0)) ++ (cartouches.map {
+                  case (alias, (field, instructions)) =>
+                    ns(alias.name) -> o.projection(state.mapper.inProjection(Projection.key(field.name)))
+                }))
+            val instructions = is.flatMap(_.flatMap( {
+              case Pipeline.Project(mp) =>
+                List(Pipeline.Project(defaultObject ++ mp))
+              case Pipeline.Presented =>
+                List()
+              case Pipeline.Erase =>
+                List()
+              case x =>
+                List(x)
+            }))
+            val removeEmptyFields = Pipeline.Project { cartouches map {
+              case (alias, _) => alias.name -> o.cond(
+                o.eqx(List(
+                  o.str("$".concat(ns(alias.name))),
+                  missing[Expr, U](ns(alias.name)))),
+                missingKey[Expr, U](ns(alias.name)),
+                o.str("$".concat(ns(alias.name))))
+            }}
+            val removeEmptyObjects =
+              Pipeline.Match(o.or(cartouches.toList map {
+                case (k, v) => o.obj(Map(k.name -> o.exists(o.bool(true))))
+              }))
+            List(initialProjection) ++ instructions ++ List(removeEmptyFields, removeEmptyObjects)
+          } flatMap { pipes =>
+            unfocus[F] as pipes
+          }
+        }
+      }
+    }
+  }
+  object Pivot {
+    import example._
+    import optics0._
+    import state._
+    def ensureArray[U: Basis[Expr, ?]](vectorType: ColumnType.Vector, key: String, undefined: U): Pipeline[U] ={
+      val o = full(basisPrism[Expr, U])
+      val proj = o.projection(Projection(List()))
+      Pipeline.Project(Map(key -> (vectorType match {
+        case ColumnType.Object =>
+          o.cond(
+            o.or(List(o.not(o.eqx(List(o.typ(proj), o.str("object")))), o.eqx(List(proj, o.obj(Map()))))),
+            o.array(List(o.obj(Map("k" -> undefined, "v" -> undefined)))),
+            o.objectToArray(o.projection(Projection(List()))))
+        case ColumnType.Array =>
+          o.cond(
+            o.or(List(o.not(o.eqx(List(o.typ(proj), o.str("array")))), o.eqx(List(proj, o.array(List()))))),
+            o.array(List(undefined)),
+            proj)
+      })))
+    }
+
+    def mkValue[U: Basis[Expr, ?]](status: IdStatus, vectorType: ColumnType.Vector, unwinded: String, index: String, undefined: U): U = {
+      val o = full(basisPrism[Expr, U])
+      val indexString = o.str("$".concat(index))
+      val unwindString = o.str("$".concat(unwinded))
+      val kString = o.str("$".concat(unwinded).concat(".k"))
+      val vString = o.str("$".concat(unwinded).concat(".v"))
+      vectorType match {
+        case ColumnType.Array => status match {
+          case IdStatus.IdOnly =>
+            o.cond(
+              o.eqx(List(unwindString, undefined)),
+              undefined,
+              indexString)
+          case IdStatus.ExcludeId =>
+            unwindString
+          case IdStatus.IncludeId =>
+            o.cond(
+              o.eqx(List(unwindString, undefined)),
+              undefined,
+              o.array(List(indexString, unwindString)))
+        }
+        case ColumnType.Object => status match {
+          case IdStatus.IdOnly => kString
+          case IdStatus.ExcludeId => vString
+          case IdStatus.IncludeId =>
+            o.cond(
+              o.eqx(List(vString, undefined)),
+              undefined,
+              o.array(List(kString, vString)))
+        }
+      }
+    }
+    def mkPipes[U: Basis[Expr, ?]](status: IdStatus, vectorType: ColumnType.Vector, state: InterpretationState): List[Pipeline[U]] = {
+      val o = full(basisPrism[Expr, U])
+      val unwindKey = state.uniqueKey.concat("_unwind")
+      val indexKey = state.uniqueKey.concat("_unwind_index")
+      List(
+        ensureArray(vectorType, unwindKey, missing[Expr, U](state.uniqueKey)),
+        Pipeline.Unwind(unwindKey, indexKey),
+        Pipeline.Project(Map(
+          "_id" -> o.int(0),
+          state.uniqueKey -> mkValue(status, vectorType, unwindKey, indexKey, missing[Expr, U](state.uniqueKey)))),
+        Pipeline.Presented)
+    }
+    import iota._
+    def apply[F[_]: Monad: MonadState[?[_], InterpretationState], U: Basis[Expr, ?]](
+        status: IdStatus, vectorType: ColumnType.Vector)
+        : F[List[Pipeline[U]]] = for {
+      state <- MonadState[F, InterpretationState].get
+      res = mkPipes(status, vectorType, state)
+      _ <- focus[F]
+    } yield res.map(_.map(mapProjection[Expr, U, U](state.mapper.inProjection(_))))
+  }
+
+  object Project {
+    import optics0._
+    import Projection._
+    import Projection.Step._
+    import example._
+    import state._
+    def stepType[U: Basis[Expr, ?]](step: Step): U = {
+      val o = full(basisPrism[Expr, U])
+      step match {
+        case Step.Field(_) => o.str("object")
+        case Step.Index(_) => o.str("array")
+      }
+    }
+    def build[U: Basis[Expr, ?]](key: String, prj: Projection, input: Field, output: Field, res: Field, acc: List[Pipeline[U]])
+        : List[Pipeline[U]] = {
+      val o = full(basisPrism[Expr, U])
+      prj.steps match {
+        case List() =>
+          acc ++ List(
+            Pipeline.Project(Map(res.keyPart -> o.projection(Projection(List(input))))),
+            Pipeline.Presented)
+        case hd :: tail =>
+          val projectionObject =
+            o.cond(
+              o.or(List(
+                o.not(o.eqx(List(o.typ(o.projection(Projection(List(input)))), stepType(hd)))),
+                o.eqx(List(o.typ(o.projection(Projection(List(input, hd)))), o.str("missing"))))),
+              missing[Expr, U](key),
+              o.projection(Projection(List(input, hd))))
+          val project: Pipeline[U] = Pipeline.Project(Map(output.keyPart -> projectionObject))
+          build(key, Projection(tail), output, input, res, acc ++ List(project, Pipeline.Presented))
+      }
+    }
+    def apply[F[_]: Monad: MonadState[?[_], InterpretationState], U: Basis[Expr, ?]](prj: Projection): F[List[Pipeline[U]]] =
+      MonadState[F, InterpretationState].get map { state =>
+        val o = full(basisPrism[Expr, U])
+        val tmpKey0 = state.uniqueKey.concat("_project0")
+        val tmpKey1 = state.uniqueKey.concat("_project1")
+        val fld = state.mapper.inProjection(prj)
+        val initialProjection = Pipeline.Project(Map(tmpKey0 -> o.projection(Projection(List()))))
+        initialProjection :: build(state.uniqueKey, fld, Field(tmpKey0), Field(tmpKey1), Field(state.uniqueKey), List())
+      } flatMap { a => focus[F] as a }
+  }
+  object Wrap {
+    import optics0._
+    import Projection._
+    import Projection.Step._
+    import example._
+    import state._
+    import iota._
+
+    def apply[F[_]: Monad: MonadState[?[_], InterpretationState], U: Basis[Expr, ?]](name: Field): F[List[Pipeline[U]]] = {
+      val o = full(basisPrism[Expr, U])
+      for {
+        state <- MonadState[F, InterpretationState].get
+        (res: List[Pipeline[U]]) = List(Pipeline.Project(Map(
+          state.uniqueKey ->
+            o.cond(
+              o.eqx(List(o.projection(Projection(List())), missing[Expr, U](state.uniqueKey))),
+              missing[Expr, U](state.uniqueKey),
+              o.obj(Map(name.name -> o.projection(Projection(List()))))),
+          "_id" -> o.int(0))))
+        _ <- focus[F]
+      } yield res.map(_.map(mapProjection[Expr, U, U](state.mapper.inProjection(_))))
+    }
   }
 }
