@@ -19,15 +19,17 @@ package quasar.physical.mongo
 import slamdata.Predef._
 
 import cats.effect._
-import cats.effect.concurrent.MVar
+import cats.effect.concurrent.{MVar, Deferred}
 import cats.effect.syntax.bracket._
 import cats.syntax.eq._
 import cats.syntax.flatMap._
 import cats.syntax.functor._
 import cats.syntax.either._
+import cats.syntax.functor._
+import cats.syntax.either._
 
 import fs2.concurrent.{NoneTerminatedQueue, Queue}
-import fs2.Stream
+import fs2.{Pipe, Pull, Stream}
 
 import quasar.api.resource.ResourcePath
 import quasar.connector.{MonadResourceErr, ResourceError}
@@ -176,23 +178,6 @@ class Mongo[F[_]: MonadResourceErr : ConcurrentEffect : ContextShift] private[mo
       getCollection(collection).aggregate[BsonValue](aggs)
         .allowDiskUse(true))
 
-  def evaluateImpl(
-      collection: Collection,
-      aggs: List[BsonDocument],
-      fallback: F[Stream[F, BsonValue]])
-      : F[(Boolean, Stream[F, BsonValue])] = {
-    val aggregated =
-      aggregate(collection, aggs)
-    val hd: F[Either[Throwable, Option[BsonValue]]] =
-      F.attempt(aggregated flatMap (_.head.compile.last))
-    hd flatMap {
-      case Right(_) =>
-        aggregated map ((true, _))
-      case Left(_) =>
-        fallback map ((false, _))
-    }
-  }
-
   def evaluate(
       collection: Collection,
       stages: ScalarStages)
@@ -205,12 +190,22 @@ class Mongo[F[_]: MonadResourceErr : ConcurrentEffect : ContextShift] private[mo
     else {
       val result = interpreter.interpret(stages)
       if (result._1.docs.isEmpty) fallback
-      else evaluateImpl(collection, result._1.docs, fallback map (_._2)) flatMap {
-        case (isOk, stream) if isOk =>
-          val newStream = stream map Mapper.bson(result._2)
+      else {
+        val aggregated = aggregate(collection, result._.docs) flatMap { s =>
+          val newStream = s map Mapper.bson(result._2)
           val newStages = ScalarStages(IdStatus.ExcludeId, result._1.stages)
-          F.point((newStages, newStream))
-        case _ => fallback
+        }
+        val aggregated = aggregate(collection, result._1.docs)
+        F.attempt(aggregated.flatMap(_.head.compile.last)) flatMap {
+          case Right(_) =>
+            aggregated flatMap { stream =>
+              val newStream = stream map Mapper.bson(result._2)
+              val newStages = ScalarStages(IdStatus.ExcludeId, result._1.stages)
+              Sync[F].delay((newStages, newStream))
+            }
+          case Left(_) =>
+            fallback
+        }
       }
     }
   }
@@ -221,6 +216,18 @@ class Mongo[F[_]: MonadResourceErr : ConcurrentEffect : ContextShift] private[mo
 }
 
 object Mongo {
+  def fallbackPipe[F[_]: Sync, A](fb: Stream[F, A]): Pipe[F, A, A] = { inp =>
+    val pull = inp.attempt.pull.uncons1 flatMap {
+      case None =>
+        Pull.done
+      case Some((Left(_), _)) =>
+        fb.pull.echo
+      case Some((Right(a), s)) =>
+        Pull.output1(a) >> s.rethrow.pull.echo
+    }
+    pull.stream
+  }
+
   val DefaultQueueSize: Long = 256L
 
   private def mkMsg(ex: MongoCommandException) = s"Mongo command error: ${ex.getErrorCodeName}"
