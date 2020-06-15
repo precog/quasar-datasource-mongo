@@ -41,6 +41,7 @@ object Version {
     }
   }
   // shims are very slow in functors
+  //
   implicit val zorderVersion: Zorder[Version] = new Zorder[Version] {
     def order(a: Version, b: Version) = {
       Ordering.fromInt(orderVersion.compare(a, b))
