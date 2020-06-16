@@ -22,7 +22,7 @@ import quasar.RateLimiting
 import quasar.api.datasource.{DatasourceError, DatasourceType}, DatasourceError.{ConfigurationError, InitializationError}
 import quasar.{concurrent => qt}
 import quasar.connector.{ByteStore, MonadResourceErr}
-import quasar.connector.datasource.LightweightDatasourceModule
+import quasar.connector.datasource.{LightweightDatasourceModule, Reconfiguration}
 import quasar.physical.mongo.Mongo.{MongoAccessDenied, MongoConnectionFailed}
 
 import scala.concurrent.ExecutionContext
@@ -83,6 +83,6 @@ object MongoDataSourceModule extends LightweightDatasourceModule {
 
   def sanitizeConfig(config: Json): Json = MongoConfig.sanitize(config)
 
-  def reconfigure(original: Json, patch: Json): Either[ConfigurationError[Json], Json] =
-    Right(patch)
+  def reconfigure(original: Json, patch: Json): Either[ConfigurationError[Json], (Reconfiguration, Json)] =
+    Right((Reconfiguration.Reset, patch))
 }
