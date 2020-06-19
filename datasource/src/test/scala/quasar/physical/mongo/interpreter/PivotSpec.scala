@@ -15,7 +15,7 @@
  */
 
 package quasar.physical.mongo.interpreter
-
+/*
 import slamdata.Predef._
 
 import org.specs2.mutable.Specification
@@ -150,3 +150,4 @@ class PivotSpec extends Specification with quasar.TreeMatchers {
     }
   }
 }
+ */

@@ -18,259 +18,277 @@ package quasar.physical.mongo.expression
 
 import slamdata.Predef._
 
-import matryoshka._
-import matryoshka.implicits._
+import quasar.physical.mongo.Version
+import quasar.contrib.iota._
 
-import monocle._
+import cats._
+import cats.data.Const
+import cats.implicits._
+import higherkindness.droste.{Basis, scheme, Algebra, CVCoalgebra}
+import higherkindness.droste.data._
+import higherkindness.droste.syntax.all._
+import iota.CopK
+import monocle.Prism
 
 import org.bson._
 
-import quasar.physical.mongo.Version
-
-import scalaz.{:<:, Const, Coproduct, Functor, Scalaz, MonadPlus, ApplicativePlus, Free}, Scalaz._
-import scalaz.syntax._
-
 import Pipeline._
+import Projection._
 
 object Compiler {
-  type CoreOp[A] = Coproduct[Op, Core, A]
-  type ExprF[A] = Coproduct[Const[Projection, ?], CoreOp, A]
+  def coreOpMinVersion[U: Basis[CoreOp, ?]]: U => Version =
+    scheme.cata[CoreOp, U, Version](Algebra { (x: CoreOp[Version]) =>
+      val order = Order[Version]
+      import order._
+      CopK.RemoveL[Op, CoreOpL].apply(x) match{
+        case Left(a) =>
+          Version.zero
+        case Right(x) =>
+          val fMin = x.minVersion
+          x match {
+            case Op.Let(vars, in) =>
+              order.max(vars.toList.map(_._2).foldLeft(in)(max), fMin)
+            case Op.Type(a) =>
+              max(fMin, a)
+            case Op.Eq(a) =>
+              a.foldLeft(fMin)(max)
+            case Op.Or(a) =>
+              a.foldLeft(fMin)(max)
+            case Op.Cond(a, b, c) =>
+              List(a, b, c).foldLeft(fMin)(max)
+            case Op.Ne(a) =>
+              max(fMin, a)
+            case Op.ObjectToArray(a) =>
+              max(fMin, a)
+            case Op.ArrayElemAt(a, _) =>
+              max(fMin, a)
+            case Op.Reduce(a, b ,c) =>
+              List(a, b, c).foldLeft(fMin)(max)
+            case Op.ConcatArrays(a) =>
+              a.foldLeft(fMin)(max)
+            case Op.Not(a) =>
+              max(fMin, a)
+            case Op.Exists(a) =>
+              max(fMin, a)
+          }
+      }
+    })
 
-  def compilePipeline[T[_[_]]: BirecursiveT, F[_]: MonadPlus](
-      version: Version,
-      uuid: String,
-      pipes: List[Pipeline[T[ExprF]]])
-      : F[List[BsonDocument]] =
-    pipes flatMap (eraseCustomPipeline(uuid, _)) foldMapM { x => compilePipe[T, F](version, uuid, x) map (List(_)) }
+  def compileOp[W: Basis[CoreOp, ?], U: Basis[Core0, ?]]: W => U = {
+    val core0 = Optics.core(Optics.basisPrism[Core0, U])
+    import core0._
+    scheme.cata[CoreOp, W, U](Algebra { (x: CoreOp[U]) =>
+      CopK.RemoveL[Op, CoreOpL].apply(x) match {
+        case Left(a) =>
+          computeListK(a).embed
+        case Right(b) => b match {
+          case Op.Let(vars, in) => obj(Map("$let" -> obj(Map("vars" -> obj(vars), "in" -> in))))
+          case Op.Type(a) => obj(Map("$type" -> a))
+          case Op.Eq(a) => obj(Map("$eq" -> array(a)))
+          case Op.Or(a) => obj(Map("$or" -> array(a)))
+          case Op.Exists(a) => obj(Map("$exists" -> a))
+          case Op.Cond(a, b, c) => obj(Map("$cond" -> array(List(a, b, c))))
+          case Op.Ne(a) => obj(Map("$ne" -> a))
+          case Op.ObjectToArray(a) => obj(Map("$objectToArray" -> a))
+          case Op.ArrayElemAt(a, ix) => obj(Map("$arrayElemAt" -> array(List(a, int(ix)))))
+          case Op.Reduce(a, b, c) => obj(Map("$reduce" -> obj(Map(
+            "input" -> a,
+            "initialValue" -> b,
+            "in" -> c))))
+          case Op.ConcatArrays(a) => obj(Map("$concatArrays" -> array(a)))
+          case Op.Not(a) => obj(Map("$not" -> a))
+        }
+      }
+    })
+  }
 
-  def toCoreOp[T[_[_]]: BirecursiveT](uuid: String, pipe: MongoPipeline[T[ExprF]]): T[CoreOp] =
-    optimize(compileProjections(uuid, pipelineObjects(pipe)))
 
-  def compilePipe[T[_[_]]: BirecursiveT, F[_]: MonadPlus](
-      version: Version,
-      uuid: String,
-      pipe: MongoPipeline[T[ExprF]])
-      : F[BsonDocument] = {
-    if (version < pipeMinVersion(pipe)) MonadPlus[F].empty
-    else {
-      def transformM(op: Op[T[Core]]): F[Core[T[Core]]] =
-        if (version < Op.opMinVersion(op)) MonadPlus[F].empty
-        else opsToCore[T](op).point[F]
+  type Elem = (Projection.Grouped, Int)
+  private def unfoldProjectionψ(uuid: String): CVCoalgebra[CoreOp, List[Elem]] = {
+    type U = Coattr[CoreOp, List[Elem]]
+    type F[X] = CoattrF[CoreOp, List[Elem], X]
 
-      toCoreOp(uuid, pipe)
-        .transCataM[F, T[Core], Core](_.run.fold(transformM, MonadPlus[F].point(_)))
-        .map(coreToBson[T](_))
-        .flatMap(mbBsonDocument[F])
+    val toCopK = Optics.basisPrism[F, U] composePrism Optics.coattrFPrism[CoreOp, List[Elem], U]
+    val ff = Optics.coreOp(Prism.id: Prism[CoreOp[U], CoreOp[U]])
+    val coreOp = Optics.coreOp(toCopK)
+    import coreOp._
+
+    CVCoalgebra {
+      case List() =>
+        ff.str("$$ROOT")
+      case (Grouped.FieldGroup(hd :: tail), _) :: List() =>
+        ff.str(tail.foldLeft("$".concat(hd)){ (acc, s) => s"$acc.$s" })
+      case (hd, levelIx) :: tl =>
+        val level = s"level${levelIx.toString}"
+        val tailCont: U = Coattr.pure(tl)
+        val undefined = str(s"$uuid$MissingSuffix")
+        hd match {
+          case Grouped.IndexGroup(i) =>
+            ff.let(
+              Map(level -> tailCont),
+              cond(
+                eqx(List(typ(tailCont), str("array"))),
+                arrayElemAt(str("$$".concat(level)), i),
+                undefined))
+          case Grouped.FieldGroup(steps) =>
+            val expSteps = Grouped.FieldGroup("$".concat(level) :: steps)
+            val exp: U = Coattr.pure(List((expSteps, 0)))
+            ff.let(
+              Map(level -> tailCont),
+              exp)
+      }
     }
   }
 
-  def mbBsonDocument[F[_]: ApplicativePlus](inp: BsonValue): F[BsonDocument] = inp match {
-    case x: BsonDocument => x.point[F]
-    case _ => ApplicativePlus[F].empty
+  private def unfoldProjection[U: Basis[CoreOp, ?]](uuid: String): Projection => U = { (prj: Projection) =>
+    val grouped = Projection.Grouped(prj).zipWithIndex
+    val fn: List[Elem] => U = scheme.zoo.futu(unfoldProjectionψ(uuid))
+    fn(grouped)
   }
 
-  val MissingSuffix = "_missing"
+  def compileProjections[U: Basis[Expr, ?], W: Basis[CoreOp, ?]](uuid: String): U => W =
+    scheme.cata[Expr, U, W](Algebra { x =>
+      CopK.RemoveL[Const[Projection, ?], ExprL].apply(x) match {
+        case Left(a) =>
+          computeListK(a).embed
+        case Right(Const(prj)) =>
+          val fn = unfoldProjection[W](uuid)
+          fn(prj)
+      }
+    })
 
-  def missing[T[_[_]]: BirecursiveT, F[_]: Functor](key: String)(implicit F: Core :<: F): T[F] = {
-    val O = Optics.core(birecursiveIso[T[F], F].reverse.asPrism)
-    O.string(key concat MissingSuffix)
-  }
-
-  def missingKey[T[_[_]]: BirecursiveT, F[_]: Functor](key: String)(implicit F: Core :<: F): T[F] = {
-    val O = Optics.core(birecursiveIso[T[F], F].reverse.asPrism)
-    O.string("$" concat key concat MissingSuffix)
-  }
-
-  def eraseCustomPipeline[T[_[_]]: BirecursiveT](
-      uuid: String,
-      pipeline: Pipeline[T[ExprF]])
-      : List[MongoPipeline[T[ExprF]]] = {
-
-    val O = Optics.fullT[T, ExprF]
+  def eraseCustomPipeline[U: Basis[Expr, ?]](uuid: String, pipeline: Pipeline[U]): List[MongoPipeline[U]] = {
+    val o = Optics.full(Optics.basisPrism[Expr, U])
+    import o._
 
     pipeline match {
       case Presented =>
-        List($match(O.obj(Map(uuid -> O.$ne(missing(uuid))))))
+        List(Match(obj(Map(uuid -> nex(missing[Expr, U](uuid))))))
       case Erase =>
-        List($match(O.obj(Map(uuid.concat("_erase") -> O.bool(false)))))
-      case $project(obj) =>
-        List($project(obj))
-      case $match(obj) =>
-        List($match(obj))
-      case $unwind(a, i) =>
-        List($unwind(a, i))
+        List(Match(obj(Map(uuid.concat("_erase") -> bool(false)))))
+      case Project(obj) =>
+        List(Project(obj))
+      case Match(obj) =>
+        List(Match(obj))
+      case Unwind(a, i) =>
+        List(Unwind(a, i))
     }
   }
 
-  def pipelineObjects[T[_[_]]: BirecursiveT](pipe: MongoPipeline[T[ExprF]]): T[ExprF] = {
-    val O = Optics.fullT[T, ExprF]
+  def pipelineObjects[F[a] <: ACopK[a], U](pipe: MongoPipeline[U])(implicit I: Core :<<: F, U: Basis[F, U]): U = {
+    val o = Optics.core(Optics.basisPrism[F, U])
     pipe match {
-      case $match(mp) =>
-        O.obj(Map("$match" -> mp))
-      case $project(mp) =>
-        O.obj(Map("$project" -> O.obj(mp)))
-      case $unwind(path, arrayIndex) =>
-        O.obj(Map("$unwind" -> O.obj(Map(
-          "path" -> O.string("$" concat path),
-          "includeArrayIndex" -> O.string(arrayIndex),
-          "preserveNullAndEmptyArrays" -> O.bool(false)))))
+      case Match(mp) =>
+        o.obj(Map("$match" -> mp))
+      case Project(mp) =>
+        o.obj(Map("$project" -> o.obj(mp)))
+      case Unwind(path, arrayIndex) =>
+        o.obj(Map("$unwind" -> o.obj(Map(
+          "path" -> o.str("$".concat(path)),
+          "includeArrayIndex" -> o.str(arrayIndex),
+          "preserveNullAndEmptyArrays" -> o.bool(false)))))
     }
   }
 
-  def unfoldProjection[T[_[_]]: BirecursiveT](uuid: String, prj: Projection): T[CoreOp] = {
-    trait GroupedSteps
-    final case class IndexGroup(i: Int) extends GroupedSteps
-    final case class FieldGroup(s: List[String]) extends GroupedSteps
-
-    def groupSteps(prj: Projection): List[GroupedSteps] = {
-      val accum = prj.steps.foldl ((List[String](), List[GroupedSteps]())) {
-        case (fldAccum, accum) => {
-          case Field(s) => (s :: fldAccum, accum)
-          case Index(i) => (List(), IndexGroup(i) :: FieldGroup(fldAccum.reverse) :: accum)
-        }
-      }
-      accum._1 match {
-        case List() => accum._2.reverse
-        case x => (FieldGroup(x.reverse) :: accum._2).reverse
-      }
-    }
-    type Elem = (GroupedSteps, Int)
-
-    type FCoreOp = Free[CoreOp, List[Elem]]
-    val OF = Optics.coreOp(Prism.id[CoreOp[FCoreOp]])
-    val O = Optics.coreOp(Prism.id[CoreOp[List[Elem]]])
-
-    val ψ: GCoalgebra[Free[CoreOp, ?], CoreOp, List[Elem]] = {
-      case List() =>
-        OF.string("$$ROOT")
-      case (FieldGroup(hd :: tail), _) :: List() =>
-        OF.string(tail.foldl("$" concat hd) { accum => s => accum concat "." concat s  })
-      case (hd, levelIx) :: tl => hd match {
-        case IndexGroup(i) =>
-          val level = "level" concat levelIx.toString
-          val vars = Map(level -> (Free.point[CoreOp, List[Elem]](tl)))
-          val nil: FCoreOp = Free.liftF(O.string(uuid concat MissingSuffix))
-          val levelExp: FCoreOp = Free.liftF(O.string("$$" concat level))
-          val elemAt: FCoreOp = Free.roll(OF.$arrayElemAt(levelExp, i))
-          val check: FCoreOp = {
-            val ty: FCoreOp = Free.liftF(O.$type(tl))
-            val str: FCoreOp = Free.liftF(O.string("array"))
-            Free.roll(OF.$eq(List(ty, str)))
-          }
-          val cond = Free.roll(OF.$cond(check, elemAt, nil))
-          OF.$let(vars, cond)
-        case FieldGroup(steps) =>
-          val level = "level".concat(levelIx.toString)
-          val vars: Map[String, FCoreOp] = Map(level -> (Free.point(tl)))
-          val expSteps: GroupedSteps = FieldGroup("$".concat(level) :: steps)
-          val exp: FCoreOp = Free.point(List((expSteps, 0)))
-          OF.$let(vars, exp)
-      }
-    }
-    groupSteps(prj).zipWithIndex.reverse.futu[T[CoreOp]](ψ)
-  }
-
-  def compileProjections[T[_[_]]: BirecursiveT](uuid: String, inp: T[ExprF]): T[CoreOp] = {
-    def τ(inp: Const[Projection, T[CoreOp]]): CoreOp[T[CoreOp]] =
-      unfoldProjection(uuid, inp.getConst).project
-    inp.transCata[T[CoreOp]](_.run.fold(τ, (x => x)))
-  }
-
-  def opsToCore[T[_[_]]: BirecursiveT](inp: Op[T[Core]]): Core[T[Core]] = {
-    val O = Optics.core(birecursiveIso[T[Core], Core].reverse.asPrism)
-    inp match {
-      case Op.Let(vars, in) => O._obj(Map("$let" -> O.obj(Map(
-        "vars" -> O.obj(vars),
-        "in" -> in))))
-      case Op.Type(a) => O._obj(Map("$type"-> a))
-      case Op.Eq(a) => O._obj(Map("$eq" -> O.array(a)))
-      case Op.Or(a) => O._obj(Map("$or" -> O.array(a)))
-      case Op.Exists(a) => O._obj(Map("$exists" -> a))
-      case Op.Cond(a, b, c) => O._obj(Map("$cond" -> O.array(List(a, b, c))))
-      case Op.Ne(a) => O._obj(Map("$ne" -> a))
-      case Op.ObjectToArray(a) => O._obj(Map("$objectToArray" -> a))
-      case Op.ArrayElemAt(a, ix) => O._obj(Map("$arrayElemAt" -> O.array(List(a, O.int(ix)))))
-      case Op.Reduce(a, b, c) => O._obj(Map("$reduce" -> O.obj(Map(
-        "input" -> a,
-        "initialValue" -> b,
-        "in" -> c))))
-      case Op.ConcatArrays(a) => O._obj(Map("$concatArrays" -> O.array(a)))
-      case Op.Not(a) => O._obj(Map("$not" -> a))
-    }
-  }
-
-  def compileOps[T[_[_]]: BirecursiveT](inp: T[CoreOp]): T[Core] =
-    inp.transCata[T[Core]](_.run.fold(opsToCore[T], (x => x)))
-
-  def coreToBson[T[_[_]]: BirecursiveT](inp: T[Core]): BsonValue = {
-    import scala.collection.JavaConverters._
-
-    def ϕ: Algebra[Core, BsonValue] = {
-      case Core.Null() =>
-        new BsonNull()
-      case Core.Int(i) =>
-        new BsonInt32(i)
-      case Core.String(s) =>
-        new BsonString(s)
-      case Core.Bool(b) =>
-        new BsonBoolean(b)
-      case Core.Array(as) =>
-        new BsonArray(as.asJava)
-      case Core.Object(mp) =>
-        val elems = mp.toList map {
-          case (key, v) => new BsonElement(key, v)
-        }
-        new BsonDocument(elems.asJava)
-    }
-    inp.cata[BsonValue](ϕ)
-  }
-
-  def optimize[T[_[_]]: BirecursiveT](inp: T[CoreOp]): T[CoreOp] = {
-    orOpt(letOpt(inp))
-  }
-
-  def letOpt[T[_[_]]: BirecursiveT](inp: T[CoreOp]): T[CoreOp] = {
-    val O = Optics.coreOp(Prism.id[CoreOp[T[CoreOp]]])
-    val τ: CoreOp[T[CoreOp]] => CoreOp[T[CoreOp]] = {
-      case O.$let(vars, in) =>
-        if (vars.size /== 1) O.$let(vars, in)
-        else in.project match {
-          case O.string(str) =>
-            vars.get(str.stripPrefix("$$")) map (_.project) match {
-              case Some(O.string(x)) if x.stripPrefix("$") /== x =>
-                O.string(x.concat(x))
+  def letOpt[W: Basis[CoreOp, ?], U: Basis[CoreOp, ?]]: W => U = {
+    val o = Optics.coreOp(Optics.basisPrism[CoreOp, U])
+    val f = Optics.coreOp(Prism.id[CoreOp[U]])
+    import o._
+    scheme.cata[CoreOp, W, U](Algebra {
+      case f.let(vars, in) =>
+        if (vars.size =!= 1) let(vars, in)
+        else in match {
+          case str(k) =>
+            vars.get(k.stripPrefix("$$")) match {
+              case Some(str(v)) if v.stripPrefix("$") =!= v =>
+                str(v.concat(v))
               case _ =>
-                O.$let(vars, in)
+                let(vars, in)
             }
-          case _ => O.$let(vars, in)
         }
-      case x => x
-    }
-    inp.transCata[T[CoreOp]](τ)
+        let(vars, in)
+      case x => x.embed
+    })
   }
-
-  def orOpt[T[_[_]]: BirecursiveT](inp: T[CoreOp]): T[CoreOp] = {
-    val O = Optics.coreOp(Prism.id[CoreOp[T[CoreOp]]])
-    val τ: CoreOp[T[CoreOp]] => CoreOp[T[CoreOp]] = {
-      case O.$or(lst) => lst match {
-        case List() => O.bool(false)
-        case List(a) => a.project
-        case _ => O.$or(lst map (_.project) flatMap {
-          case O.$or(as) => as
-          case x => List(x.embed)
+  def orOpt[W: Basis[CoreOp, ?], U: Basis[CoreOp, ?]]: W => U = {
+    val o = Optics.coreOp(Optics.basisPrism[CoreOp, U])
+    val f = Optics.coreOp(Prism.id[CoreOp[U]])
+    import o._
+    scheme.cata[CoreOp, W, U](Algebra {
+      case f.or(lst) => lst match {
+        case List() => bool(false)
+        case List(a) => a
+        case _ => or(lst flatMap {
+          case or(as) => as
+          case x => List(x)
         })
       }
-      case x => x
-    }
-    inp.transCata[T[CoreOp]](τ)
+    })
+  }
+  def mapProjection[F[a] <: ACopK[a], W, U](fn: Projection => Projection)(
+      implicit
+      F: Functor[F],
+      I: Const[Projection, ?] :<<: F,
+      Q: Basis[F, W],
+      P: Basis[F, U])
+      : W => U = {
+    val o = Optics.projection(Optics.basisPrism[F, U] composePrism Optics.copkPrism[Const[Projection, ?], F, U])
+    val f = Optics.projection(Optics.copkPrism[Const[Projection, ?], F, U])
+    scheme.cata[F, W, U](Algebra {
+      case f.projection(prj) =>
+        o.projection(fn(prj))
+      case x =>
+        x.embed
+    })
   }
 
-  def mapProjection[T[_[_]]: BirecursiveT](f: Projection => Projection)(inp: T[ExprF]): T[ExprF] = {
-    val O = Optics.full(Prism.id[ExprF[T[ExprF]]])
-    val τ: ExprF[T[ExprF]] => ExprF[T[ExprF]] = {
-      case O.projection(prj) => O.projection(f(prj))
-      case x => x
+  def coreToBson[U: Basis[Core0, ?]]: U => BsonValue = {
+    import scala.collection.JavaConverters._
+    scheme.cata[Core0, U, BsonValue](Algebra { x =>
+      CopK.RemoveL[Core, CoreL].apply(x) match {
+        case Right(a) => a match {
+          case Core.Null() =>
+            new BsonNull()
+          case Core.SInt(i) =>
+            new BsonInt32(i)
+          case Core.SString(s) =>
+            new BsonString(s)
+          case Core.Bool(b) =>
+            new BsonBoolean(b)
+          case Core.Array(as) =>
+            new BsonArray(as.asJava)
+          case Core.Object(mp) =>
+            val elems = mp.toList.map {
+              case (k, v) => new BsonElement(k, v)
+            }
+            new BsonDocument(elems.asJava)
+        }
+        case Left(_) => throw new Throwable("impossible")
+    }})
+  }
+
+  def compile[F[_]: MonoidK: Monad, U: Basis[Expr, ?]](
+      version: Version,
+      uuid: String,
+      pipes: List[Pipeline[U]]): F[List[BsonDocument]] =
+    pipes.flatMap(eraseCustomPipeline(uuid, _)).traverse { (pipe: MongoPipeline[U]) =>
+      if (version < pipe.minVersion) MonoidK[F].empty
+      else {
+        val exprs = pipelineObjects[Expr, U](pipe)
+        val coreop: Fix[CoreOp] = compileProjections[U, Fix[CoreOp]](uuid).apply(exprs)
+        val optimized = (letOpt[Fix[CoreOp], Fix[CoreOp]] andThen orOpt[Fix[CoreOp], Fix[CoreOp]])(coreop)
+        val opVersion = coreOpMinVersion[Fix[CoreOp]].apply(optimized)
+        if (opVersion > version) MonoidK[F].empty
+        else {
+          val core: Fix[Core0] = compileOp[Fix[CoreOp], Fix[Core0]].apply(optimized)
+          val bsonValue = coreToBson[Fix[Core0]].apply(core)
+          onlyDocuments[F](bsonValue)
+        }
+      }
     }
-    inp.transCata[T[ExprF]](τ)
+
+  def onlyDocuments[F[_]: MonoidK: Applicative](inp: BsonValue): F[BsonDocument] = inp match {
+    case x: BsonDocument => x.pure[F]
+    case _ => MonoidK[F].empty
   }
 }

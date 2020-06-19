@@ -18,75 +18,75 @@ package quasar.physical.mongo.interpreter
 
 import slamdata.Predef._
 
-import quasar.physical.mongo.expression._
 import quasar.ScalarStage
+import quasar.physical.mongo.Interpreter
+import quasar.physical.mongo.expression._
 
-import scalaz.{MonadState, Scalaz, PlusEmpty}, Scalaz._
-
-import shims._
+import cats._
+import cats.implicits._
+import cats.mtl.MonadState
+import higherkindness.droste.Basis
 
 object Cartesian {
-  def apply[F[_]: MonadInState: PlusEmpty](
-      cartouches: Map[Field, (Field, List[ScalarStage.Focused])],
-      interpretStep: ScalarStage => F[List[Pipe]])
-      : F[List[Pipe]] =
-
-  MonadState[F, InterpretationState].get flatMap { state =>
-    val undefinedKey = state.uniqueKey concat "_cartesian_empty"
-
-    if (cartouches.isEmpty)
-      unfocus[F] as List(Pipeline.$match(O.obj(Map(undefinedKey -> O.bool(false)))): Pipe)
-    else {
-      val ns = x => state.uniqueKey concat x
-      val interpretations: F[List[List[Pipe]]] =
-        cartouches.toList.traverse {
-          case (alias, (_, instructions)) => for {
-            _ <- MonadState[F, InterpretationState].put(InterpretationState(ns(alias.name), Mapper.Focus(ns(alias.name))))
-            res <- instructions foldMapM { x => for {
-              a <- interpretStep(x)
-              _ <- focus[F]
-            } yield a }
-          } yield res
+  def apply[F[_]: Monad: MonoidK: MonadInState, U: Basis[Expr, ?]](
+      inner: Interpreter[F, U, ScalarStage])
+      : Interpreter[F, U, ScalarStage.Cartesian] = new Interpreter[F, U, ScalarStage.Cartesian] {
+    def apply(s: ScalarStage.Cartesian): F[List[Pipeline[U]]] =
+      optToAlternative[F].apply(Projection.safeCartouches(s.cartouches)).flatMap { cartouches =>
+        MonadState[F, InterpretationState].get flatMap { state =>
+          val undefinedKey = state.uniqueKey.concat("_cartesian_empty")
+          if (cartouches.isEmpty)
+            unfocus[F] as List(Pipeline.Match(o.obj(Map(undefinedKey -> o.bool(false)))))
+          else {
+            val ns = x => state.uniqueKey.concat(x)
+            val interpretations: F[List[List[Pipeline[U]]]] =
+              cartouches.toList.traverse {
+                case (alias, (_, instructions)) => for {
+                  _ <- MonadState[F, InterpretationState].set(InterpretationState(ns(alias.name), Mapper.Focus(ns(alias.name))))
+                  res <- instructions foldMapM { x => for {
+                    a <- inner(x)
+                    _ <- focus[F]
+                  } yield a }
+                } yield res
+              }
+            interpretations map { is =>
+              val defaultObject = cartouches map {
+                case (alias, _) => ns(alias.name) -> o.str("$".concat(ns(alias.name)))
+              }
+              val initialProjection: Pipeline[U] =
+                Pipeline.Project(
+                  Map("_id" -> o.int(0)) ++ (cartouches.map {
+                    case (alias, (field, instructions)) =>
+                      ns(alias.name) -> o.projection(state.mapper.projection(Projection.key(field.name)))
+                  }))
+              val instructions = is.flatMap(_.flatMap( {
+                case Pipeline.Project(mp) =>
+                  List(Pipeline.Project(defaultObject ++ mp))
+                case Pipeline.Presented =>
+                  List()
+                case Pipeline.Erase =>
+                  List()
+                case x =>
+                  List(x)
+              }))
+              val removeEmptyFields = Pipeline.Project { cartouches map {
+                case (alias, _) => alias.name -> o.cond(
+                  o.eqx(List(
+                    o.str("$".concat(ns(alias.name))),
+                    missing[Expr, U](ns(alias.name)))),
+                  missingKey[Expr, U](ns(alias.name)),
+                  o.str("$".concat(ns(alias.name))))
+              }}
+              val removeEmptyObjects =
+                Pipeline.Match(o.or(cartouches.toList map {
+                  case (k, v) => o.obj(Map(k.name -> o.exists(o.bool(true))))
+                }))
+              List(initialProjection) ++ instructions ++ List(removeEmptyFields, removeEmptyObjects)
+            } flatMap { pipes =>
+              unfocus[F] as pipes
+            }
+          }
         }
-
-      interpretations map { is =>
-        val defaultObject = cartouches map {
-          case (alias, _) => ns(alias.name) -> O.string("$" concat ns(alias.name))
-        }
-        // We don't need to map any projections except initial since they're mapped already
-        val initialProjection =
-          Pipeline.$project(
-            Map("_id" -> O.int(0)) ++ (cartouches map {
-              case (alias, (field, instructions)) =>
-                ns(alias.name) -> O.projection(Mapper.projection(state.mapper)(Projection.key(field.name)))
-            }))
-
-        val instructions = is flatMap (_ flatMap {
-          case Pipeline.$project(mp) =>
-            List(Pipeline.$project(defaultObject ++ mp))
-          case Pipeline.Presented => List()
-          case Pipeline.Erase => List()
-          case x => List(x)
-        })
-
-        val removeEmptyFields =
-          Pipeline.$project(cartouches map {
-            case (alias, _) => alias.name -> O.$cond(
-              O.$eq(List(
-                O.string("$" concat ns(alias.name)),
-                missing(ns(alias.name)))),
-              missingKey(ns(alias.name)),
-              O.string("$" concat ns(alias.name)))
-          })
-
-        val removeEmptyObjects =
-          Pipeline.$match(O.$or(cartouches.toList map {
-            case (k, v) => O.obj(Map(k.name -> O.$exists(O.bool(true))))
-          }))
-        initialProjection :: instructions ++ List(removeEmptyFields, removeEmptyObjects)
-      } flatMap { pipes =>
-        unfocus[F] as pipes
       }
-    }
   }
 }

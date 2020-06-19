@@ -15,7 +15,7 @@
  */
 
 package quasar.physical.mongo.interpreter
-
+/*
 import slamdata.Predef._
 
 import org.specs2.mutable.Specification
@@ -53,3 +53,4 @@ class WrapSpec extends Specification with ScalaCheck {
     (actual._2 === expected) and (actual._1.mapper === Mapper.Focus("root"))
   }
 }
+ */

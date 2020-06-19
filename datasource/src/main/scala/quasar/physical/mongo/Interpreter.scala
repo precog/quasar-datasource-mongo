@@ -18,79 +18,82 @@ package quasar.physical.mongo
 
 import slamdata.Predef._
 
-import cats.effect.Sync
-
-import org.bson.BsonDocument
-
-import quasar.{ScalarStage, ScalarStages}
-import quasar.IdStatus
-import quasar.physical.mongo.interpreter.{InterpretationState, _}
+import quasar.{ScalarStage, ScalarStages, IdStatus}
 import quasar.physical.mongo.expression._
-import quasar.physical.mongo.utils._
+import quasar.physical.mongo.interpreter._
 
-import scalaz.{BindRec, \/, Scalaz, PlusEmpty}, Scalaz._
+import cats.{Applicative, Monad, MonoidK}
+import cats.effect.Sync
+import cats.implicits._
+import cats.mtl.implicits._
+import higherkindness.droste.Basis
+import higherkindness.droste.data.Fix
 
-import shims._
+import org.bson._
 
-final case class Interpretation(
-  stages: List[ScalarStage],
-  docs: List[BsonDocument])
-
-class Interpreter(version: Version, uniqueKey: String, pushdownLevel: PushdownLevel) {
-  private def refine(inp: Interpretation)
-      : InState[Interpretation \/ Interpretation] = inp.stages match {
-    case List() => inp.right[Interpretation].point[InState]
-    case hd :: tail =>
-      val nextStep = for {
-        pipes <- interpretStep[InState](hd)
-        docs <- compilePipeline[InState](version, uniqueKey, pipes)
-      } yield Interpretation(tail, inp.docs ++ docs).left[Interpretation]
-      nextStep <+> inp.right[Interpretation].point[InState]
-  }
-
-  @SuppressWarnings(Array("org.wartremover.warts.Recursion"))
-  def interpretStep[F[_]: MonadInState: PlusEmpty](instruction: ScalarStage): F[List[Pipe]] = instruction match {
-    case ScalarStage.Wrap(name) =>
-      optToAlternative[F].apply(Projection.safeField(name)) flatMap (Wrap[F](_))
-    case ScalarStage.Mask(masks) =>
-      Mask[F](masks)
-    case ScalarStage.Pivot(status, structure) =>
-      Pivot[F](status, structure)
-    case ScalarStage.Project(path) =>
-      optToAlternative[F].apply(Projection.fromCPath(path)) flatMap (Project[F](_))
-    case ScalarStage.Cartesian(cartouches) =>
-      if (pushdownLevel < PushdownLevel.Full) PlusEmpty[F].empty
-      else optToAlternative[F].apply(Projection.safeCartouches(cartouches)) flatMap (Cartesian[F](_, interpretStep[F]))
-  }
-
-  private def initial[F[_]: MonadInState](idStatus: IdStatus): F[List[Pipe]] = idStatus match {
-    case IdStatus.IdOnly =>
-      focus[F] as List(Pipeline.$project(Map(
-        uniqueKey -> O.key("_id"),
-        "_id" -> O.int(0))))
-    case IdStatus.ExcludeId =>
-      List[Pipe]().point[F]
-    case IdStatus.IncludeId =>
-      focus[F] as List(Pipeline.$project(Map(
-        uniqueKey -> O.array(List(O.key("_id"), O.steps(List()))),
-        "_id" -> O.int(0))))
-  }
-
-  def interpret(stages: ScalarStages): (Interpretation, Mapper) = {
-    val interpreted = for {
-      firstPipes <- initial[InState](stages.idStatus)
-      firstDocs <- firstPipes foldMapM (compilePipe[InState](version, uniqueKey, _))
-      result <- BindRec[InState].tailrecM(refine)(Interpretation(stages.stages, firstDocs))
-    } yield result
-    interpreted.run(InterpretationState(uniqueKey, Mapper.Unfocus)) match {
-      case None =>
-        (Interpretation(stages.stages, List()), Mapper.Unfocus)
-      case Some((state, a)) => (a, state.mapper)
-    }
-  }
+trait Interpreter[F[_], U, -S] {
+  def o(implicit U: Basis[Expr, U]) = Optics.full(Optics.basisPrism[Expr, U])
+  def apply(s: S): F[List[Pipeline[U]]]
 }
 
 object Interpreter {
-  def apply[F[_]: Sync](version: Version, pushdownLevel: PushdownLevel): F[Interpreter] =
-    Sync[F].delay(java.util.UUID.randomUUID().toString) map (new Interpreter(version, _, pushdownLevel))
+  def interpretStage[F[_]: Monad: MonadInState: MonoidK, U: Basis[Expr, ?]](pushdown: PushdownLevel): Interpreter[F, U, ScalarStage] =
+    new Interpreter[F, U, ScalarStage] {
+      def apply(s: ScalarStage) =
+        if (pushdown < PushdownLevel.Light)
+          MonoidK[F].empty[List[Pipeline[U]]]
+        else s match {
+          case a: ScalarStage.Wrap => Wrap[F, U].apply(a)
+          case a: ScalarStage.Mask => Mask[F, U].apply(a)
+          case a: ScalarStage.Pivot => Pivot[F, U].apply(a)
+          case a: ScalarStage.Project => Project[F, U].apply(a)
+          case _: ScalarStage.Cartesian if pushdown < PushdownLevel.Full => MonoidK[F].empty[List[Pipeline[U]]]
+          case a: ScalarStage.Cartesian => Cartesian[F, U](interpretStage[F, U](pushdown)).apply(a)
+        }
+    }
+  def interpretIdStatus[F[_]: Applicative: MonadInState, U: Basis[Expr, ?]](uq: String): Interpreter[F, U, IdStatus] =
+    new Interpreter[F, U, IdStatus] {
+      def apply(s: IdStatus) = s match {
+        case IdStatus.IdOnly =>
+          focus[F] as List(Pipeline.Project(Map(
+            uq -> o.str("$_id"),
+            "_id" -> o.int(0))))
+        case IdStatus.ExcludeId =>
+          List[Pipeline[U]]().pure[F]
+        case IdStatus.IncludeId =>
+          focus[F] as List(Pipeline.Project(Map(
+            uq -> o.array(List(o.key("$_id"), o.projection(Projection(List())))),
+            "_id" -> o.int(0))))
+      }
+    }
+  final case class Interpretation(stages: List[ScalarStage], docs: List[BsonDocument])
+  type Interpret = ScalarStages => (Interpretation, Mapper)
+
+  def interpret(version: Version, pushdown: PushdownLevel, uuid: String): Interpret = { stages =>
+    val stage = interpretStage[InState, Fix[Expr]](pushdown)
+    val idStatus = interpretIdStatus[InState, Fix[Expr]](uuid)
+    def refine(inp: Interpretation): InState[Either[Interpretation, Interpretation]] = inp.stages match {
+      case List() => inp.asRight[Interpretation].pure[InState]
+      case hd :: tail =>
+        val nextStep = for {
+          pipes <- stage.apply(hd)
+          docs <- Compiler.compile[InState, Fix[Expr]](version, uuid, pipes)
+        } yield Interpretation(tail, inp.docs ++ docs).asLeft[Interpretation]
+        nextStep <+> inp.asRight.pure[InState]
+      }
+    val interpreted = for {
+      initPipes <- idStatus(stages.idStatus)
+      initDocs <- Compiler.compile[InState, Fix[Expr]](version, uuid, initPipes)
+      refined <- Monad[InState].tailRecM(Interpretation(stages.stages, initDocs))(refine)
+    } yield refined
+    interpreted.run(InterpretationState(uuid, Mapper.Unfocus)) match {
+      case None =>
+        (Interpretation(stages.stages, List()), Mapper.Unfocus)
+      case Some((state, a)) =>
+        (a, state.mapper)
+    }
+  }
+
+  def apply[F[_]: Sync](version: Version, pushdown: PushdownLevel): F[Interpret] =
+    Sync[F].delay(java.util.UUID.randomUUID.toString) map (interpret(version, pushdown, _))
 }

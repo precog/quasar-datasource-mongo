@@ -19,7 +19,7 @@ package quasar.physical.mongo
 import slamdata.Predef._
 
 import cats.effect._
-import cats.effect.concurrent.{MVar, Deferred}
+import cats.effect.concurrent.MVar
 import cats.effect.syntax.bracket._
 import cats.syntax.eq._
 import cats.syntax.flatMap._
@@ -34,7 +34,6 @@ import fs2.{Pipe, Pull, Stream}
 import quasar.api.resource.ResourcePath
 import quasar.connector.{MonadResourceErr, ResourceError}
 import quasar.physical.mongo.MongoResource.{Collection, Database}
-import quasar.physical.mongo.expression.Mapper
 import quasar.{IdStatus, ScalarStages}
 
 import org.bson.{Document => _, _}
@@ -42,13 +41,13 @@ import com.mongodb.{Block, ConnectionString}
 import com.mongodb.connection.{ClusterSettings, SslSettings}
 import org.mongodb.scala._
 
-import shims._
+import shims.equalToCats
 
 class Mongo[F[_]: MonadResourceErr : ConcurrentEffect : ContextShift] private[mongo](
     client: MongoClient,
     batchSize: Long,
     pushdownLevel: PushdownLevel,
-//    val interpreter: Interpreter,
+    val interpret: Interpreter.Interpret,
     val accessedResource: Option[MongoResource]) {
   import Mongo._
 
@@ -178,6 +177,23 @@ class Mongo[F[_]: MonadResourceErr : ConcurrentEffect : ContextShift] private[mo
       getCollection(collection).aggregate[BsonValue](aggs)
         .allowDiskUse(true))
 
+  def evaluateImpl(
+      collection: Collection,
+      aggs: List[BsonDocument],
+      fallback: F[Stream[F, BsonValue]])
+      : F[(Boolean, Stream[F, BsonValue])] = {
+    val aggregated =
+      aggregate(collection, aggs)
+    val hd: F[Either[Throwable, Option[BsonValue]]] =
+      F.attempt(aggregated flatMap (_.head.compile.last))
+    hd flatMap {
+      case Right(_) =>
+        aggregated map ((true, _))
+      case Left(_) =>
+        fallback map ((false, _))
+    }
+  }
+
   def evaluate(
       collection: Collection,
       stages: ScalarStages)
@@ -185,27 +201,19 @@ class Mongo[F[_]: MonadResourceErr : ConcurrentEffect : ContextShift] private[mo
 
     val fallback: F[(ScalarStages, Stream[F, BsonValue])] =
       findAll(collection) map (x => (stages, x))
-    fallback
-/*
+
     if (ScalarStages.Id === stages || pushdownLevel === PushdownLevel.Disabled) fallback
     else {
-      val result = interpreter.interpret(stages)
+      val result = interpret(stages)
       if (result._1.docs.isEmpty) fallback
-      else {
-        val aggregated = aggregate(collection, result._1.docs)
-        F.attempt(aggregated.flatMap(_.head.compile.last)) flatMap {
-          case Right(_) =>
-            aggregated flatMap { stream =>
-              val newStream = stream map Mapper.bson(result._2)
-              val newStages = ScalarStages(IdStatus.ExcludeId, result._1.stages)
-              Sync[F].delay((newStages, newStream))
-            }
-          case Left(_) =>
-            fallback
-        }
+      else evaluateImpl(collection, result._1.docs, fallback map (_._2)) flatMap {
+        case (isOk, stream) if isOk =>
+          val newStream = stream map result._2.bson
+          val newStages = ScalarStages(IdStatus.ExcludeId, result._1.stages)
+          F.point((newStages, newStream))
+        case _ => fallback
       }
     }
- */
   }
 
   private [mongo] def getCollection(collection: Collection): MongoCollection[Document] =
@@ -358,8 +366,8 @@ object Mongo {
     mkClient(config, blocker) evalMap { client =>
       for {
         version <- getVersion(client)
-//        interpreter <- Interpreter(version, config.pushdownLevel)
-      } yield new Mongo[F](client, scala.math.max(1L, config.batchSize.toLong), config.pushdownLevel, /*interpreter, */config.accessedResource)
+        interpreter <- Interpreter(version, config.pushdownLevel)
+      } yield new Mongo[F](client, scala.math.max(1L, config.batchSize.toLong), config.pushdownLevel, interpreter, config.accessedResource)
     }
   }
 }

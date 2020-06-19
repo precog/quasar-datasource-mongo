@@ -18,35 +18,41 @@ package quasar.physical.mongo.expression
 
 import slamdata.Predef._
 
+import cats.Order
+import cats.implicits._
+
 import org.bson._
 
-trait Mapper extends Product with Serializable
+import Mapper._
 
-import scalaz.{Order, Ordering, Scalaz}, Scalaz._
+sealed trait Mapper extends Product with Serializable { self =>
+  def bson: BsonValue => BsonValue = { inp =>
+    self match {
+      case Unfocus => inp
+      case Focus(str) => inp.asDocument().get(str)
+    }
+  }
+  def projection: Projection => Projection = { inp =>
+    self match {
+      case Unfocus => inp
+      case Focus(str) => Projection.key(str) + inp
+    }
+  }
+}
 
 object Mapper {
   final case class Focus(str: String) extends Mapper
   final case object Unfocus extends Mapper
 
-  def bson(mapper: Mapper)(inp: BsonValue): BsonValue = mapper match {
-    case Focus(str) => inp.asDocument().get(str)
-    case Unfocus => inp
-  }
-
-  def projection(mapper: Mapper)(inp: Projection): Projection = mapper match {
-    case Focus(str) => Projection.key(str) + inp
-    case Unfocus => inp
-  }
-
-  implicit val orderMapper: Order[Mapper] = new Order[Mapper] {
-    def order(a: Mapper, b: Mapper) = a match {
+  implicit val order: Order[Mapper] = new Order[Mapper] {
+    def compare(a: Mapper, b: Mapper): Int = a match {
       case Unfocus => b match {
-        case Unfocus => Ordering.EQ
-        case Focus(_) => Ordering.LT
+        case Unfocus => 0
+        case Focus(_) => -1
       }
       case Focus(afld) => b match {
-        case Unfocus => Ordering.GT
-        case Focus(bfld) => Order[String].order(afld, bfld)
+        case Unfocus => 1
+        case Focus(bfld) => Order[String].compare(afld, bfld)
       }
     }
   }

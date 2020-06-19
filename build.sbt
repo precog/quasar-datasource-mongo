@@ -96,4 +96,5 @@ lazy val core = project
       // warnings w/o this dependency
       "com.google.code.findbugs"   %  "jsr305"                      % jsrVersion % Provided
     ))
+  .evictToLocal("QUASAR_PATH", "foundation", true)
   .enablePlugins(QuasarPlugin)

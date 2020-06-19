@@ -149,10 +149,10 @@ class MongoSpec extends EffectfulQSpec[IO] {
       }
     }
   )
-/*
-  "evalute falls back if there is an exception" >> Fragment.foreach(MongoSpec.correctCollections)(col =>
+
+  "evaluteImpl works falls back if there is an exception" >> Fragment.foreach(MongoSpec.correctCollections)(col =>
     s"checking ${col.database.name} :: ${col.name}" >>* mkMongo.use { mongo =>
-      mongo.evaluate(col, incorrectPipeline) flatMap { case (_, stream) => //, mongo.findAll(col)).flatMap { case (_, stream) =>
+      mongo.evaluateImpl(col, incorrectPipeline, mongo.findAll(col)).flatMap { case (_, stream) =>
         stream
           .fold(List[BsonValue]())((lst, col) => col :: lst)
           .map(bsons => bsons match {
@@ -164,7 +164,6 @@ class MongoSpec extends EffectfulQSpec[IO] {
       }
     }
   )
- */
 
   "findAll raises path not found for nonexistent collections" >> Fragment.foreach(MongoSpec.incorrectCollections)(col =>
     s"checking ${col.database.name} :: ${col.name}" >>* mkMongo.use { mongo =>
@@ -348,10 +347,10 @@ object MongoSpec {
         MongoConfig(connectionStringInvalidPort, 64, PushdownLevel.Full, None, None),
         blocker)
 
-      interpreter = new Interpreter(Version(0, 0, 0), "redundant", PushdownLevel.Full)
+      interpreter = Interpreter.interpret(Version(0, 0, 0), PushdownLevel.Full, "redundant")
     } yield {
       new Mongo[IO](
-        client, BatchSize.toLong, PushdownLevel.Full , /*interpreter, */None)
+        client, BatchSize.toLong, PushdownLevel.Full, interpreter, None)
     }
 
   def mkBMongo: Resource[IO, Mongo[IO]] =

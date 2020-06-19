@@ -18,21 +18,32 @@ package quasar.physical.mongo.interpreter
 
 import slamdata.Predef._
 
+import quasar.ScalarStage
+import quasar.contrib.iota._
+import quasar.physical.mongo.Interpreter
 import quasar.physical.mongo.expression._
 
-import scalaz.{MonadState, Scalaz}, Scalaz._
+import cats.{Monad, MonoidK}
+import cats.implicits._
+import cats.mtl.MonadState
+import higherkindness.droste.Basis
 
 object Wrap {
-  def apply[F[_]: MonadInState](name: Field): F[List[Pipe]] = for {
-    state <- MonadState[F, InterpretationState].get
-    res = List(Pipeline.$project(Map(
-      state.uniqueKey ->
-        O.$cond(
-          O.$eq(List(O.steps(List()), missing(state.uniqueKey))),
-          missing(state.uniqueKey),
-          O.obj(Map(name.name -> O.steps(List())))),
-      "_id" -> O.int(0))),
-      Pipeline.Presented)
-    _ <- focus[F]
-  } yield res map mapProjection(state.mapper)
+  def apply[F[_]: Monad: MonadInState: MonoidK, U: Basis[Expr, ?]]
+      : Interpreter[F, U, ScalarStage.Wrap] =
+    new Interpreter[F, U, ScalarStage.Wrap] {
+      def apply(s: ScalarStage.Wrap): F[List[Pipeline[U]]] = optToAlternative[F].apply(Projection.safeField(s.name)) flatMap { name =>
+        for {
+          state <- MonadState[F, InterpretationState].get
+          (res: List[Pipeline[U]]) = List(Pipeline.Project(Map(
+            state.uniqueKey ->
+              o.cond(
+                o.eqx(List(o.projection(Projection(List())), missing[Expr, U](state.uniqueKey))),
+                missing[Expr, U](state.uniqueKey),
+                o.obj(Map(name.name -> o.projection(Projection(List()))))),
+            "_id" -> o.int(0))))
+          _ <- focus[F]
+        } yield res.map(_.map(Compiler.mapProjection[Expr, U, U](state.mapper.projection)))
+      }
+    }
 }
