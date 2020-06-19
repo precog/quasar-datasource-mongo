@@ -37,7 +37,6 @@ final case class Interpretation(
   docs: List[BsonDocument])
 
 class Interpreter(version: Version, uniqueKey: String, pushdownLevel: PushdownLevel) {
-  // Fuck, what does this even mean???
   private def refine(inp: Interpretation)
       : InState[Interpretation \/ Interpretation] = inp.stages match {
     case List() => inp.right[Interpretation].point[InState]

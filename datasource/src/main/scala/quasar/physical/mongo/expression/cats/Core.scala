@@ -22,7 +22,7 @@ import quasar.{ScalarStage, ScalarStages}
 import quasar.common.{CPath, CPathField, CPathIndex}
 import quasar.common.CPath
 import quasar.api.ColumnType
-import quasar.physical.mongo.PushdownLevel
+import quasar.physical.mongo.{PushdownLevel, Version}
 
 import _root_.iota.TListK.:::
 import _root_.iota.{CopK, TListK, TNilK}
@@ -217,21 +217,33 @@ object Core {
   def optics[A, O](bp: Prism[O, Core[A]]) = new Optics[A, O] { val core = bp }
 }
 
-sealed trait Op[A] extends Product with Serializable
+sealed trait Op[A] extends Product with Serializable {
+  def minVersion: Version = Version.zero
+}
 
 object Op {
   final case class Let[A](vars: Map[String, A], in: A) extends Op[A]
-  final case class Type[A](exp: A) extends Op[A]
+  final case class Not[A](exp: A) extends Op[A]
   final case class Eq[A](exps: List[A]) extends Op[A]
   final case class Or[A](exps: List[A]) extends Op[A]
   final case class Exists[A](exp: A) extends Op[A]
   final case class Cond[A](check: A, ok: A, fail: A) extends Op[A]
   final case class Ne[A](exp: A) extends Op[A]
-  final case class ObjectToArray[A](exp: A) extends Op[A]
-  final case class ArrayElemAt[A](exp: A, ix: Int) extends Op[A]
-  final case class Reduce[A](input: A, initialValue: A, expression: A) extends Op[A]
-  final case class ConcatArrays[A](exps: List[A]) extends Op[A]
-  final case class Not[A](exp: A) extends Op[A]
+  final case class Type[A](exp: A) extends Op[A] {
+    override def minVersion = Version.$type
+  }
+  final case class ObjectToArray[A](exp: A) extends Op[A] {
+    override def minVersion = Version.$objectToArray
+  }
+  final case class ArrayElemAt[A](exp: A, ix: Int) extends Op[A] {
+    override def minVersion = Version.$arrayElemAt
+  }
+  final case class Reduce[A](input: A, initialValue: A, expression: A) extends Op[A] {
+    override def minVersion = Version.$reduce
+  }
+  final case class ConcatArrays[A](exps: List[A]) extends Op[A] {
+    override def minVersion = Version.$concatArrays
+  }
 
   implicit def traverse: Traverse[Op] = new DefaultTraverse[Op] {
     def traverse[G[_]: Applicative, A, B](fa: Op[A])(f: A => G[B]): G[Op[B]] = fa match {
@@ -441,6 +453,8 @@ object optics0 {
   }
 }
 object algebras {
+  type CoreOpL = Core ::: Op ::: TNilK
+  type ExprL = Const[Projection, ?] ::: Core ::: Op ::: TNilK
   type CoreOp[A] = CopK[Core ::: Op ::: TNilK, A]
   type Core0[A] = CopK[Core ::: TNilK, A]
   type Expr[A] = CopK[Const[Projection, ?] ::: Core ::: Op ::: TNilK, A]
@@ -453,6 +467,49 @@ object example {
   import Core._
   import Op._
   import optics0._
+
+  def opsMinVersion: Algebra[Op, Version] = {
+    val order = Order[Version]
+    import order._
+    Algebra { x =>
+      val fMin = x.minVersion
+      x match {
+        case Op.Let(vars, in) =>
+          max(vars.toList.map(_._2).foldLeft(in)(max), fMin)
+        case Op.Type(a) =>
+          max(fMin, a)
+        case Op.Eq(a) =>
+          a.foldLeft(fMin)(max)
+        case Op.Or(a) =>
+          a.foldLeft(fMin)(max)
+        case Op.Cond(a, b, c) =>
+          List(a, b, c).foldLeft(fMin)(max)
+        case Op.Ne(a) =>
+          max(fMin, a)
+        case Op.ObjectToArray(a) =>
+          max(fMin, a)
+        case Op.ArrayElemAt(a, _) =>
+          max(fMin, a)
+        case Op.Reduce(a, b ,c) =>
+          List(a, b, c).foldLeft(fMin)(max)
+        case Op.ConcatArrays(a) =>
+          a.foldLeft(fMin)(max)
+        case Op.Not(a) =>
+          max(fMin, a)
+      }
+    }
+  }
+
+  def coreOpsVersion: Algebra[CoreOp, Version] =
+    Algebra{ (x: CoreOp[Version]) =>
+      CopK.RemoveL[Op, Core ::: Op ::: TNilK].apply(x) match {
+        case Left(a) => Version.zero
+        case Right(b) => opsMinVersion(b)
+      }
+    }
+
+  def coreOpsVersionRun[W: Basis[CoreOp, ?]]: W => Version =
+    scheme.cata[CoreOp, W, Version](coreOpsVersion)
 
   def opsToCore[U: Basis[Core0, ?]]: Algebra[Op, U] = {
     val core0 = optics0.core(basisPrism[Core0, U])
@@ -488,9 +545,16 @@ object example {
     }
   }
 
-  def coreOpsToCoreRun[W: Basis[CoreOp, ?], U: Basis[Core0, ?]]: W => U =
+  def coreOpsToCore0Run[W: Basis[CoreOp, ?], U: Basis[Core0, ?]]: W => U =
     scheme.cata[CoreOp, W, U](coreOpsToCore)
 
+  def core0ToCore[W: Basis[Core0, ?], U: Basis[Core, ?]]: W => U =
+    scheme.cata[Core0, W, U](Algebra { x =>
+      CopK.RemoveL[Core, Core ::: TNilK].apply(x) match {
+        case Left(_) => throw new Throwable("impossible")
+        case Right(a) => a.embed
+      }
+    })
 
   val MissingSuffix = "_missing"
   type Elem = (Projection.Grouped, Int)
@@ -540,13 +604,18 @@ object example {
   }
 
   sealed trait Pipeline[+A] extends Product with Serializable
-  sealed trait MongoPipeline[+A] extends Pipeline[A]
+  sealed trait MongoPipeline[+A] extends Pipeline[A] {
+    def minVersion = Version.zero
+  }
   sealed trait CustomPipeline extends Pipeline[Nothing]
 
   object Pipeline {
     final case class Project[A](obj: Map[String, A]) extends MongoPipeline[A]
     final case class Match[A](a: A) extends MongoPipeline[A]
-    final case class Unwind(path: String, arrayIndex: String) extends MongoPipeline[Nothing]
+    final case class Unwind(path: String, arrayIndex: String) extends MongoPipeline[Nothing] {
+      override def minVersion = Version.$unwind
+    }
+
 
     final case object Presented extends CustomPipeline
     final case object Erase extends CustomPipeline
@@ -1123,14 +1192,16 @@ object interpreter {
         case s: ScalarStage.Mask => Mask[F, U].apply(s)
         case s: ScalarStage.Pivot => Pivot[F, U].apply(s)
         case s: ScalarStage.Project => Project[F, U].apply(s)
-        case s: ScalarStage.Cartesian if pushdown< PushdownLevel.Full => MonoidK[F].empty[List[Pipeline[U]]]
+        case s: ScalarStage.Cartesian if pushdown < PushdownLevel.Full => MonoidK[F].empty[List[Pipeline[U]]]
         case s: ScalarStage.Cartesian => Cartesian[F, U](apply[F, U](pushdown)).apply(s)
       }
     }
 
-  final case class InterpretResult[U](stages: List[ScalarStage], pipes: List[Pipeline[U]])
+  final case class Interpretation(stages: List[ScalarStage], docs: List[BsonDocument])
 
-  def interpretIdStatus[F[_]: Monad: MonadState[?[_], InterpretationState], U: Basis[Expr, ?]](uq: String): Interpreter[F, U, IdStatus] =
+  def interpretIdStatus[F[_]: Applicative: MonadState[?[_], InterpretationState], U: Basis[Expr, ?]](
+      uq: String)
+      : Interpreter[F, U, IdStatus] =
     new Interpreter[F, U, IdStatus] {
       def apply(s: IdStatus): F[List[Pipeline[U]]] = s match {
         case IdStatus.IdOnly =>
@@ -1145,4 +1216,91 @@ object interpreter {
             "_id" -> o.int(0))))
       }
     }
+
+  def interpretStages(version: Version, pushdown: PushdownLevel, uuid: String, stages: ScalarStages): (Interpretation, Mapper) = {
+    type InState[A] = StateT[Option, InterpretationState, A]
+    val stage = apply[InState, Fix[Expr]](pushdown)
+    val idStatus = interpretIdStatus[InState, Fix[Expr]](uuid)
+    def refine(inp: Interpretation): InState[Either[Interpretation, Interpretation]] = inp.stages match {
+      case List() => inp.asRight[Interpretation].pure[InState]
+      case hd :: tail =>
+        val nextStep = for {
+          pipes <- stage.apply(hd)
+          docs <- compilePipeline[InState, Fix[Expr]](version, uuid, pipes)
+        } yield Interpretation(tail, inp.docs ++ docs).asLeft[Interpretation]
+        nextStep <+> inp.asRight.pure[InState]
+      }
+    val interpreted = for {
+      initPipes <- idStatus(stages.idStatus)
+      initDocs <- compilePipeline[InState, Fix[Expr]](version, uuid, initPipes)
+      refined <- Monad[InState].tailRecM(Interpretation(stages.stages, initDocs))(refine)
+    } yield refined
+    interpreted.run(InterpretationState(uuid, Mapper.Unfocus)) match {
+      case None =>
+        (Interpretation(stages.stages, List()), Mapper.Unfocus)
+      case Some((state, a)) =>
+        (a, state.mapper)
+    }
+  }
+
+    import algebras._
+    import iota._
+
+    def coreToBson[U: Basis[Core, ?]]: U => BsonValue = {
+      import scala.collection.JavaConverters._
+      scheme.cata[Core, U, BsonValue](Algebra {
+        case Core.Null() =>
+          new BsonNull()
+        case Core.SInt(i) =>
+          new BsonInt32(i)
+        case Core.SString(s) =>
+          new BsonString(s)
+        case Core.Bool(b) =>
+          new BsonBoolean(b)
+        case Core.Array(as) =>
+          new BsonArray(as.asJava)
+        case Core.Object(mp) =>
+          val elems = mp.toList.map {
+            case (k, v) => new BsonElement(k, v)
+          }
+          new BsonDocument(elems.asJava)
+      })
+    }
+
+    def compileProjections[U: Basis[Expr, ?], W: Basis[CoreOp, ?]](uuid: String): U => W =
+      scheme.cata[Expr, U, W](Algebra { x =>
+        CopK.RemoveL[Const[Projection, ?], ExprL].apply(x) match {
+          case Left(a) => compute(a).embed
+          case Right(Const(prj)) => unfoldProjection[W](uuid).apply(prj)
+        }
+      })
+
+    def onlyDocuments[F[_]: MonoidK: Applicative](inp: BsonValue): F[BsonDocument] = inp match {
+      case x: BsonDocument => x.pure[F]
+      case _ => MonoidK[F].empty
+    }
+
+    def compilePipeline[F[_]: MonoidK: Monad, U: Basis[Expr, ?]](
+        version: Version,
+        uuid: String,
+        pipes: List[Pipeline[U]])
+        : F[List[BsonDocument]] =
+      pipes.flatMap(eraseCustomPipeline(uuid, _)).traverse { (pipe: MongoPipeline[U]) =>
+        if (version < pipe.minVersion) MonoidK[F].empty
+        else {
+          val exprs = pipelineObjects[Expr, U](pipe)
+          val coreop: Fix[CoreOp] = compileProjections[U, Fix[CoreOp]](uuid).apply(exprs)
+          val optimized = (letOpt[Fix[CoreOp], Fix[CoreOp]] andThen orOpt[Fix[CoreOp], Fix[CoreOp]])(coreop)
+          val coreopMinVersion = coreOpsVersionRun[Fix[CoreOp]].apply(optimized)
+          if (coreopMinVersion > version) MonoidK[F].empty
+          else {
+            val core0: Fix[Core0] = coreOpsToCore0Run[Fix[CoreOp], Fix[Core0]].apply(optimized)
+            val core: Fix[Core] = core0ToCore[Fix[Core0], Fix[Core]].apply(core0)
+            val bsonValue = coreToBson[Fix[Core]].apply(core)
+            onlyDocuments[F](bsonValue)
+          }
+        }
+      }
+
+
 }

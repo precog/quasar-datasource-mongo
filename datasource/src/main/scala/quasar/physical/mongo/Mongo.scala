@@ -191,10 +191,6 @@ class Mongo[F[_]: MonadResourceErr : ConcurrentEffect : ContextShift] private[mo
       val result = interpreter.interpret(stages)
       if (result._1.docs.isEmpty) fallback
       else {
-        val aggregated = aggregate(collection, result._.docs) flatMap { s =>
-          val newStream = s map Mapper.bson(result._2)
-          val newStages = ScalarStages(IdStatus.ExcludeId, result._1.stages)
-        }
         val aggregated = aggregate(collection, result._1.docs)
         F.attempt(aggregated.flatMap(_.head.compile.last)) flatMap {
           case Right(_) =>
