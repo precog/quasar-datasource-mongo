@@ -48,7 +48,7 @@ class Mongo[F[_]: MonadResourceErr : ConcurrentEffect : ContextShift] private[mo
     client: MongoClient,
     batchSize: Long,
     pushdownLevel: PushdownLevel,
-    val interpreter: Interpreter,
+//    val interpreter: Interpreter,
     val accessedResource: Option[MongoResource]) {
   import Mongo._
 
@@ -185,7 +185,8 @@ class Mongo[F[_]: MonadResourceErr : ConcurrentEffect : ContextShift] private[mo
 
     val fallback: F[(ScalarStages, Stream[F, BsonValue])] =
       findAll(collection) map (x => (stages, x))
-
+    fallback
+/*
     if (ScalarStages.Id === stages || pushdownLevel === PushdownLevel.Disabled) fallback
     else {
       val result = interpreter.interpret(stages)
@@ -204,6 +205,7 @@ class Mongo[F[_]: MonadResourceErr : ConcurrentEffect : ContextShift] private[mo
         }
       }
     }
+ */
   }
 
   private [mongo] def getCollection(collection: Collection): MongoCollection[Document] =
@@ -356,8 +358,8 @@ object Mongo {
     mkClient(config, blocker) evalMap { client =>
       for {
         version <- getVersion(client)
-        interpreter <- Interpreter(version, config.pushdownLevel)
-      } yield new Mongo[F](client, scala.math.max(1L, config.batchSize.toLong), config.pushdownLevel, interpreter, config.accessedResource)
+//        interpreter <- Interpreter(version, config.pushdownLevel)
+      } yield new Mongo[F](client, scala.math.max(1L, config.batchSize.toLong), config.pushdownLevel, /*interpreter, */config.accessedResource)
     }
   }
 }
