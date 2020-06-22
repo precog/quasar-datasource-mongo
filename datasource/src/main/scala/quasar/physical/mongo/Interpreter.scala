@@ -62,7 +62,7 @@ object Interpreter {
           List[Pipeline[U]]().pure[F]
         case IdStatus.IncludeId =>
           focus[F] as List(Pipeline.Project(Map(
-            uq -> o.array(List(o.key("$_id"), o.projection(Projection(List())))),
+            uq -> o.array(List(o.str("$_id"), o.steps(List()))),
             "_id" -> o.int(0))))
       }
     }

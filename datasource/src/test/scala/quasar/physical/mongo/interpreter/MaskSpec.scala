@@ -57,21 +57,6 @@ class MaskSpec extends Specification with quasar.TreeMatchers {
   def eval(state: InterpretationState, masks: Map[CPath, Set[ColumnType]]): Option[(Mapper, List[Pipeline[Fix[Expr]]])] =
     Mask[InState, Fix[Expr]].apply(ScalarStage.Mask(masks)) run state map (_ leftMap (_.mapper))
 
-  "projection" >> {
-    import quasar.RenderTree.ops._
-    import quasar.contrib.iotac._
-    import scalaz.Scalaz._
-    val prj = Projection.key("foo") + Projection.index(1) + Projection.key("bar")
-    val oo = Optics.full(Optics.basisPrism[Expr, Fix[Expr]])
-    val compiler = Compiler.compileProjections[Fix[Expr], Fix[CoreOp]]("uuid")
-    val e = compiler(oo.projection(prj))
-    println(e.render.show)
-    println(prj)
-    println(prj.toCPath)
-    println(Projection.fromCPath(prj.toCPath))
-    Projection.fromCPath(prj.toCPath) must beSome(prj)
-  }
-
   "state modifications" >> {
     "unfocused non root" >> {
       val state = InterpretationState("unique", Mapper.Unfocus)
