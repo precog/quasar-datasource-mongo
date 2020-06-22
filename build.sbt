@@ -54,7 +54,6 @@ val shimsVersion = "2.0.0"
 val slf4jVersion = "1.7.25"
 val specsVersion = "4.7.1"
 val refinedVersion = "0.9.9"
-val nettyVersion = "4.1.49.Final"
 val jsrVersion = "3.0.2"
 val jschVersion = "0.1.55"
 val catsEffectVersion   = "2.1.0"
@@ -77,12 +76,12 @@ lazy val core = project
       "eu.timepit"                 %% "refined-scalacheck"         % refinedVersion,
       "io.higherkindness"          %% "droste-core"                % drosteVersion,
       "io.frees"                   %% "iota-core"                  % iotaVersion,
-      "io.netty"                   %  "netty-all"                  % nettyVersion,
+      "org.typelevel"              %% "cats-effect"                % catsEffectVersion,
+      "org.mongodb.scala"          %% "mongo-scala-driver"         % mongoVersion,
       "com.jcraft"                 % "jsch"                        % jschVersion,
       "org.typelevel"              %% "cats-effect"                % catsEffectVersion,
       "org.mongodb.scala"          %% "mongo-scala-driver"         % mongoVersion,
       "com.github.julien-truffaut" %% "monocle-core"               % monocleVersion,
-      "com.github.julien-truffaut" %% "monocle-macro"              % monocleVersion,
       "org.typelevel"              %% "cats-mtl-core"              % catsMTLVersion,
 
       "com.precog"                 %% "quasar-foundation"          % managedVersions.value("precog-quasar") % Test classifier "tests",

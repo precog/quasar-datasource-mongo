@@ -112,8 +112,9 @@ class MongoDataSourceSpec extends EffectfulQSpec[IO] {
 
     "non-existing collection raises path not found" >>
       Fragment.foreach(MongoSpec.incorrectCollections)(col =>
-        s"checking ${col.database.name} :: ${col.name}" >> assertPathNotFound(mkDataSource, col.resourcePath)
-      )
+        s"checking ${col.database.name} :: ${col.name}" in skipped { // ch11377
+          assertPathNotFound(mkDataSource, col.resourcePath)
+        })
 
     "inaccessible collection raises connection failed" >>
       Fragment.foreach(MongoSpec.incorrectCollections.headOption.toList)(col =>
