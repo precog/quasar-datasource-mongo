@@ -29,7 +29,7 @@ import cats.syntax.functor._
 import cats.syntax.either._
 
 import fs2.concurrent.{NoneTerminatedQueue, Queue}
-import fs2.{Pipe, Pull, Stream}
+import fs2.Stream
 
 import quasar.api.resource.ResourcePath
 import quasar.connector.{MonadResourceErr, ResourceError}
@@ -222,18 +222,6 @@ class Mongo[F[_]: MonadResourceErr : ConcurrentEffect : ContextShift] private[mo
 }
 
 object Mongo {
-  def fallbackPipe[F[_]: Sync, A](fb: Stream[F, A]): Pipe[F, A, A] = { inp =>
-    val pull = inp.attempt.pull.uncons1 flatMap {
-      case None =>
-        Pull.done
-      case Some((Left(_), _)) =>
-        fb.pull.echo
-      case Some((Right(a), s)) =>
-        Pull.output1(a) >> s.rethrow.pull.echo
-    }
-    pull.stream
-  }
-
   val DefaultQueueSize: Long = 256L
 
   private def mkMsg(ex: MongoCommandException) = s"Mongo command error: ${ex.getErrorCodeName}"
