@@ -25,6 +25,8 @@ import cats.syntax.eq._
 import cats.syntax.flatMap._
 import cats.syntax.functor._
 import cats.syntax.either._
+import cats.syntax.functor._
+import cats.syntax.either._
 
 import fs2.concurrent.{NoneTerminatedQueue, Queue}
 import fs2.Stream
@@ -32,7 +34,6 @@ import fs2.Stream
 import quasar.api.resource.ResourcePath
 import quasar.connector.{MonadResourceErr, ResourceError}
 import quasar.physical.mongo.MongoResource.{Collection, Database}
-import quasar.physical.mongo.expression.Mapper
 import quasar.{IdStatus, ScalarStages}
 
 import org.bson.{Document => _, _}
@@ -40,13 +41,13 @@ import com.mongodb.{Block, ConnectionString}
 import com.mongodb.connection.{ClusterSettings, SslSettings}
 import org.mongodb.scala._
 
-import shims._
+import shims.equalToCats
 
 class Mongo[F[_]: MonadResourceErr : ConcurrentEffect : ContextShift] private[mongo](
     client: MongoClient,
     batchSize: Long,
     pushdownLevel: PushdownLevel,
-    val interpreter: Interpreter,
+    val interpret: Interpreter.Interpret,
     val accessedResource: Option[MongoResource]) {
   import Mongo._
 
@@ -203,11 +204,11 @@ class Mongo[F[_]: MonadResourceErr : ConcurrentEffect : ContextShift] private[mo
 
     if (ScalarStages.Id === stages || pushdownLevel === PushdownLevel.Disabled) fallback
     else {
-      val result = interpreter.interpret(stages)
+      val result = interpret(stages)
       if (result._1.docs.isEmpty) fallback
       else evaluateImpl(collection, result._1.docs, fallback map (_._2)) flatMap {
         case (isOk, stream) if isOk =>
-          val newStream = stream map Mapper.bson(result._2)
+          val newStream = stream map result._2.bson
           val newStages = ScalarStages(IdStatus.ExcludeId, result._1.stages)
           F.point((newStages, newStream))
         case _ => fallback

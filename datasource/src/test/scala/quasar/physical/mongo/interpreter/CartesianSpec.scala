@@ -20,34 +20,41 @@ import slamdata.Predef._
 
 import org.specs2.mutable.Specification
 
-import quasar.api.ColumnType
-import quasar.common.{CPath, CPathField}
-import quasar.physical.mongo.{Interpreter, Version, PushdownLevel}
 import quasar.{ScalarStage, IdStatus}
+import quasar.api.ColumnType
+import quasar.RenderTree._
+import quasar.common.{CPath, CPathField}
+import quasar.contrib.iotac._
+import quasar.physical.mongo.{Interpreter, PushdownLevel}
 import quasar.physical.mongo.expression._
-import quasar.physical.mongo.utils._
 
-import scalaz.Scalaz._
+import cats.implicits._
+import cats.mtl.implicits._
+import higherkindness.droste.data.Fix
 
 class CartesianSpec extends Specification with quasar.TreeMatchers {
+  val o = Optics.full(Optics.basisPrism[Expr, Fix[Expr]])
   def evalCartesian(
       cartouches: Map[CPathField, (CPathField, List[ScalarStage.Focused])])
-      : Option[(Mapper, List[Pipe])] = {
-    val interpreter = new Interpreter(Version.$objectToArray, "root", PushdownLevel.Full)
+      : Option[(Mapper, List[Pipeline[Fix[Expr]]])] = {
+    val cartesian = Cartesian[InState, Fix[Expr]](Interpreter.interpretStage[InState, Fix[Expr]](PushdownLevel.Full))
     optToAlternative[InState].apply(Projection.safeCartouches(cartouches))
-      .flatMap((Cartesian[InState](_, interpreter.interpretStep[InState])))
+      .flatMap(x => cartesian(ScalarStage.Cartesian(cartouches)))
       .run(InterpretationState("root", Mapper.Focus("root")))
       .map(_ leftMap (_.mapper))
   }
+
   "empty cartesian should erase everything" >> {
     val actual = evalCartesian(Map.empty)
-    val expected = List(Pipeline.$match(O.obj(Map("root_cartesian_empty" -> O.bool(false)))))
+    val expected = List(Pipeline.Match(o.obj(Map("root_cartesian_empty" -> o.bool(false)))): Pipeline[Fix[Expr]])
     actual must beLike {
       case Some((mapper, pipes)) =>
         (pipes must beTree(expected)) and (mapper must_=== Mapper.Unfocus)
     }
   }
+
   "example" >> {
+
     val cartouches = Map(
       (CPathField("a"), (CPathField("a"), Nil)),
 
@@ -60,81 +67,81 @@ class CartesianSpec extends Specification with quasar.TreeMatchers {
         ScalarStage.Pivot(IdStatus.ExcludeId, ColumnType.Object)))))
 
     val expected = List(
-      Pipeline.$project(Map(
-        "_id" -> O.int(0),
-        "roota" -> O.projection(Projection.key("root") + Projection.key("a")),
-        "rootba" -> O.projection(Projection.key("root") + Projection.key("b")),
-        "rootbm" -> O.projection(Projection.key("root") + Projection.key("b")))),
-      Pipeline.$project(Map(
-        "roota" -> O.string("$roota"),
-        "rootba" -> O.$cond(
-          O.$or(List(O.$eq(List(O.$type(O.key("rootba")), O.string("array"))))),
-          O.key("rootba"),
-          O.string("rootba_missing")),
-        "rootbm" -> O.string("$rootbm"),
-        "_id" -> O.int(0))),
-      Pipeline.$project(Map(
-        "roota" -> O.string("$roota"),
-        "rootba" -> O.string("$rootba"),
-        "rootbm" -> O.string("$rootbm"),
+      Pipeline.Project(Map(
+        "_id" -> o.int(0),
+        "roota" -> o.projection(Projection.key("root") + Projection.key("a")),
+        "rootba" -> o.projection(Projection.key("root") + Projection.key("b")),
+        "rootbm" -> o.projection(Projection.key("root") + Projection.key("b")))),
+      Pipeline.Project(Map(
+        "roota" -> o.str("$roota"),
+        "rootba" -> o.cond(
+          o.or(List(o.eqx(List(o.typ(o.key("rootba")), o.str("array"))))),
+          o.key("rootba"),
+          o.str("rootba_missing")),
+        "rootbm" -> o.str("$rootbm"),
+        "_id" -> o.int(0))),
+      Pipeline.Project(Map(
+        "roota" -> o.str("$roota"),
+        "rootba" -> o.str("$rootba"),
+        "rootbm" -> o.str("$rootbm"),
         "rootba_unwind" ->
-          O.$cond(
-            O.$or(List(
-              O.$not(O.$eq(List(O.$type(O.key("rootba")), O.string("array")))),
-              O.$eq(List(O.key("rootba"), O.array(List()))))),
-            O.array(List(O.string("rootba_missing"))),
-            O.key("rootba")))),
-      Pipeline.$unwind("rootba_unwind", "rootba_unwind_index"),
-      Pipeline.$project(Map(
-        "roota" -> O.string("$roota"),
-        "rootba" -> O.string("$rootba_unwind"),
-        "rootbm" -> O.string("$rootbm"),
-        "_id" -> O.int(0))),
-      Pipeline.$project(Map(
-        "roota" -> O.string("$roota"),
-        "rootba" -> O.string("$rootba"),
-        "rootbm" -> O.$cond(
-          O.$or(List(O.$eq(List(O.$type(O.key("rootbm")), O.string("object"))))),
-          O.key("rootbm"),
-          O.string("rootbm_missing")),
-        "_id" -> O.int(0))),
-      Pipeline.$project(Map(
-        "roota" -> O.string("$roota"),
-        "rootba" -> O.string("$rootba"),
-        "rootbm" -> O.string("$rootbm"),
+          o.cond(
+            o.or(List(
+              o.not(o.eqx(List(o.typ(o.key("rootba")), o.str("array")))),
+              o.eqx(List(o.key("rootba"), o.array(List()))))),
+            o.array(List(o.str("rootba_missing"))),
+            o.key("rootba")))),
+      Pipeline.Unwind("rootba_unwind", "rootba_unwind_index"),
+      Pipeline.Project(Map(
+        "roota" -> o.str("$roota"),
+        "rootba" -> o.str("$rootba_unwind"),
+        "rootbm" -> o.str("$rootbm"),
+        "_id" -> o.int(0))),
+      Pipeline.Project(Map(
+        "roota" -> o.str("$roota"),
+        "rootba" -> o.str("$rootba"),
+        "rootbm" -> o.cond(
+          o.or(List(o.eqx(List(o.typ(o.key("rootbm")), o.str("object"))))),
+          o.key("rootbm"),
+          o.str("rootbm_missing")),
+        "_id" -> o.int(0))),
+      Pipeline.Project(Map(
+        "roota" -> o.str("$roota"),
+        "rootba" -> o.str("$rootba"),
+        "rootbm" -> o.str("$rootbm"),
         "rootbm_unwind" ->
-          O.$cond(
-            O.$or(List(
-              O.$not(O.$eq(List(O.$type(O.key("rootbm")), O.string("object")))),
-              O.$eq(List(O.key("rootbm"), O.obj(Map()))))),
-            O.array(List(O.obj(Map(
-              "k" -> O.string("rootbm_missing"),
-              "v" -> O.string("rootbm_missing"))))),
-            O.$objectToArray(O.key("rootbm"))))),
-      Pipeline.$unwind("rootbm_unwind", "rootbm_unwind_index"),
-      Pipeline.$project(Map(
-        "roota" -> O.string("$roota"),
-        "rootba" -> O.string("$rootba"),
-        "rootbm" -> O.string("$rootbm_unwind.v"),
-        "_id" -> O.int(0))),
-      Pipeline.$project(Map(
-        "a" -> O.$cond(
-          O.$eq(List(O.string("$roota"), O.string("roota_missing"))),
-          O.string("$roota_missing"),
-          O.string("$roota")),
-        "ba" -> O.$cond(
-          O.$eq(List(O.string("$rootba"), O.string("rootba_missing"))),
-          O.string("$rootba_missing"),
-          O.string("$rootba")),
-        "bm" -> O.$cond(
-          O.$eq(List(O.string("$rootbm"), O.string("rootbm_missing"))),
-          O.string("$rootbm_missing"),
-          O.string("$rootbm")),
+          o.cond(
+            o.or(List(
+              o.not(o.eqx(List(o.typ(o.key("rootbm")), o.str("object")))),
+              o.eqx(List(o.key("rootbm"), o.obj(Map()))))),
+            o.array(List(o.obj(Map(
+              "k" -> o.str("rootbm_missing"),
+              "v" -> o.str("rootbm_missing"))))),
+            o.objectToArray(o.key("rootbm"))))),
+      Pipeline.Unwind("rootbm_unwind", "rootbm_unwind_index"),
+      Pipeline.Project(Map(
+        "roota" -> o.str("$roota"),
+        "rootba" -> o.str("$rootba"),
+        "rootbm" -> o.str("$rootbm_unwind.v"),
+        "_id" -> o.int(0))),
+      Pipeline.Project(Map(
+        "a" -> o.cond(
+          o.eqx(List(o.str("$roota"), o.str("roota_missing"))),
+          o.str("$roota_missing"),
+          o.str("$roota")),
+        "ba" -> o.cond(
+          o.eqx(List(o.str("$rootba"), o.str("rootba_missing"))),
+          o.str("$rootba_missing"),
+          o.str("$rootba")),
+        "bm" -> o.cond(
+          o.eqx(List(o.str("$rootbm"), o.str("rootbm_missing"))),
+          o.str("$rootbm_missing"),
+          o.str("$rootbm")),
       )),
-      Pipeline.$match(O.$or(List(
-        O.obj(Map("a" -> O.$exists(O.bool(true)))),
-        O.obj(Map("ba" -> O.$exists(O.bool(true)))),
-        O.obj(Map("bm" -> O.$exists(O.bool(true))))))))
+      Pipeline.Match(o.or(List(
+        o.obj(Map("a" -> o.exists(o.bool(true)))),
+        o.obj(Map("ba" -> o.exists(o.bool(true)))),
+        o.obj(Map("bm" -> o.exists(o.bool(true))))))))
 
 
     evalCartesian(cartouches) must beLike {

@@ -20,4 +20,4 @@ import slamdata.Predef._
 
 import quasar.physical.mongo.expression.Mapper
 
-final case class InterpretationState(uniqueKey: String, mapper: Mapper) extends Product with Serializable
+final case class InterpretationState(uniqueKey: String, mapper: Mapper)

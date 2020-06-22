@@ -20,7 +20,10 @@ import slamdata.Predef._
 
 import quasar.physical.mongo.expression.Mapper
 
-import scalaz.{StateT, MonadState}
+import cats.{~>, MonoidK, Applicative}
+import cats.data.StateT
+import cats.implicits._
+import cats.mtl.MonadState
 
 package object interpreter {
   type InState[A] = StateT[Option, InterpretationState, A]
@@ -32,4 +35,11 @@ package object interpreter {
 
   def unfocus[F[_]: MonadInState]: F[Unit] =
     MonadState[F, InterpretationState].modify { x => x.copy(mapper = Mapper.Unfocus) }
+
+  def optToAlternative[F[_]: MonoidK: Applicative]: Option ~> F = new (Option ~> F) {
+    def apply[A](inp: Option[A]): F[A] = inp match {
+      case None => MonoidK[F].empty
+      case Some(a) => a.pure[F]
+    }
+  }
 }

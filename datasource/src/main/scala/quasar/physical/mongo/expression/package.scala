@@ -18,38 +18,25 @@ package quasar.physical.mongo
 
 import slamdata.Predef._
 
-import matryoshka.data.Fix
+import quasar.contrib.iotac._
 
-import org.bson._
-
-import scalaz.{Scalaz, MonadPlus}, Scalaz._
-import scalaz.syntax._
+import cats.data.Const
+import higherkindness.droste.Basis
+import iota.{CopK, TListK, TNilK}, TListK.:::
 
 package object expression {
-  type ExprF[A] = Compiler.ExprF[A]
-  type Expr = Fix[ExprF]
+  type CoreL = Core ::: TNilK
+  type CoreOpL = Core ::: Op ::: TNilK
+  type ExprL = Core ::: Op ::: Const[Projection, ?] ::: TNilK
+  type Core0[A] = CopK[CoreL, A]
+  type CoreOp[A] = CopK[CoreOpL, A]
+  type Expr[A] = CopK[ExprL, A]
 
-  type Step = Projection.Step
-  type Field = Step.Field
-  type Index = Step.Index
+  def missing[F[a] <: ACopK[a], U](k: String)(implicit I: Core :<<: F, P: Basis[F, U]): U =
+    Optics.core(Optics.basisPrism[F, U]).str(k.concat(MissingSuffix))
 
-  val Step: Projection.Step.type = Projection.Step
-  val Field: Step.Field.type = Step.Field
-  val Index: Step.Index.type = Step.Index
+  def missingKey[F[a] <: ACopK[a], U](key: String)(implicit I: Core :<<: F, U: Basis[F, U]): U =
+    Optics.core(Optics.basisPrism[F, U]).str("$".concat(key).concat(MissingSuffix))
 
-  val O: Optics.FullOptics[Fix[Compiler.ExprF], Fix[Compiler.ExprF], Compiler.ExprF] = Optics.fullT[Fix, Compiler.ExprF]
-
-  type Pipe = Pipeline[Expr]
-
-  def compilePipeline[F[_]: MonadPlus](version: Version, uuid: String, pipes: List[Pipe]): F[List[BsonDocument]] =
-    Compiler.compilePipeline[Fix, F](version, uuid, pipes)
-
-  def compilePipe[F[_]: MonadPlus](version: Version, uuid: String, pipe: Pipe): F[List[BsonDocument]] =
-    Compiler.eraseCustomPipeline(uuid, pipe) foldMapM { x => Compiler.compilePipe[Fix, F](version, uuid, x) map (List(_)) }
-
-  def mapProjection(mp: Mapper)(pipe: Pipe): Pipe =
-    pipe map Compiler.mapProjection(Mapper.projection(mp))
-
-  def missing(key: String): Expr = Compiler.missing[Fix, ExprF](key)
-  def missingKey(key: String): Expr = Compiler.missingKey[Fix, ExprF](key)
+  val MissingSuffix = "_missing"
 }

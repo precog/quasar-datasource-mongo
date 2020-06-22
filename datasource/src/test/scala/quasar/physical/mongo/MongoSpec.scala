@@ -347,7 +347,7 @@ object MongoSpec {
         MongoConfig(connectionStringInvalidPort, 64, PushdownLevel.Full, None, None),
         blocker)
 
-      interpreter = new Interpreter(Version(0, 0, 0), "redundant", PushdownLevel.Full)
+      interpreter = Interpreter.interpret(Version(0, 0, 0), PushdownLevel.Full, "redundant")
     } yield {
       new Mongo[IO](
         client, BatchSize.toLong, PushdownLevel.Full, interpreter, None)

@@ -23,51 +23,47 @@ import matryoshka.Delay
 import quasar.{RenderTree, NonTerminal, Terminal}, RenderTree.ops._
 import quasar.physical.mongo.Version
 
-trait Pipeline[+A] extends Product with Serializable
+import cats.Functor
 
-trait MongoPipeline[+A] extends Pipeline[A]
-
-trait CustomPipeline extends Pipeline[Nothing]
-
-import scalaz.Functor
+sealed trait Pipeline[+A] extends Product with Serializable
+sealed trait MongoPipeline[+A] extends Pipeline[A] {
+  def minVersion = Version.zero
+}
+sealed trait CustomPipeline extends Pipeline[Nothing]
 
 object Pipeline {
-  final case class $project[A](obj: Map[String, A]) extends MongoPipeline[A]
-  final case class $match[A](a: A) extends MongoPipeline[A]
-  final case class $unwind[A](path: String, arrayIndex: String) extends MongoPipeline[A]
+  final case class Project[A](obj: Map[String, A]) extends MongoPipeline[A]
+  final case class Match[A](a: A) extends MongoPipeline[A]
+  final case class Unwind(path: String, arrayIndex: String) extends MongoPipeline[Nothing] {
+    override def minVersion = Version.$unwind
+  }
 
   final case object Presented extends CustomPipeline
   final case object Erase extends CustomPipeline
 
+  implicit val functor: Functor[Pipeline] = new Functor[Pipeline] {
+    def map[A, B](fa: Pipeline[A])(f: A => B): Pipeline[B] = fa match {
+      case Presented => Presented
+      case Erase => Erase
+      case Project(obj) => Project(obj.toList.map({case (k, v) => (k, f(v))}).toMap)
+      case Match(a) => Match(f(a))
+      case Unwind(p, i) => Unwind(p, i)
+    }
+  }
+
   implicit val delayRenderTreeMongoPipeline: Delay[RenderTree, Pipeline] =
     new Delay[RenderTree, Pipeline] {
       def apply[A](fa: RenderTree[A]): RenderTree[Pipeline[A]] = RenderTree.make {
-        case $project(obj) => NonTerminal(List("$project"), None, obj.toList map {
+        case Project(obj) => NonTerminal(List("$project"), None, obj.toList map {
           case (k, v) => NonTerminal(List(), Some(k), List(fa.render(v)))
         })
-        case $match(a) => NonTerminal(List("$match"), None, List(fa.render(a)))
-        case $unwind(p, a) =>
+        case Match(a) => NonTerminal(List("$match"), None, List(fa.render(a)))
+        case Unwind(p, a) =>
           NonTerminal(List("$unwind"), None, List(p.render, a.render))
         case Presented =>
           Terminal(List("Presented"), None)
         case Erase =>
           Terminal(List("Erase"), None)
       }
-  }
-
-  def pipeMinVersion(pipe: MongoPipeline[_]): Version = pipe match {
-    case $project(_) => Version.zero
-    case $match(_) => Version.zero
-    case $unwind(_, _) => Version.$unwind
-  }
-
-  implicit val functorPipeline: Functor[Pipeline] = new Functor[Pipeline] {
-    def map[A, B](fa: Pipeline[A])(f: A => B): Pipeline[B] = fa match {
-      case Presented => Presented
-      case Erase => Erase
-      case $project(obj) => $project(obj map { case (k, v) => (k, f(v)) })
-      case $match(a) => $match(f(a))
-      case $unwind(p, i) => $unwind(p, i)
-    }
   }
 }
