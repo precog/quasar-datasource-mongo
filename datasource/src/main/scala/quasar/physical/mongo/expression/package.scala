@@ -18,13 +18,10 @@ package quasar.physical.mongo
 
 import slamdata.Predef._
 
-import quasar.{RenderTree, RenderedTree}, RenderTree.ops._
-import quasar.contrib.iota._
+import quasar.contrib.iotac._
 
-import cats.{Functor, ~>}
 import cats.data.Const
-import higherkindness.droste.{Algebra, Basis, Delay, scheme}
-import higherkindness.droste.data.Fix
+import higherkindness.droste.Basis
 import iota.{CopK, TListK, TNilK}, TListK.:::
 
 package object expression {

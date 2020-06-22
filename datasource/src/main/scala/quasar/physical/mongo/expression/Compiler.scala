@@ -19,7 +19,7 @@ package quasar.physical.mongo.expression
 import slamdata.Predef._
 
 import quasar.physical.mongo.Version
-import quasar.contrib.iota._
+import quasar.contrib.iotac._
 
 import cats._
 import cats.data.Const
@@ -102,7 +102,6 @@ object Compiler {
     })
   }
 
-
   type Elem = (Projection.Grouped, Int)
   private def unfoldProjectionψ(uuid: String): CVCoalgebra[CoreOp, List[Elem]] = {
     type U = Coattr[CoreOp, List[Elem]]
@@ -157,13 +156,20 @@ object Compiler {
       }
     })
 
-  def eraseCustomPipeline[U: Basis[Expr, ?]](uuid: String, pipeline: Pipeline[U]): List[MongoPipeline[U]] = {
-    val o = Optics.full(Optics.basisPrism[Expr, U])
+  def eraseCustomPipeline[F[a] <: ACopK[a], U](
+      uuid: String,
+      pipeline: Pipeline[U])(
+      implicit
+      IC: Core :<<: F,
+      IO: Op :<<: F,
+      U: Basis[F, U])
+      : List[MongoPipeline[U]] = {
+    val o = Optics.coreOp(Optics.basisPrism[F, U])
     import o._
 
     pipeline match {
       case Presented =>
-        List(Match(obj(Map(uuid -> nex(missing[Expr, U](uuid))))))
+        List(Match(obj(Map(uuid -> nex(missing[F, U](uuid))))))
       case Erase =>
         List(Match(obj(Map(uuid.concat("_erase") -> bool(false)))))
       case Project(obj) =>
@@ -195,7 +201,7 @@ object Compiler {
     val f = Optics.coreOp(Prism.id[CoreOp[U]])
     import o._
     scheme.cata[CoreOp, W, U](Algebra {
-      case f.let(vars, in) =>
+      case l @ f.let(vars, in) =>
         if (vars.size =!= 1) let(vars, in)
         else in match {
           case str(k) =>
@@ -205,11 +211,13 @@ object Compiler {
               case _ =>
                 let(vars, in)
             }
+          case _ =>
+            let(vars, in)
         }
-        let(vars, in)
       case x => x.embed
     })
   }
+
   def orOpt[W: Basis[CoreOp, ?], U: Basis[CoreOp, ?]]: W => U = {
     val o = Optics.coreOp(Optics.basisPrism[CoreOp, U])
     val f = Optics.coreOp(Prism.id[CoreOp[U]])
@@ -223,6 +231,7 @@ object Compiler {
           case x => List(x)
         })
       }
+      case x => x.embed
     })
   }
   def mapProjection[F[a] <: ACopK[a], W, U](fn: Projection => Projection)(
@@ -271,7 +280,7 @@ object Compiler {
       version: Version,
       uuid: String,
       pipes: List[Pipeline[U]]): F[List[BsonDocument]] =
-    pipes.flatMap(eraseCustomPipeline(uuid, _)).traverse { (pipe: MongoPipeline[U]) =>
+    pipes.flatMap(eraseCustomPipeline[Expr, U](uuid, _)).traverse { (pipe: MongoPipeline[U]) =>
       if (version < pipe.minVersion) MonoidK[F].empty
       else {
         val exprs = pipelineObjects[Expr, U](pipe)

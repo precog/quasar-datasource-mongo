@@ -15,69 +15,89 @@
  */
 
 package quasar.physical.mongo.interpreter
-/*
+
 import slamdata.Predef._
 
 import org.specs2.mutable.Specification
 
+import quasar.ScalarStage
+import quasar.contrib.iotac._
 import quasar.physical.mongo.expression._
-import quasar.physical.mongo.expression.{Projection, Pipeline}, Projection._, Pipeline._
+import quasar.physical.mongo.expression.{Projection, Pipeline => P}, Projection._, Step._
 
-import scalaz.{State, Scalaz}, Scalaz._
+import cats.implicits._
+import cats.mtl.implicits._
+import higherkindness.droste.data.Fix
 
 class ProjectSpec extends Specification with quasar.TreeMatchers {
+  val o = Optics.full(Optics.basisPrism[Expr, Fix[Expr]])
+
   "unfocused" >> {
     val foobarPrj = Projection.key("foo") + Projection.key("bar")
-    val actual = Project[State[InterpretationState, ?]](foobarPrj) run InterpretationState("root", Mapper.Unfocus)
+    val interpreter = Project[InState, Fix[Expr]]
+    val actual =
+      interpreter(ScalarStage.Project(foobarPrj.toCPath))
+        .run(InterpretationState("root", Mapper.Unfocus))
     val expected = List(
-      $project(Map("root_project0" -> O.steps(List()))),
-      $project(Map("root_project1" -> O.$cond(
-        O.$or(List(
-          O.$not(O.$eq(List(O.$type(O.key("root_project0")), O.string("object")))),
-          O.$eq(List(O.$type(O.steps(List(Field("root_project0"), Field("foo")))), O.string("missing"))))),
-        O.string("root_missing"),
-        O.steps(List(Field("root_project0"), Field("foo")))))),
-      Presented,
-      $project(Map("root_project0" -> O.$cond(
-        O.$or(List(
-          O.$not(O.$eq(List(O.$type(O.key("root_project1")), O.string("object")))),
-          O.$eq(List(O.$type(O.steps(List(Field("root_project1"), Field("bar")))), O.string("missing"))))),
-        O.string("root_missing"),
-        O.steps(List(Field("root_project1"), Field("bar")))))),
-      Presented,
-      $project(Map("root" -> O.key("root_project0"))),
-      Presented)
-    (actual._2 must beTree(expected)) and (actual._1.mapper === Mapper.Focus("root"))
+      P.Project(Map("root_project0" -> o.steps(List()))),
+      P.Project(Map("root_project1" -> o.cond(
+        o.or(List(
+          o.not(o.eqx(List(o.typ(o.key("root_project0")), o.str("object")))),
+          o.eqx(List(o.typ(o.steps(List(Field("root_project0"), Field("foo")))), o.str("missing"))))),
+        o.str("root_missing"),
+        o.steps(List(Field("root_project0"), Field("foo")))))),
+      P.Presented,
+      P.Project(Map("root_project0" -> o.cond(
+        o.or(List(
+          o.not(o.eqx(List(o.typ(o.key("root_project1")), o.str("object")))),
+          o.eqx(List(o.typ(o.steps(List(Field("root_project1"), Field("bar")))), o.str("missing"))))),
+        o.str("root_missing"),
+        o.steps(List(Field("root_project1"), Field("bar")))))),
+      P.Presented,
+      P.Project(Map("root" -> o.key("root_project0"))),
+      P.Presented)
+    actual must beLike {
+      case Some((state, pipes)) =>
+        state.mapper must_=== Mapper.Focus("root")
+        pipes must beTree(expected)
+    }
   }
   "focused" >> {
     val foo1Prj = Projection.key("foo") + Projection.index(1)
-    val actual = Project[State[InterpretationState, ?]](foo1Prj) run InterpretationState("other", Mapper.Focus("other"))
+    val interpreter = Project[InState, Fix[Expr]]
+    val actual =
+      interpreter(
+        ScalarStage.Project(foo1Prj.toCPath))
+        .run(InterpretationState("other", Mapper.Focus("other")))
     val expected = List(
-      $project(Map("other_project0" -> O.steps(List()))),
-      $project(Map("other_project1" -> O.$cond(
-        O.$or(List(
-          O.$not(O.$eq(List(O.$type(O.key("other_project0")), O.string("object")))),
-          O.$eq(List(O.$type(O.steps(List(Field("other_project0"), Field("other")))), O.string("missing"))))),
-        O.string("other_missing"),
-        O.steps(List(Field("other_project0"), Field("other")))))),
-      Presented,
-      $project(Map("other_project0" -> O.$cond(
-        O.$or(List(
-          O.$not(O.$eq(List(O.$type(O.key("other_project1")), O.string("object")))),
-          O.$eq(List(O.$type(O.steps(List(Field("other_project1"), Field("foo")))), O.string("missing"))))),
-        O.string("other_missing"),
-        O.steps(List(Field("other_project1"), Field("foo")))))),
-      Presented,
-      $project(Map("other_project1" -> O.$cond(
-        O.$or(List(
-          O.$not(O.$eq(List(O.$type(O.key("other_project0")), O.string("array")))),
-          O.$eq(List(O.$type(O.steps(List(Field("other_project0"), Index(1)))), O.string("missing"))))),
-        O.string("other_missing"),
-        O.steps(List(Field("other_project0"), Index(1)))))),
-      Presented,
-      $project(Map("other" -> O.key("other_project1"))),
-      Presented)
-    (actual._2 must beTree(expected)) and (actual._1.mapper === Mapper.Focus("other"))
+      P.Project(Map("other_project0" -> o.steps(List()))),
+      P.Project(Map("other_project1" -> o.cond(
+        o.or(List(
+          o.not(o.eqx(List(o.typ(o.key("other_project0")), o.str("object")))),
+          o.eqx(List(o.typ(o.steps(List(Field("other_project0"), Field("other")))), o.str("missing"))))),
+        o.str("other_missing"),
+        o.steps(List(Field("other_project0"), Field("other")))))),
+      P.Presented,
+      P.Project(Map("other_project0" -> o.cond(
+        o.or(List(
+          o.not(o.eqx(List(o.typ(o.key("other_project1")), o.str("object")))),
+          o.eqx(List(o.typ(o.steps(List(Field("other_project1"), Field("foo")))), o.str("missing"))))),
+        o.str("other_missing"),
+        o.steps(List(Field("other_project1"), Field("foo")))))),
+      P.Presented,
+      P.Project(Map("other_project1" -> o.cond(
+        o.or(List(
+          o.not(o.eqx(List(o.typ(o.key("other_project0")), o.str("array")))),
+          o.eqx(List(o.typ(o.steps(List(Field("other_project0"), Index(1)))), o.str("missing"))))),
+        o.str("other_missing"),
+        o.steps(List(Field("other_project0"), Index(1)))))),
+      P.Presented,
+      P.Project(Map("other" -> o.key("other_project1"))),
+      P.Presented)
+    actual must beLike {
+      case Some((state, pipes)) =>
+        state.mapper must_=== Mapper.Focus("other")
+        pipes must beTree(expected)
+    }
   }
 }
- */

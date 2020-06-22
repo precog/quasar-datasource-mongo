@@ -15,17 +15,16 @@
  */
 
 package quasar.physical.mongo.interpreter
-/*
+
 import slamdata.Predef._
 
 import org.specs2.mutable.Specification
 
 import quasar.api.ColumnType
 import quasar.RenderTree._
-import quasar.common.{CPath, CPathField}
-import quasar.contrib.iota._
-import quasar.physical.mongo.{Interpreter, PushdownLevel}
-import quasar.{ScalarStage, IdStatus}
+import quasar.common.CPath
+import quasar.contrib.iotac._
+import quasar.ScalarStage
 import quasar.physical.mongo.expression._
 
 import cats.implicits._
@@ -43,11 +42,11 @@ class MaskSpec extends Specification with quasar.TreeMatchers {
   def pipeEqualWithKey(key: String, a: Option[List[Pipeline[Fix[Expr]]]], b: Fix[CoreOp]) = {
     a must beLike {
       case Some(x :: Pipeline.Presented :: List()) =>
-        eraseCustomPipeline[Fix[Expr]](key, x) must beLike {
+        eraseCustomPipeline[Expr, Fix[Expr]](key, x) must beLike {
           case List(pipe) =>
-            val pipeObjs = pipelineObjects[Expr, Fix[Expr]]
+            val pipeObjs = pipelineObjects[Expr, Fix[Expr]](_)
             val projections = compileProjections[Fix[Expr], Fix[CoreOp]](key)
-            projections(pipeObjs(pipe)) must beTree(b)
+            (pipeObjs andThen projections andThen letOpt andThen  orOpt)(pipe) must beTree(b)
         }
     }
   }
@@ -55,8 +54,23 @@ class MaskSpec extends Specification with quasar.TreeMatchers {
   def wrapWithProject(e: Fix[CoreOp]) = o.obj(Map("$project" -> e))
   def wrapWithMatch(e: Fix[CoreOp]) = o.obj(Map("$match" -> e))
 
-  def eval(state: InterpretationState, masks: Map[CPath, Set[ColumnType]]): Option[(Mapper, List[Pipeline[Fix[CoreOp]]])] =
-    Mask[InState, Fix[CoreOp]].apply(ScalarStage.Mask(masks)) run state map (_ leftMap (_.mapper))
+  def eval(state: InterpretationState, masks: Map[CPath, Set[ColumnType]]): Option[(Mapper, List[Pipeline[Fix[Expr]]])] =
+    Mask[InState, Fix[Expr]].apply(ScalarStage.Mask(masks)) run state map (_ leftMap (_.mapper))
+
+  "projection" >> {
+    import quasar.RenderTree.ops._
+    import quasar.contrib.iotac._
+    import scalaz.Scalaz._
+    val prj = Projection.key("foo") + Projection.index(1) + Projection.key("bar")
+    val oo = Optics.full(Optics.basisPrism[Expr, Fix[Expr]])
+    val compiler = Compiler.compileProjections[Fix[Expr], Fix[CoreOp]]("uuid")
+    val e = compiler(oo.projection(prj))
+    println(e.render.show)
+    println(prj)
+    println(prj.toCPath)
+    println(Projection.fromCPath(prj.toCPath))
+    Projection.fromCPath(prj.toCPath) must beSome(prj)
+  }
 
   "state modifications" >> {
     "unfocused non root" >> {
@@ -102,17 +116,20 @@ class MaskSpec extends Specification with quasar.TreeMatchers {
     val missingKey = o.str("$root_missing")
     val missing = o.str("root_missing")
 
-    def pipeEqual(a: Option[List[Pipeline[Fix[CoreOp]]]], b: Fix[CoreOp]) = pipeEqualWithKey("root", a, b)
+    def pipeEqual(a: Option[List[Pipeline[Fix[Expr]]]], b: Fix[CoreOp]) = pipeEqualWithKey("root", a, b)
 
-    def evalMask(masks: Map[CPath, Set[ColumnType]]): Option[List[Pipeline[Fix[CoreOp]]]] =
+    def evalMask(masks: Map[CPath, Set[ColumnType]]): Option[List[Pipeline[Fix[Expr]]]] =
       eval(InterpretationState("root", Mapper.Focus("root")), masks) map (_._2)
 
     "drop everything when empty" >> {
       evalMask(Map.empty) must beLike {
         case Some(List(x)) =>
           val expected = wrapWithMatch(o.obj(Map("root_erase" -> o.bool(false))))
-          eraseCustomPipeline("root", x) must beLike {
-            case List(pipe) => toCoreOp("root", pipe) must beTree(expected)
+          eraseCustomPipeline[Expr, Fix[Expr]]("root", x) must beLike {
+            case List(pipe) =>
+              val pipeObjs = pipelineObjects[Expr, Fix[Expr]](_)
+              val projections = compileProjections[Fix[Expr], Fix[CoreOp]]("root")
+              (pipeObjs andThen projections andThen letOpt andThen orOpt)(pipe) must beTree(expected)
           }
       }
     }
@@ -206,7 +223,6 @@ class MaskSpec extends Specification with quasar.TreeMatchers {
 
       pipeEqual(actual, expected)
     }
-
     "erasing objects check, array check and preserving arrays" >> {
       val actual = evalMask(Map(
         CPath.parse(".a") -> Set(ColumnType.Object),
@@ -216,10 +232,10 @@ class MaskSpec extends Specification with quasar.TreeMatchers {
         CPath.parse(".d[1]") -> Set(ColumnType.Boolean)))
 
       def indexed(e: Fix[CoreOp], ix: Int): Fix[CoreOp] = o.let(
-        Map("level1" -> e),
+        Map("level0" -> e),
         o.cond(
           o.eqx(List(o.typ(e), o.str("array"))),
-          o.arrayElemAt(o.str("$$level1"), ix),
+          o.arrayElemAt(o.str("$$level0"), ix),
           missing))
 
       val expected = wrapWithProject(o.obj(Map(
@@ -267,4 +283,3 @@ class MaskSpec extends Specification with quasar.TreeMatchers {
     }
   }
 }
- */

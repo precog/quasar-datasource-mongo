@@ -20,12 +20,12 @@ import slamdata.Predef._
 
 import org.specs2.mutable.Specification
 
+import quasar.{ScalarStage, IdStatus}
 import quasar.api.ColumnType
 import quasar.RenderTree._
 import quasar.common.{CPath, CPathField}
-import quasar.contrib.iota._
+import quasar.contrib.iotac._
 import quasar.physical.mongo.{Interpreter, PushdownLevel}
-import quasar.{ScalarStage, IdStatus}
 import quasar.physical.mongo.expression._
 
 import cats.implicits._
@@ -148,6 +148,5 @@ class CartesianSpec extends Specification with quasar.TreeMatchers {
       case Some((mapper, pipes)) =>
         (pipes must beTree(expected)) and (mapper must_=== Mapper.Unfocus)
     }
-
   }
 }

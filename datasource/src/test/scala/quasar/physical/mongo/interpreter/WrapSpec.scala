@@ -15,42 +15,56 @@
  */
 
 package quasar.physical.mongo.interpreter
-/*
+
 import slamdata.Predef._
 
 import org.specs2.mutable.Specification
-import org.specs2.ScalaCheck
 
+import quasar.ScalarStage
+import quasar.contrib.iotac._
 import quasar.physical.mongo.expression._
 
-import scalaz.{State, Scalaz}, Scalaz._
+import cats.implicits._
+import cats.mtl.implicits._
+import higherkindness.droste.data.Fix
 
-class WrapSpec extends Specification with ScalaCheck {
+class WrapSpec extends Specification with quasar.TreeMatchers {
+  val o = Optics.full(Optics.basisPrism[Expr, Fix[Expr]])
+
   "unfocused" >> {
-    val actual = Wrap[State[InterpretationState, ?]](Field("wrapper")) run InterpretationState("root", Mapper.Unfocus)
+    val interpreter = Wrap[InState, Fix[Expr]]
+    val actual = interpreter(ScalarStage.Wrap("wrapper")).run(InterpretationState("root", Mapper.Unfocus))
     val expected = List(
-      Pipeline.$project(Map(
+      Pipeline.Project(Map(
         "root" ->
-          O.$cond(
-            O.$eq(List(O.steps(List()), O.string("root_missing"))),
-            O.string("root_missing"),
-            O.obj(Map("wrapper" -> O.steps(List())))),
-        "_id" -> O.int(0))),
+          o.cond(
+            o.eqx(List(o.steps(List()), o.str("root_missing"))),
+            o.str("root_missing"),
+            o.obj(Map("wrapper" -> o.steps(List())))),
+        "_id" -> o.int(0))),
       Pipeline.Presented)
-    (actual._2 === expected) and (actual._1.mapper === Mapper.Focus("root"))
+    actual must beLike {
+      case Some((state, pipes)) =>
+        state.mapper must_=== Mapper.Focus("root")
+        pipes must beTree(expected)
+    }
   }
   "focused" >> {
-    val actual = Wrap[State[InterpretationState, ?]](Field("wrapper")) run InterpretationState("root", Mapper.Focus("root"))
+    val interpreter = Wrap[InState, Fix[Expr]]
+    val actual = interpreter(ScalarStage.Wrap("wrapper")).run(InterpretationState("root", Mapper.Focus("root")))
     val expected = List(
-      Pipeline.$project(Map(
+      Pipeline.Project(Map(
         "root" ->
-          O.$cond(
-            O.$eq(List(O.key("root"), O.string("root_missing"))),
-            O.string("root_missing"),
-            O.obj(Map("wrapper" -> O.key("root")))),
-        "_id" -> O.int(0))),
+          o.cond(
+            o.eqx(List(o.key("root"), o.str("root_missing"))),
+            o.str("root_missing"),
+            o.obj(Map("wrapper" -> o.key("root")))),
+        "_id" -> o.int(0))),
       Pipeline.Presented)
-    (actual._2 === expected) and (actual._1.mapper === Mapper.Focus("root"))
+    actual must beLike {
+      case Some((state, pipes)) =>
+        state.mapper must_=== Mapper.Focus("root")
+        pipes must beTree(expected)
+    }
   }
 }
- */

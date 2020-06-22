@@ -20,7 +20,7 @@ import slamdata.Predef._
 
 import quasar.{ScalarStage, IdStatus}
 import quasar.api.ColumnType
-import quasar.contrib.iota._
+import quasar.contrib.iotac._
 import quasar.physical.mongo.Interpreter
 import quasar.physical.mongo.expression._
 
@@ -100,93 +100,3 @@ object Pivot {
       }
     }
 }
-
-
-/*
-object Pivot {
-  def ensureArray(vectorType: ColumnType.Vector, key: String, undefined: Expr): Pipe = {
-    val proj = O.steps(List())
-    Pipeline.$project(Map(key -> (vectorType match {
-      // if proj === {} or its type isn't "object" this emits [{k: missing, v: missing}]
-      case ColumnType.Object =>
-        O.$cond(
-          O.$or(List(O.$not(O.$eq(List(O.$type(proj), O.string("object")))), O.$eq(List(proj, O.obj(Map()))))),
-          O.array(List(O.obj(Map("k" -> undefined, "v" -> undefined)))),
-          O.$objectToArray(O.steps(List())))
-      // if proj === [] or its type isn't "array" this emits [missing]
-      case ColumnType.Array =>
-        O.$cond(
-          O.$or(List(O.$not(O.$eq(List(O.$type(proj), O.string("array")))), O.$eq(List(proj, O.array(List()))))),
-          O.array(List(undefined)),
-          proj)
-    })))
-  }
-
-  def mkValue(
-      status: IdStatus,
-      vectorType: ColumnType.Vector,
-      unwinded: String,
-      index: String,
-      undefined: Expr)
-      : Expr = {
-    val indexString = O.string("$" concat index)
-    val unwindString = O.string("$" concat unwinded)
-    val kString = O.string("$" concat unwinded concat ".k")
-    val vString = O.string("$" concat unwinded concat ".v")
-    vectorType match {
-      case ColumnType.Array => status match {
-        // if we have `missing` in values then index has no sense, it's `missing` too
-        case IdStatus.IdOnly =>
-          O.$cond(
-            O.$eq(List(unwindString, undefined)),
-            undefined,
-            indexString)
-        case IdStatus.ExcludeId =>
-          unwindString
-        // the same as above, but we erase whole [id, val] instead of elements
-        case IdStatus.IncludeId =>
-          O.$cond(
-            O.$eq(List(unwindString, undefined)),
-            undefined,
-            O.array(List(indexString, unwindString)))
-      }
-      case ColumnType.Object => status match {
-        // no handling in kString, vString, they could be defined as missing in `ensureArray`
-        case IdStatus.IdOnly => kString
-        case IdStatus.ExcludeId => vString
-        case IdStatus.IncludeId =>
-          // if value is `missing` whole [id, val] is `missing`
-          O.$cond(
-            O.$eq(List(vString, undefined)),
-            undefined,
-            O.array(List(kString, vString)))
-      }
-    }
-  }
-
-  def mkPipes(
-      status: IdStatus,
-      vectorType: ColumnType.Vector,
-      state: InterpretationState)
-      : List[Pipe] = {
-    val unwindKey = state.uniqueKey concat "_unwind"
-    val indexKey = state.uniqueKey concat "_unwind_index"
-
-    List(
-      ensureArray(vectorType, unwindKey, missing(state.uniqueKey)),
-      Pipeline.$unwind(unwindKey, indexKey),
-      Pipeline.$project(Map(
-        "_id" -> O.int(0),
-        state.uniqueKey -> mkValue(status, vectorType, unwindKey, indexKey, missing(state.uniqueKey)))),
-      Pipeline.Presented)
-  }
-
-
-  def apply[F[_]: MonadInState](status: IdStatus, vectorType: ColumnType.Vector): F[List[Pipe]] =
-    for {
-      state <- MonadState[F, InterpretationState].get
-      res = mkPipes(status, vectorType, state)
-      _ <- focus[F]
-    } yield res map mapProjection(state.mapper)
-}
- */

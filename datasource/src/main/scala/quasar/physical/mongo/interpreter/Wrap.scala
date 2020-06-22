@@ -19,7 +19,7 @@ package quasar.physical.mongo.interpreter
 import slamdata.Predef._
 
 import quasar.ScalarStage
-import quasar.contrib.iota._
+import quasar.contrib.iotac._
 import quasar.physical.mongo.Interpreter
 import quasar.physical.mongo.expression._
 
@@ -41,7 +41,8 @@ object Wrap {
                 o.eqx(List(o.projection(Projection(List())), missing[Expr, U](state.uniqueKey))),
                 missing[Expr, U](state.uniqueKey),
                 o.obj(Map(name.name -> o.projection(Projection(List()))))),
-            "_id" -> o.int(0))))
+            "_id" -> o.int(0))),
+            Pipeline.Presented)
           _ <- focus[F]
         } yield res.map(_.map(Compiler.mapProjection[Expr, U, U](state.mapper.projection)))
       }

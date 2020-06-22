@@ -16,7 +16,7 @@
 
 package quasar.physical.mongo.expression
 
-import quasar.contrib.iota._
+import quasar.contrib.iotac._
 
 import cats.data.Const
 import higherkindness.droste._

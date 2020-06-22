@@ -32,6 +32,11 @@ final case class Projection(steps: List[Projection.Step]) {
     case List() => "$$ROOT"
     case hd :: tail => tail.foldLeft(hd.keyPart){(acc, x) => s"$acc.${x.keyPart}"}
   }
+
+  def toCPath: CPath = CPath(steps map {
+    case Projection.Step.Field(s) => CPathField(s)
+    case Projection.Step.Index(i) => CPathIndex(i)
+  })
 }
 
 object Projection {
@@ -81,12 +86,14 @@ object Projection {
       }
     }
 
-  def fromCPath(cpath: CPath): Option[Projection] =
-    cpath.nodes.foldMapM {
+  def fromCPath(cpath: CPath): Option[Projection] = {
+    val steps = cpath.nodes.foldMapM {
       case CPathField(str) => safeField(str).map(List(_))
       case CPathIndex(ix) => Some(List(Index(ix)))
       case _ => None
-    } map (Projection(_))
+    }
+    steps.map(Projection(_))
+  }
 
   trait Grouped extends Product with Serializable
 
@@ -103,10 +110,11 @@ object Projection {
           }
         }
       }
-      accum._1 match {
+      val reversed = accum._1 match {
         case List() => accum._2.reverse
         case x => (FieldGroup(x.reverse) :: accum._2).reverse
       }
+      reversed.reverse
     }
   }
 
