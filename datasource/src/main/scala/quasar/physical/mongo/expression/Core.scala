@@ -16,7 +16,7 @@
 
 package quasar.physical.mongo.expression
 
-import slamdata.Predef.{Eq => _, _}
+import slamdata.{Predef => s}, s.{Int => _, String => _, Eq => _, _}
 
 import quasar.{RenderTree, NonTerminal, Terminal}
 
@@ -30,10 +30,10 @@ sealed trait Core[A] extends Product with Serializable
 
 object Core {
   final case class Array[A](value: List[A]) extends Core[A]
-  final case class Object[A](value: Map[String, A]) extends Core[A]
+  final case class Object[A](value: Map[s.String, A]) extends Core[A]
   final case class Bool[A](value: Boolean) extends Core[A]
-  final case class SInt[A](value: Int) extends Core[A]
-  final case class SString[A](value: String) extends Core[A]
+  final case class Int[A](value: s.Int) extends Core[A]
+  final case class String[A](value: s.String) extends Core[A]
   final case class Null[A]() extends Core[A]
 
 
@@ -42,8 +42,8 @@ object Core {
       case Array(v) => v.traverse(f).map(Array(_))
       case Object(v) => v.toList.traverse(_.traverse(f)).map(x => Object(x.toMap))
       case Bool(v) => (Bool(v): Core[B]).pure[G]
-      case SInt(v) => (SInt(v): Core[B]).pure[G]
-      case SString(v) => (SString(v): Core[B]).pure[G]
+      case Int(v) => (Int(v): Core[B]).pure[G]
+      case String(v) => (String(v): Core[B]).pure[G]
       case Null() => (Null(): Core[B]).pure[G]
     }
   }
@@ -54,13 +54,13 @@ object Core {
     val _array =
       Prism.partial[Core[A], List[A]]{case Array(v) => v}(Array(_))
     val _obj =
-      Prism.partial[Core[A], Map[String, A]]{case Object(v) => v}(Object(_))
+      Prism.partial[Core[A], Map[s.String, A]]{case Object(v) => v}(Object(_))
     val _bool =
       Prism.partial[Core[A], Boolean]{case Bool(v) => v}(Bool(_))
     val _int =
-      Prism.partial[Core[A], Int]{case SInt(v) => v}(SInt(_))
+      Prism.partial[Core[A], s.Int]{case Int(v) => v}(Int(_))
     val _str =
-      Prism.partial[Core[A], String]{case SString(v) => v}(SString(_))
+      Prism.partial[Core[A], s.String]{case String(v) => v}(String(_))
     val _nil =
       Prism.partial[Core[A], Unit]{case Null() => ()}(x => Null())
 
@@ -79,8 +79,8 @@ object Core {
         case (k, v) => NonTerminal(List(), Some(k), List(fa.render(v)))
       })
       case Bool(a) => Terminal(List("Boolean"), Some(a.toString))
-      case SInt(a) => Terminal(List("Int"), Some(a.toString))
-      case SString(a) => Terminal(List("String"), Some(a))
+      case Int(a) => Terminal(List("s.Int"), Some(a.toString))
+      case String(a) => Terminal(List("s.String"), Some(a))
       case Null() => Terminal(List("Null"), None)
     }
   }

@@ -40,7 +40,7 @@ object Compiler {
     scheme.cata[CoreOp, U, Version](Algebra { (x: CoreOp[Version]) =>
       val order = Order[Version]
       import order._
-      CopK.RemoveL[Op, CoreOpL].apply(x) match{
+      CopK.RemoveL[Op, CoreOpL].apply(x) match {
         case Left(a) =>
           Version.zero
         case Right(x) =>
@@ -258,9 +258,9 @@ object Compiler {
         case Right(a) => a match {
           case Core.Null() =>
             new BsonNull()
-          case Core.SInt(i) =>
+          case Core.Int(i) =>
             new BsonInt32(i)
-          case Core.SString(s) =>
+          case Core.String(s) =>
             new BsonString(s)
           case Core.Bool(b) =>
             new BsonBoolean(b)
