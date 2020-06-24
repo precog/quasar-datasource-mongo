@@ -79,8 +79,8 @@ object Core {
         case (k, v) => NonTerminal(List(), Some(k), List(fa.render(v)))
       })
       case Bool(a) => Terminal(List("Boolean"), Some(a.toString))
-      case Int(a) => Terminal(List("s.Int"), Some(a.toString))
-      case String(a) => Terminal(List("s.String"), Some(a))
+      case Int(a) => Terminal(List("Int"), Some(a.toString))
+      case String(a) => Terminal(List("String"), Some(a))
       case Null() => Terminal(List("Null"), None)
     }
   }

@@ -57,7 +57,6 @@ object Projection {
         case (Field(a), Field(b)) => Order[String].compare(a, b)
         case (Index(_), Field(_)) => 1
         case (Index(a), Index(b)) => Order[Int].compare(a, b)
-        case (_, _) => -1
       }
     }
 
