@@ -50,13 +50,16 @@ lazy val root = project
   .aggregate(core)
 
 val mongoVersion = "2.7.0"
-val catsEffectVersion = "2.0.0"
 val shimsVersion = "2.0.0"
 val slf4jVersion = "1.7.25"
 val specsVersion = "4.7.1"
 val refinedVersion = "0.9.9"
 val jsrVersion = "3.0.2"
 val jschVersion = "0.1.55"
+val catsEffectVersion   = "2.1.0"
+val iotaVersion = "0.3.10"
+val drosteVersion = "0.8.0"
+val catsMTLVersion = "0.7.0"
 
 lazy val core = project
   .in(file("datasource"))
@@ -70,10 +73,12 @@ lazy val core = project
     quasarPluginDependencies ++= Seq(
       "com.codecommit"             %% "shims"                      % shimsVersion,
       "eu.timepit"                 %% "refined-scalacheck"         % refinedVersion,
+      "io.higherkindness"          %% "droste-core"                % drosteVersion,
+      "io.frees"                   %% "iota-core"                  % iotaVersion,
       "org.typelevel"              %% "cats-effect"                % catsEffectVersion,
+      "org.typelevel"              %% "cats-mtl-core"              % catsMTLVersion,
       "org.mongodb.scala"          %% "mongo-scala-driver"         % mongoVersion,
       "com.jcraft"                 % "jsch"                        % jschVersion,
-
       "com.precog"                 %% "quasar-foundation"          % managedVersions.value("precog-quasar") % Test classifier "tests",
       "com.precog"                 %% "quasar-frontend"            % managedVersions.value("precog-quasar") % Test classifier "tests",
       "org.slf4j"                  %  "slf4j-log4j12"              % slf4jVersion % Test,
@@ -85,4 +90,5 @@ lazy val core = project
       // warnings w/o this dependency
       "com.google.code.findbugs"   %  "jsr305"                      % jsrVersion % Provided
     ))
+  .evictToLocal("QUASAR_PATH", "foundation", true)
   .enablePlugins(QuasarPlugin)

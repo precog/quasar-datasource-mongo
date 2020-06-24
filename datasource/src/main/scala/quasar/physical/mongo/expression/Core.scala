@@ -16,78 +16,60 @@
 
 package quasar.physical.mongo.expression
 
-import slamdata.Predef.{String => SString, Int => SInt, _}
-
-import matryoshka.Delay
-
-import monocle.Prism
+import slamdata.{Predef => s}, s.{Int => _, String => _, Eq => _, _}
 
 import quasar.{RenderTree, NonTerminal, Terminal}
 
-import scalaz.{Traverse, Applicative, Scalaz}, Scalaz._
-import scalaz.syntax._
+import cats._
+import cats.implicits._
+import higherkindness.droste.Delay
+import higherkindness.droste.util.DefaultTraverse
+import monocle.Prism
 
-trait Core[A] extends Product with Serializable
+sealed trait Core[A] extends Product with Serializable
 
 object Core {
-  final case class Array[A](arr: List[A]) extends Core[A]
-  final case class Object[A](obj: Map[SString, A]) extends Core[A]
-  final case class Bool[A](bool: Boolean) extends Core[A]
-  final case class Int[A](int: SInt) extends Core[A]
-  final case class String[A](string: SString) extends Core[A]
+  final case class Array[A](value: List[A]) extends Core[A]
+  final case class Object[A](value: Map[s.String, A]) extends Core[A]
+  final case class Bool[A](value: Boolean) extends Core[A]
+  final case class Int[A](value: s.Int) extends Core[A]
+  final case class String[A](value: s.String) extends Core[A]
   final case class Null[A]() extends Core[A]
 
-  implicit def traverse: Traverse[Core] = new Traverse[Core] {
-    def traverseImpl[G[_]: Applicative, A, B](core: Core[A])(f: A => G[B])
-        : G[Core[B]] = core match {
 
-      case Null() => (Null(): Core[B]).point[G]
-      case String(s) => (String(s): Core[B]).point[G]
-      case Int(i) => (Int(i): Core[B]).point[G]
-      case Bool(b) => (Bool(b): Core[B]).point[G]
-      case Object(o) => o traverse f map (Object(_))
-      case Array(a) => a traverse f map (Array(_))
+  implicit def traverse: Traverse[Core] = new DefaultTraverse[Core] {
+    def traverse[G[_]: Applicative, A, B](fa: Core[A])(f: A => G[B]): G[Core[B]] = fa match {
+      case Array(v) => v.traverse(f).map(Array(_))
+      case Object(v) => v.toList.traverse(_.traverse(f)).map(x => Object(x.toMap))
+      case Bool(v) => (Bool(v): Core[B]).pure[G]
+      case Int(v) => (Int(v): Core[B]).pure[G]
+      case String(v) => (String(v): Core[B]).pure[G]
+      case Null() => (Null(): Core[B]).pure[G]
     }
   }
 
   trait Optics[A, O] {
-    val corePrism: Prism[O, Core[A]]
-    val _array: Prism[Core[A], List[A]] =
-      Prism.partial[Core[A], List[A]] {
-        case Array(a) => a
-      } { a => Array(a) }
+    val core: Prism[O, Core[A]]
 
-    val _obj: Prism[Core[A], Map[SString, A]] =
-      Prism.partial[Core[A], Map[SString, A]] {
-        case Object(a) => a
-      } { a => Object(a) }
+    val _array =
+      Prism.partial[Core[A], List[A]]{case Array(v) => v}(Array(_))
+    val _obj =
+      Prism.partial[Core[A], Map[s.String, A]]{case Object(v) => v}(Object(_))
+    val _bool =
+      Prism.partial[Core[A], Boolean]{case Bool(v) => v}(Bool(_))
+    val _int =
+      Prism.partial[Core[A], s.Int]{case Int(v) => v}(Int(_))
+    val _str =
+      Prism.partial[Core[A], s.String]{case String(v) => v}(String(_))
+    val _nil =
+      Prism.partial[Core[A], Unit]{case Null() => ()}(x => Null())
 
-    val _bool: Prism[Core[A], Boolean] =
-      Prism.partial[Core[A], Boolean] {
-        case Bool(a) => a
-      } { a => Bool(a) }
-
-    val _int: Prism[Core[A], SInt] =
-      Prism.partial[Core[A], SInt] {
-        case Int(a) => a
-      } { a => Int(a) }
-
-    val _string: Prism[Core[A], SString] =
-      Prism.partial[Core[A], SString] {
-        case String(a) => a
-      } { a => String(a) }
-
-    val _nil: Prism[Core[A], Unit] =
-      Prism.partial[Core[A], Unit] {
-        case Null() => ()
-      } { x => Null() }
-
-    val array: Prism[O, List[A]] = corePrism composePrism _array
-    val obj: Prism[O, Map[SString, A]] = corePrism composePrism _obj
-    val bool: Prism[O, Boolean] = corePrism composePrism _bool
-    val int: Prism[O, SInt] = corePrism composePrism _int
-    val string: Prism[O, SString] = corePrism composePrism _string
-    val nil: Prism[O, Unit] = corePrism composePrism _nil
+    val array = core composePrism _array
+    val obj = core composePrism _obj
+    val bool = core composePrism _bool
+    val int = core composePrism _int
+    val str = core composePrism _str
+    val nil = core composePrism _nil
   }
 
   implicit val delayRenderTreeCore: Delay[RenderTree, Core] = new Delay[RenderTree, Core] {

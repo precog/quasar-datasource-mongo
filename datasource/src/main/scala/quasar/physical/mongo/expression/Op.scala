@@ -18,49 +18,100 @@ package quasar.physical.mongo.expression
 
 import slamdata.Predef._
 
-import matryoshka.Delay
-
-import monocle.Prism
-
 import quasar.{RenderTree, NonTerminal}
 import quasar.physical.mongo.Version
 
-import scalaz.{Traverse, Applicative, Scalaz}, Scalaz._
-import scalaz.syntax._
+import cats._
+import cats.implicits._
+import higherkindness.droste.Delay
+import higherkindness.droste.util.DefaultTraverse
+import monocle.Prism
 
-trait Op[A] extends Product with Serializable
+sealed trait Op[A] extends Product with Serializable {
+  def minVersion: Version = Version.zero
+}
 
 object Op {
   final case class Let[A](vars: Map[String, A], in: A) extends Op[A]
-  final case class Type[A](exp: A) extends Op[A]
+  final case class Not[A](exp: A) extends Op[A]
   final case class Eq[A](exps: List[A]) extends Op[A]
   final case class Or[A](exps: List[A]) extends Op[A]
   final case class Exists[A](exp: A) extends Op[A]
   final case class Cond[A](check: A, ok: A, fail: A) extends Op[A]
   final case class Ne[A](exp: A) extends Op[A]
-  final case class ObjectToArray[A](exp: A) extends Op[A]
-  final case class ArrayElemAt[A](exp: A, ix: Int) extends Op[A]
-  final case class Reduce[A](input: A, initialValue: A, expression: A) extends Op[A]
-  final case class ConcatArrays[A](exps: List[A]) extends Op[A]
-  final case class Not[A](exp: A) extends Op[A]
+  final case class Type[A](exp: A) extends Op[A] {
+    override def minVersion = Version.$type
+  }
+  final case class ObjectToArray[A](exp: A) extends Op[A] {
+    override def minVersion = Version.$objectToArray
+  }
+  final case class ArrayElemAt[A](exp: A, ix: Int) extends Op[A] {
+    override def minVersion = Version.$arrayElemAt
+  }
+  final case class Reduce[A](input: A, initialValue: A, expression: A) extends Op[A] {
+    override def minVersion = Version.$reduce
+  }
+  final case class ConcatArrays[A](exps: List[A]) extends Op[A] {
+    override def minVersion = Version.$concatArrays
+  }
 
-  implicit def traverse: Traverse[Op] = new Traverse[Op] {
-    def traverseImpl[G[_]: Applicative, A, B](op: Op[A])(f: A => G[B])
-        : G[Op[B]] = op match {
-
-      case ArrayElemAt(x, i) => f(x) map (ArrayElemAt(_, i))
-      case ObjectToArray(x) => f(x) map (ObjectToArray(_))
-      case Ne(x) => f(x) map (Ne(_))
-      case Exists(x) => f(x) map (Exists(_))
-      case Cond(a, b, c) => (f(a) |@| f(b) |@| f(c))(Cond(_, _, _))
+  implicit def traverse: Traverse[Op] = new DefaultTraverse[Op] {
+    def traverse[G[_]: Applicative, A, B](fa: Op[A])(f: A => G[B]): G[Op[B]] = fa match {
+      case ArrayElemAt(x, i) => f(x).map(ArrayElemAt(_, i))
+      case ObjectToArray(x) => f(x).map(ObjectToArray(_))
+      case Ne(x) => f(x).map(Ne(_))
+      case Exists(x) => f(x).map(Exists(_))
+      case Cond(a, b, c) => (f(a), f(b), f(c)).mapN(Cond(_, _, _))
       case Or(lst) => lst traverse f map (Or(_))
       case Eq(lst) => lst traverse f map (Eq(_))
       case Type(x) => f(x) map (Type(_))
-      case Let(vars, in) => ((vars traverse f) |@| f(in))(Let(_, _))
-      case Reduce(a, b, c) => (f(a) |@| f(b) |@| f(c))(Reduce(_, _, _))
+      case Let(vars, in) =>  (vars.toList.traverse(_.traverse(f)).map(_.toMap), f(in)).mapN(Let(_, _))
+      case Reduce(a, b, c) => (f(a), f(b), f(c)).mapN(Reduce(_, _, _))
       case ConcatArrays(lst) => lst traverse f map (ConcatArrays(_))
       case Not(a) => f(a) map (Not(_))
     }
+  }
+
+  trait Optics[A, O] {
+    val op: Prism[O, Op[A]]
+
+    val _let =
+      Prism.partial[Op[A], (Map[String, A], A)]{case Let(a, b) => (a, b)}{case (a, b) => Let(a, b)}
+    val _type =
+      Prism.partial[Op[A], A]{case Type(v) => v}(Type(_))
+    val _eq =
+      Prism.partial[Op[A], List[A]]{case Eq(v) => v}(Eq(_))
+    val _or =
+      Prism.partial[Op[A], List[A]]{case Or(v) => v}(Or(_))
+    val _exists =
+      Prism.partial[Op[A], A]{case Exists(v) => v}(Exists(_))
+    val _cond =
+      Prism.partial[Op[A], (A, A, A)]{case Cond(a, b, c) => (a, b, c)}{case (a, b, c) => Cond(a, b, c)}
+    val _ne =
+      Prism.partial[Op[A], A]{case Ne(v) => v}(Ne(_))
+    val _objectToArray =
+      Prism.partial[Op[A], A]{case ObjectToArray(v) => v}(ObjectToArray(_))
+    val _arrayElemAt =
+      Prism.partial[Op[A], (A, Int)]{case ArrayElemAt(a, b) => (a, b)}{case (a, b) => ArrayElemAt(a, b)}
+    val _reduce =
+      Prism.partial[Op[A], (A, A, A)]{case Reduce(a, b, c) => (a, b, c)}{case (a, b, c) => Reduce(a, b, c)}
+    val _concatArrays =
+      Prism.partial[Op[A], List[A]]{case ConcatArrays(v) => v}(ConcatArrays(_))
+    val _not =
+      Prism.partial[Op[A], A]{case Not(v) => v}(Not(_))
+
+    val let = op composePrism _let
+    val typ = op composePrism _type
+    val eqx = op composePrism _eq
+    val or = op composePrism _or
+    val exists = op composePrism _exists
+    val cond = op composePrism _cond
+    val nex = op composePrism _ne
+    val objectToArray = op composePrism _objectToArray
+    val arrayElemAt = op composePrism _arrayElemAt
+    val reduce = op composePrism _reduce
+    val concatArrays = op composePrism _concatArrays
+    val not = op composePrism _not
   }
 
   implicit val delayRenderTreeOp: Delay[RenderTree, Op] = new Delay[RenderTree, Op] {
@@ -90,84 +141,4 @@ object Op {
     }
   }
 
-  trait Optics[A, O] {
-    val opPrism: Prism[O, Op[A]]
-    val _let: Prism[Op[A], (Map[String, A], A)] =
-      Prism.partial[Op[A], (Map[String, A], A)] {
-        case Let(vars, in) => (vars, in)
-      } { case (vars, in) => Let(vars, in) }
-    val _type: Prism[Op[A], A] =
-      Prism.partial[Op[A], A] {
-        case Type(a) => a
-      } { a => Type(a) }
-    val _eq: Prism[Op[A], List[A]] =
-      Prism.partial[Op[A], List[A]] {
-        case Eq(a) => a
-      } { a => Eq(a) }
-    val _or: Prism[Op[A], List[A]] =
-      Prism.partial[Op[A], List[A]] {
-        case Or(a) => a
-      } { a => Or(a) }
-    val _exists: Prism[Op[A], A] =
-      Prism.partial[Op[A], A] {
-        case Exists(a) => a
-      } { a => Exists(a) }
-    val _cond: Prism[Op[A], (A, A, A)] =
-      Prism.partial[Op[A], (A, A, A)] {
-        case Cond(a, b, c) => (a, b, c)
-      } { case (a, b, c) => Cond(a, b, c) }
-    val _arrayElemAt: Prism[Op[A], (A, Int)] =
-      Prism.partial[Op[A], (A, Int)] {
-        case ArrayElemAt(a, i) => (a, i)
-      } { case (a, i) => ArrayElemAt(a, i) }
-    val _objectToArray: Prism[Op[A], A] =
-      Prism.partial[Op[A], A] {
-        case ObjectToArray(a) => a
-      } { a => ObjectToArray(a) }
-    val _ne: Prism[Op[A], A] =
-      Prism.partial[Op[A], A] {
-        case Ne(a) => a
-      } { a => Ne(a) }
-    val _reduce: Prism[Op[A], (A, A, A)] =
-      Prism.partial[Op[A], (A, A, A)] {
-        case Reduce(a, b, c) => (a, b, c)
-      } { case (a, b, c) => Reduce(a, b, c) }
-    val _concatArrays: Prism[Op[A], List[A]] =
-      Prism.partial[Op[A], List[A]] {
-        case ConcatArrays(a) => a
-      } { a => ConcatArrays(a) }
-    val _not: Prism[Op[A], A] =
-      Prism.partial[Op[A], A] {
-        case Not(a) => a
-      } { a => Not(a) }
-
-
-    val $let: Prism[O, (Map[String, A], A)] = opPrism composePrism _let
-    val $type: Prism[O, A] = opPrism composePrism _type
-    val $eq: Prism[O, List[A]] = opPrism composePrism _eq
-    val $or: Prism[O, List[A]] = opPrism composePrism _or
-    val $exists: Prism[O, A] = opPrism composePrism _exists
-    val $cond: Prism[O, (A, A, A)] = opPrism composePrism _cond
-    val $arrayElemAt: Prism[O, (A, Int)] = opPrism composePrism _arrayElemAt
-    val $objectToArray: Prism[O, A] = opPrism composePrism _objectToArray
-    val $ne: Prism[O, A] = opPrism composePrism _ne
-    val $reduce: Prism[O, (A, A, A)] = opPrism composePrism _reduce
-    val $concatArrays: Prism[O, List[A]] = opPrism composePrism _concatArrays
-    val $not: Prism[O, A] = opPrism composePrism _not
-  }
-
-  def opMinVersion(op: Op[_]): Version = op match {
-    case Let(_, _) => Version.zero
-    case Type(_) => Version.$type
-    case Eq(_) => Version.zero
-    case Or(_) => Version.zero
-    case Exists(_) => Version.zero
-    case Cond(_, _, _) => Version.zero
-    case ArrayElemAt(_, _) => Version.$arrayElemAt
-    case ObjectToArray(_) => Version.$objectToArray
-    case Ne(_) => Version.zero
-    case Reduce(_, _, _) => Version.$reduce
-    case ConcatArrays(_) => Version.$concatArrays
-    case Not(_) => Version.zero
-  }
 }

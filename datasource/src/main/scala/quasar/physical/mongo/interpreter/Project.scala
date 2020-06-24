@@ -18,51 +18,53 @@ package quasar.physical.mongo.interpreter
 
 import slamdata.Predef._
 
-import quasar.physical.mongo.expression._
-import quasar.physical.mongo.expression.Projection.Step
+import quasar.ScalarStage
+import quasar.physical.mongo.Interpreter
+import quasar.physical.mongo.expression._, Projection._, Step._
 
-import scalaz.{MonadState, Scalaz}, Scalaz._
+import cats.{Monad, MonoidK}
+import cats.implicits._
+import cats.mtl.MonadState
+import higherkindness.droste.Basis
 
 object Project {
-  def stepType(step: Step): Expr = step match {
-    case Step.Field(_) => O.string("object")
-    case Step.Index(_) => O.string("array")
-  }
+  def apply[F[_]: Monad: MonadInState: MonoidK, U: Basis[Expr, ?]]: Interpreter[F, U, ScalarStage.Project] =
+    new Interpreter[F, U, ScalarStage.Project] {
+      def apply(s: ScalarStage.Project): F[List[Pipeline[U]]] =
+        optToAlternative[F].apply(Projection.fromCPath(s.path)) flatMap { (prj: Projection) =>
+          MonadState[F, InterpretationState].get map { state =>
+            val tmpKey0 = state.uniqueKey.concat("_project0")
+            val tmpKey1 = state.uniqueKey.concat("_project1")
+            val fld = state.mapper.projection(prj)
+            val initialProjection = Pipeline.Project(Map(tmpKey0 -> o.projection(Projection(List()))))
+            initialProjection :: build(state.uniqueKey, fld, Field(tmpKey0), Field(tmpKey1), Field(state.uniqueKey), List())
+          } flatMap { a => focus[F] as a }
+        }
 
-  // We need to be sure that type of projectee is coherent with projector
-  // E.g. if we project [1] the type of Projection(List()) must be "array"
-  @scala.annotation.tailrec
-  def build(
-      key: String,
-      prj: Projection,
-      input: Field,
-      output: Field,
-      res: Field,
-      acc: List[Pipe])
-      : List[Pipe] = prj.steps match {
+      def stepType: Step => U = {
+        case Step.Field(_) => o.str("object")
+        case Step.Index(_) => o.str("array")
+      }
 
-    case List() =>
-      acc ++ List(
-        Pipeline.$project(Map(res.keyPart -> O.steps(List(input)))),
-        Pipeline.Presented)
-    case hd :: tail =>
-      val projectionObject =
-        O.$cond(
-          O.$or(List(
-            O.$not(O.$eq(List(O.$type(O.steps(List(input))), stepType(hd)))),
-            O.$eq(List(O.$type(O.steps(List(input, hd))), O.string("missing"))))),
-          missing(key),
-          O.steps(List(input, hd)))
-      val project: Pipe = Pipeline.$project(Map(output.keyPart -> projectionObject))
-      build(key, Projection(tail), output, input, res, acc ++ List(project, Pipeline.Presented))
-  }
-
-  def apply[F[_]: MonadInState](prj: Projection): F[List[Pipe]] =
-    MonadState[F, InterpretationState].get map { state =>
-      val tmpKey0 = state.uniqueKey concat "_project0"
-      val tmpKey1 = state.uniqueKey concat "_project1"
-      val fld = Mapper.projection(state.mapper)(prj)
-      val initialProjection = Pipeline.$project(Map(tmpKey0 -> O.steps(List())))
-      initialProjection :: build(state.uniqueKey, fld, Field(tmpKey0), Field(tmpKey1), Field(state.uniqueKey), List())
-    } flatMap { a => focus[F] as a }
+      @scala.annotation.tailrec
+      def build(key: String, prj: Projection, input: Field, output: Field, res: Field, acc: List[Pipeline[U]])
+          : List[Pipeline[U]] = {
+        prj.steps match {
+          case List() =>
+            acc ++ List(
+              Pipeline.Project(Map(res.keyPart -> o.projection(Projection(List(input))))),
+              Pipeline.Presented)
+          case hd :: tail =>
+            val projectionObject =
+              o.cond(
+                o.or(List(
+                  o.not(o.eqx(List(o.typ(o.projection(Projection(List(input)))), stepType(hd)))),
+                  o.eqx(List(o.typ(o.projection(Projection(List(input, hd)))), o.str("missing"))))),
+                missing[Expr, U](key),
+                o.projection(Projection(List(input, hd))))
+            val project: Pipeline[U] = Pipeline.Project(Map(output.keyPart -> projectionObject))
+            build(key, Projection(tail), output, input, res, acc ++ List(project, Pipeline.Presented))
+        }
+      }
+    }
 }
