@@ -64,6 +64,7 @@ object Projection {
       case Field(s) => Terminal(List("Field"), Some(s))
       case Index(i) => Terminal(List("Index"), Some(i.toString))
     }
+
   }
   import Step._
   implicit val order: Order[Projection] = Order.by(_.steps)
