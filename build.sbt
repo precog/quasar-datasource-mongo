@@ -53,7 +53,6 @@ val mongoVersion = "2.7.0"
 val shimsVersion = "2.0.0"
 val slf4jVersion = "1.7.25"
 val specsVersion = "4.7.1"
-val refinedVersion = "0.9.9"
 val jsrVersion = "3.0.2"
 val jschVersion = "0.1.55"
 val catsEffectVersion   = "2.1.0"
@@ -72,7 +71,6 @@ lazy val core = project
     quasarPluginDatasourceFqcn := Some("quasar.physical.mongo.MongoDataSourceModule$"),
     quasarPluginDependencies ++= Seq(
       "com.codecommit"             %% "shims"                      % shimsVersion,
-      "eu.timepit"                 %% "refined-scalacheck"         % refinedVersion,
       "io.higherkindness"          %% "droste-core"                % drosteVersion,
       "io.frees"                   %% "iota-core"                  % iotaVersion,
       "org.typelevel"              %% "cats-effect"                % catsEffectVersion,

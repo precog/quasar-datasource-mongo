@@ -22,8 +22,6 @@ import cats.data.NonEmptyList
 import cats.effect._
 import cats.implicits._
 
-import eu.timepit.refined.auto._
-
 import fs2.Stream
 
 import quasar.api.datasource.DatasourceType
