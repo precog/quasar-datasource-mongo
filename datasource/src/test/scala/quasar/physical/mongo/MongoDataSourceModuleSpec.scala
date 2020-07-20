@@ -19,7 +19,7 @@ package quasar.physical.mongo
 import slamdata.Predef._
 
 import quasar.{EffectfulQSpec, RateLimiter, NoopRateLimitUpdater}
-import quasar.api.datasource.DatasourceError
+import quasar.api.datasource.{DatasourceError, DatasourceType}
 import quasar.connector.ByteStore
 import quasar.physical.mongo.testImplicits._
 
@@ -53,5 +53,22 @@ class MongoDataSourceModuleSpec extends EffectfulQSpec[IO] {
           case Left(DatasourceError.ConnectionFailed(MongoDataSource.kind, cfg, _)) =>
             cfg must_=== config
         })))
+  }
+
+  "migrate config as itself" in {
+    val config = MongoConfig.basic("mongodb://unreachable/?serverSelectionTimeoutMS=1000").withBatchSize(1).asJson
+
+    MongoDataSourceModule.migrateConfig[IO](config).unsafeRunSync() must beRight(config)
+  }
+
+  "fail to migrate malformed config" in {
+    val malformed = Json.obj("foo" -> Json.jString("bar"))
+
+    val error = DatasourceError.MalformedConfiguration(
+      DatasourceType("mongo", 1L),
+      malformed,
+      "Configuration to migrate is malformed.")
+
+    MongoDataSourceModule.migrateConfig[IO](malformed).unsafeRunSync() must beLeft(error)
   }
 }

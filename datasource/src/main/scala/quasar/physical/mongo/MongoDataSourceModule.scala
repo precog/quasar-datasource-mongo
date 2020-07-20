@@ -28,9 +28,10 @@ import quasar.physical.mongo.Mongo.{MongoAccessDenied, MongoConnectionFailed}
 import scala.concurrent.ExecutionContext
 
 import argonaut._
+import argonaut.Argonaut._
 
 import cats.ApplicativeError
-import cats.effect.{Blocker, ConcurrentEffect, ContextShift, Resource, Timer}
+import cats.effect.{Blocker, ConcurrentEffect, ContextShift, Resource, Sync, Timer}
 import cats.kernel.Hash
 import cats.syntax.applicative._
 import cats.syntax.either._
@@ -82,6 +83,18 @@ object MongoDataSourceModule extends LightweightDatasourceModule {
   def kind: DatasourceType = MongoDataSource.kind
 
   def sanitizeConfig(config: Json): Json = MongoConfig.sanitize(config)
+
+  def migrateConfig[F[_]: Sync](config: Json): F[Either[ConfigurationError[Json], Json]] =
+    Sync[F] delay {
+      config.as[MongoConfig].result match {
+        case Left(_) =>
+          Left(DatasourceError.MalformedConfiguration[Json](
+            kind,
+            sanitizeConfig(config),
+            "Configuration to migrate is malformed."))
+        case Right(cfg) => Right(cfg.asJson)
+      }
+    }
 
   def reconfigure(original: Json, patch: Json): Either[ConfigurationError[Json], (Reconfiguration, Json)] =
     Right((Reconfiguration.Reset, patch))
