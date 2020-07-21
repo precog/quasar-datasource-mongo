@@ -30,7 +30,7 @@ import scala.concurrent.ExecutionContext
 import argonaut._
 
 import cats.ApplicativeError
-import cats.effect.{Blocker, ConcurrentEffect, ContextShift, Resource, Timer}
+import cats.effect.{Blocker, ConcurrentEffect, ContextShift, Resource, Sync, Timer}
 import cats.kernel.Hash
 import cats.syntax.applicative._
 import cats.syntax.either._
@@ -82,6 +82,9 @@ object MongoDataSourceModule extends LightweightDatasourceModule {
   def kind: DatasourceType = MongoDataSource.kind
 
   def sanitizeConfig(config: Json): Json = MongoConfig.sanitize(config)
+
+   def migrateConfig[F[_]: Sync](config: Json): F[Either[ConfigurationError[Json], Json]] =
+     Sync[F].pure(Right(config))
 
   def reconfigure(original: Json, patch: Json): Either[ConfigurationError[Json], (Reconfiguration, Json)] =
     Right((Reconfiguration.Reset, patch))
