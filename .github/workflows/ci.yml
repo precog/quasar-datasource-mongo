@@ -84,31 +84,8 @@ jobs:
         if: env.ENCRYPTION_PASSWORD != null
         run: $SBT ++${{ matrix.scala }} transferCommonResources exportSecretsForActions
 
-      - name: Start a plain mongo on port 27018
-        run: 'docker run -d -p 127.0.0.1:27018:27017 --name mongodb -e MONGODB_ROOT_PASSWORD=secret bitnami/mongodb:4.1.4'
-
-      - name: Start an SSL-enabled mongo on port 27019
-        run: |
-          docker create -p 127.0.0.1:27019:27017 --name mongodb-ssl -e MONGODB_EXTRA_FLAGS="--sslMode requireSSL --sslPEMKeyFile /cert.pem" bitnami/mongodb:4.1.4
-          docker cp ./certs/quasar-mongo-travis.pem mongodb-ssl:/cert.pem
-          docker start mongodb-ssl
-
-      - name: Start an SSL-enabled mongo with client-required key on port 27020
-        run: |
-          docker create -p 127.0.0.1:27020:27017 --name mongodb-ssl-client -e MONGODB_EXTRA_FLAGS="--sslMode requireSSL --sslPEMKeyFile /cert.pem --sslCAFile /ca.pem" bitnami/mongodb:4.1.4
-          docker cp ./certs/quasar-mongo-travis.pem mongodb-ssl-client:/cert.pem
-          docker cp ./certs/client.crt mongodb-ssl-client:/ca.pem
-          docker start mongodb-ssl-client
-
-      - name: Create an SSH tunnel to the mongo container
+      - name: Start mongo instances and sshd server
         run: docker-compose up -d
-
-      - name: Install sshpass
-        run: |
-          sudo apt-get update
-          sudo apt-get install sshpass
-          ssh-keygen -t rsa -N "passphrase" -f key_for_docker
-          sshpass -p root ssh-copy-id -i key_for_docker -o StrictHostKeyChecking=no root@localhost -p 22222
 
       - name: Check that workflows are up to date
         run: $SBT ++${{ matrix.scala }} githubWorkflowCheck

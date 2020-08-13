@@ -14,35 +14,8 @@ scmInfo in ThisBuild := Some(ScmInfo(
 
 ThisBuild / githubWorkflowBuildPreamble ++= Seq(
   WorkflowStep.Run(
-    List("docker run -d -p 127.0.0.1:27018:27017 --name mongodb -e MONGODB_ROOT_PASSWORD=secret bitnami/mongodb:4.1.4"),
-    name = Some("Start a plain mongo on port 27018")),
-
-  WorkflowStep.Run(
-    List(
-      """docker create -p 127.0.0.1:27019:27017 --name mongodb-ssl -e MONGODB_EXTRA_FLAGS="--sslMode requireSSL --sslPEMKeyFile /cert.pem" bitnami/mongodb:4.1.4""",
-      "docker cp ./certs/quasar-mongo-travis.pem mongodb-ssl:/cert.pem",
-      "docker start mongodb-ssl"),
-    name = Some("Start an SSL-enabled mongo on port 27019")),
-
-  WorkflowStep.Run(
-    List(
-      """docker create -p 127.0.0.1:27020:27017 --name mongodb-ssl-client -e MONGODB_EXTRA_FLAGS="--sslMode requireSSL --sslPEMKeyFile /cert.pem --sslCAFile /ca.pem" bitnami/mongodb:4.1.4""",
-      "docker cp ./certs/quasar-mongo-travis.pem mongodb-ssl-client:/cert.pem",
-      "docker cp ./certs/client.crt mongodb-ssl-client:/ca.pem",
-      "docker start mongodb-ssl-client"),
-    name = Some("Start an SSL-enabled mongo with client-required key on port 27020")),
-
-  WorkflowStep.Run(
     List("docker-compose up -d"),
-    name = Some("Create an SSH tunnel to the mongo container")),
-
-  WorkflowStep.Run(
-    List(
-      "sudo apt-get update",
-      "sudo apt-get install sshpass",
-      """ssh-keygen -t rsa -N "passphrase" -f key_for_docker""",
-      "sshpass -p root ssh-copy-id -i key_for_docker -o StrictHostKeyChecking=no root@localhost -p 22222"),
-    name = Some("Install sshpass")))
+    name = Some("Start mongo instances and sshd server")))
 
 lazy val root = project
   .in(file("."))
