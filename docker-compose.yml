@@ -1,4 +1,4 @@
-version: '3.5'
+version: '3.8'
 
 services:
   sshd:
@@ -8,6 +8,7 @@ services:
     secrets:
       - source: authorized_keys
         target: /root/.ssh/authorized_keys
+        mode: 0400
 
   mongo:
     image: bitnami/mongodb:4.1.4
