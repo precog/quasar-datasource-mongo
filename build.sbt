@@ -14,7 +14,9 @@ scmInfo in ThisBuild := Some(ScmInfo(
 
 ThisBuild / githubWorkflowBuildPreamble ++= Seq(
   WorkflowStep.Run(
-    List("docker-compose up -d"),
+    List(
+      "chmod 0600 key_for_docker.pub",
+      "docker-compose up -d"),
     name = Some("Start mongo instances and sshd server")),
     WorkflowStep.Tmate
   )
