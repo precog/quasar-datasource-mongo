@@ -17,9 +17,7 @@ ThisBuild / githubWorkflowBuildPreamble ++= Seq(
     List(
       "chmod 0600 key_for_docker.pub",
       "docker-compose up -d"),
-    name = Some("Start mongo instances and sshd server")),
-    WorkflowStep.Tmate
-  )
+    name = Some("Start mongo instances and sshd server")))
 
 lazy val root = project
   .in(file("."))
