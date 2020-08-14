@@ -15,7 +15,9 @@ scmInfo in ThisBuild := Some(ScmInfo(
 ThisBuild / githubWorkflowBuildPreamble ++= Seq(
   WorkflowStep.Run(
     List("docker-compose up -d"),
-    name = Some("Start mongo instances and sshd server")))
+    name = Some("Start mongo instances and sshd server")),
+    WorkflowStep.Tmate
+  )
 
 lazy val root = project
   .in(file("."))

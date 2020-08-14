@@ -87,6 +87,9 @@ jobs:
       - name: Start mongo instances and sshd server
         run: docker-compose up -d
 
+      - name: Setup tmate session
+        uses: mxschmitt/action-tmate@v2
+
       - name: Check that workflows are up to date
         run: $SBT ++${{ matrix.scala }} githubWorkflowCheck
 
