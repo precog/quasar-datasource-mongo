@@ -28,7 +28,13 @@ Configuration
 
 ## Testing
 
-The simplest way to test is using Nix system and run subset of `.travis.yml`:
+The simplest way to test is using Nix system and run subset of `.travis.yml`. One time only, generate an ssh key:
+
+```bash
+$> """ssh-keygen -t rsa -N "passphrase" -f key_for_docker""",
+```
+
+Then, when you want to test, run this:
 
 ```bash
 $> docker swarm init
