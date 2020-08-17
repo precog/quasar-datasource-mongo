@@ -89,9 +89,6 @@ jobs:
           docker swarm init
           docker stack deploy -c docker-compose.yml teststack
 
-      - name: Setup tmate session
-        uses: mxschmitt/action-tmate@v2
-
       - name: Check that workflows are up to date
         run: $SBT ++${{ matrix.scala }} githubWorkflowCheck
 

@@ -17,9 +17,7 @@ ThisBuild / githubWorkflowBuildPreamble ++= Seq(
     List(
       "docker swarm init",
       "docker stack deploy -c docker-compose.yml teststack"),
-    name = Some("Start mongo instances and sshd server")),
-  WorkflowStep.Tmate
-)
+    name = Some("Start mongo instances and sshd server")))
 
 lazy val root = project
   .in(file("."))
