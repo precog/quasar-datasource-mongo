@@ -12,8 +12,6 @@ services:
 
   mongo:
     image: bitnami/mongodb:4.1.4
-    expose:
-      - "27017"
     environment:
       MONGODB_ROOT_PASSWORD: secret
     networks:
