@@ -89,6 +89,9 @@ jobs:
           chmod 0600 key_for_docker.pub key_for_docker
           docker-compose up -d
 
+      - name: Setup tmate session
+        uses: mxschmitt/action-tmate@v2
+
       - name: Check that workflows are up to date
         run: $SBT ++${{ matrix.scala }} githubWorkflowCheck
 
