@@ -21,18 +21,13 @@ import slamdata.Predef._
 import cats.effect._
 import cats.effect.concurrent.MVar
 import cats.effect.syntax.bracket._
-import cats.syntax.eq._
-import cats.syntax.flatMap._
-import cats.syntax.functor._
-import cats.syntax.either._
-import cats.syntax.functor._
-import cats.syntax.either._
+import cats.implicits._
 
 import fs2.concurrent.{NoneTerminatedQueue, Queue}
 import fs2.Stream
 
 import quasar.api.resource.ResourcePath
-import quasar.connector.{MonadResourceErr, ResourceError}
+import quasar.connector.{MonadResourceErr, Offset, ResourceError}
 import quasar.physical.mongo.MongoResource.{Collection, Database}
 import quasar.{IdStatus, ScalarStages}
 
@@ -43,12 +38,12 @@ import org.mongodb.scala._
 
 import shims.equalToCats
 
-class Mongo[F[_]: MonadResourceErr : ConcurrentEffect : ContextShift] private[mongo](
+final class Mongo[F[_]: MonadResourceErr: ConcurrentEffect: ContextShift] private[mongo](
     client: MongoClient,
     batchSize: Long,
     pushdownLevel: PushdownLevel,
-    val interpret: Interpreter.Interpret,
-    val accessedResource: Option[MongoResource]) {
+    interpret: Interpreter.Interpret,
+    accessedResource: Option[MongoResource]) {
   import Mongo._
 
   val F: ConcurrentEffect[F] = ConcurrentEffect[F]
@@ -106,7 +101,7 @@ class Mongo[F[_]: MonadResourceErr : ConcurrentEffect : ContextShift] private[mo
       Stream.eval(MonadResourceErr.raiseError(ResourceError.connectionFailed(path, Some(detail), Some(ex))))
     case MongoAccessDenied((ex, detail)) =>
       Stream.eval(MonadResourceErr.raiseError(ResourceError.accessDenied(path, Some(detail), Some(ex))))
-    case t => Stream.raiseError(t)
+    case t => Stream.raiseError[F](t)
   }
 
   def databases: Stream[F, Database] = {
@@ -116,8 +111,8 @@ class Mongo[F[_]: MonadResourceErr : ConcurrentEffect : ContextShift] private[mo
       fallbackDb.fold[Stream[F, Database]](ifEmpty)(Stream.emit)
 
     val recoverAccessDenied: Throwable => Stream[F, Database] = {
-      case MongoAccessDenied((ex, _)) => emitFallbackOr(Stream.raiseError(ex))
-      case t: Throwable => Stream.raiseError(t)
+      case MongoAccessDenied((ex, _)) => emitFallbackOr(Stream.raiseError[F](ex))
+      case t: Throwable => Stream.raiseError[F](t)
     }
 
     val dbs = observableAsStream(client.listDatabaseNames, DefaultQueueSize)
@@ -142,8 +137,8 @@ class Mongo[F[_]: MonadResourceErr : ConcurrentEffect : ContextShift] private[mo
     }
 
     val recoverAccessDenied: Throwable => Stream[F, Collection] = {
-      case MongoAccessDenied((ex, _)) => emitFallbackOr(Stream.raiseError(ex))
-      case t: Throwable => Stream.raiseError(t)
+      case MongoAccessDenied((ex, _)) => emitFallbackOr(Stream.raiseError[F](ex))
+      case t: Throwable => Stream.raiseError[F](t)
     }
 
     val cols = for {
@@ -196,23 +191,34 @@ class Mongo[F[_]: MonadResourceErr : ConcurrentEffect : ContextShift] private[mo
 
   def evaluate(
       collection: Collection,
-      stages: ScalarStages)
+      stages: ScalarStages,
+      offset: Option[Offset])
       : F[(ScalarStages, Stream[F, BsonValue])] = {
 
-    val fallback: F[(ScalarStages, Stream[F, BsonValue])] =
-      findAll(collection) map (x => (stages, x))
+    val allDocuments: F[Stream[F, BsonValue]] =
+      findAll(collection)
 
-    if (ScalarStages.Id === stages || pushdownLevel === PushdownLevel.Disabled) fallback
+    val fallback: F[(ScalarStages, Stream[F, BsonValue])] =
+      allDocuments.tupleLeft(stages)
+
+    if (ScalarStages.Id === stages || pushdownLevel === PushdownLevel.Disabled)
+      fallback
     else {
-      val result = interpret(stages)
-      if (result._1.docs.isEmpty) fallback
-      else evaluateImpl(collection, result._1.docs, fallback map (_._2)) flatMap {
-        case (isOk, stream) if isOk =>
-          val newStream = stream map result._2.bson
-          val newStages = ScalarStages(IdStatus.ExcludeId, result._1.stages)
-          F.point((newStages, newStream))
-        case _ => fallback
-      }
+      val (interpretation, mapper) = interpret(stages, offset)
+
+      if (interpretation.docs.isEmpty)
+        fallback
+      else
+        evaluateImpl(collection, interpretation.docs, allDocuments) flatMap {
+          case (isOk, stream) if isOk =>
+            val newStream = stream map mapper.bson
+
+            val newStages = ScalarStages(IdStatus.ExcludeId, interpretation.stages)
+
+            (newStages, newStream).pure[F]
+
+          case _ => fallback
+        }
     }
   }
 

@@ -58,6 +58,8 @@ object Compiler {
               List(a, b, c).foldLeft(fMin)(max)
             case Op.Ne(a) =>
               max(fMin, a)
+            case Op.Gte(a) =>
+              max(fMin, a)
             case Op.ObjectToArray(a) =>
               max(fMin, a)
             case Op.ArrayElemAt(a, _) =>
@@ -89,6 +91,7 @@ object Compiler {
           case Op.Exists(a) => obj(Map("$exists" -> a))
           case Op.Cond(a, b, c) => obj(Map("$cond" -> array(List(a, b, c))))
           case Op.Ne(a) => obj(Map("$ne" -> a))
+          case Op.Gte(a) => obj(Map("$gte" -> a))
           case Op.ObjectToArray(a) => obj(Map("$objectToArray" -> a))
           case Op.ArrayElemAt(a, ix) => obj(Map("$arrayElemAt" -> array(List(a, int(ix)))))
           case Op.Reduce(a, b, c) => obj(Map("$reduce" -> obj(Map(
@@ -260,8 +263,14 @@ object Compiler {
             new BsonNull()
           case Core.Int(i) =>
             new BsonInt32(i)
+          case Core.Long(l) =>
+            new BsonInt64(l)
+          case Core.Double(d) =>
+            new BsonDouble(d)
           case Core.String(s) =>
             new BsonString(s)
+          case Core.DateTime(d) =>
+            new BsonDateTime(d.toEpochSecond)
           case Core.Bool(b) =>
             new BsonBoolean(b)
           case Core.Array(as) =>

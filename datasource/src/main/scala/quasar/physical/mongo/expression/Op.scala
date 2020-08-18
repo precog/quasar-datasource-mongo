@@ -39,6 +39,7 @@ object Op {
   final case class Exists[A](exp: A) extends Op[A]
   final case class Cond[A](check: A, ok: A, fail: A) extends Op[A]
   final case class Ne[A](exp: A) extends Op[A]
+  final case class Gte[A](exp: A) extends Op[A]
   final case class Type[A](exp: A) extends Op[A] {
     override def minVersion = Version.$type
   }
@@ -60,6 +61,7 @@ object Op {
       case ArrayElemAt(x, i) => f(x).map(ArrayElemAt(_, i))
       case ObjectToArray(x) => f(x).map(ObjectToArray(_))
       case Ne(x) => f(x).map(Ne(_))
+      case Gte(x) => f(x).map(Gte(_))
       case Exists(x) => f(x).map(Exists(_))
       case Cond(a, b, c) => (f(a), f(b), f(c)).mapN(Cond(_, _, _))
       case Or(lst) => lst traverse f map (Or(_))
@@ -76,29 +78,31 @@ object Op {
     val op: Prism[O, Op[A]]
 
     val _let =
-      Prism.partial[Op[A], (Map[String, A], A)]{case Let(a, b) => (a, b)}{case (a, b) => Let(a, b)}
+      Prism.partial[Op[A], (Map[String, A], A)]{ case Let(a, b) => (a, b) } { case (a, b) => Let(a, b) }
     val _type =
-      Prism.partial[Op[A], A]{case Type(v) => v}(Type(_))
+      Prism.partial[Op[A], A]{ case Type(v) => v } (Type(_))
     val _eq =
-      Prism.partial[Op[A], List[A]]{case Eq(v) => v}(Eq(_))
+      Prism.partial[Op[A], List[A]]{ case Eq(v) => v } (Eq(_))
     val _or =
-      Prism.partial[Op[A], List[A]]{case Or(v) => v}(Or(_))
+      Prism.partial[Op[A], List[A]]{ case Or(v) => v } (Or(_))
     val _exists =
-      Prism.partial[Op[A], A]{case Exists(v) => v}(Exists(_))
+      Prism.partial[Op[A], A]{ case Exists(v) => v } (Exists(_))
     val _cond =
-      Prism.partial[Op[A], (A, A, A)]{case Cond(a, b, c) => (a, b, c)}{case (a, b, c) => Cond(a, b, c)}
+      Prism.partial[Op[A], (A, A, A)]{ case Cond(a, b, c) => (a, b, c) } { case (a, b, c) => Cond(a, b, c) }
     val _ne =
-      Prism.partial[Op[A], A]{case Ne(v) => v}(Ne(_))
+      Prism.partial[Op[A], A]{ case Ne(v) => v } (Ne(_))
+    val _gte =
+      Prism.partial[Op[A], A]{ case Gte(v) => v } (Gte(_))
     val _objectToArray =
-      Prism.partial[Op[A], A]{case ObjectToArray(v) => v}(ObjectToArray(_))
+      Prism.partial[Op[A], A]{ case ObjectToArray(v) => v } (ObjectToArray(_))
     val _arrayElemAt =
-      Prism.partial[Op[A], (A, Int)]{case ArrayElemAt(a, b) => (a, b)}{case (a, b) => ArrayElemAt(a, b)}
+      Prism.partial[Op[A], (A, Int)]{ case ArrayElemAt(a, b) => (a, b) } { case (a, b) => ArrayElemAt(a, b) }
     val _reduce =
-      Prism.partial[Op[A], (A, A, A)]{case Reduce(a, b, c) => (a, b, c)}{case (a, b, c) => Reduce(a, b, c)}
+      Prism.partial[Op[A], (A, A, A)]{ case Reduce(a, b, c) => (a, b, c) } { case (a, b, c) => Reduce(a, b, c) }
     val _concatArrays =
-      Prism.partial[Op[A], List[A]]{case ConcatArrays(v) => v}(ConcatArrays(_))
+      Prism.partial[Op[A], List[A]]{ case ConcatArrays(v) => v } (ConcatArrays(_))
     val _not =
-      Prism.partial[Op[A], A]{case Not(v) => v}(Not(_))
+      Prism.partial[Op[A], A]{ case Not(v) => v } (Not(_))
 
     val let = op composePrism _let
     val typ = op composePrism _type
@@ -107,6 +111,7 @@ object Op {
     val exists = op composePrism _exists
     val cond = op composePrism _cond
     val nex = op composePrism _ne
+    val gte = op composePrism _gte
     val objectToArray = op composePrism _objectToArray
     val arrayElemAt = op composePrism _arrayElemAt
     val reduce = op composePrism _reduce
@@ -130,6 +135,7 @@ object Op {
         NonTerminal(List(), Some("ok"), List(fa.render(b))),
         NonTerminal(List(), Some("fail"), List(fa.render(c)))))
       case Ne(a) => NonTerminal(List("Ne"), None, List(fa.render(a)))
+      case Gte(a) => NonTerminal(List("Gte"), None, List(fa.render(a)))
       case ObjectToArray(a) => NonTerminal(List("ObjectToArray"), None, List(fa.render(a)))
       case ArrayElemAt(a, i) => NonTerminal(List("ArrayElemAt"), Some(i.toString), List(fa.render(a)))
       case Reduce(a, b, c) => NonTerminal(List("Reduce"), None, List(

@@ -35,10 +35,13 @@ object Cartesian {
       optToAlternative[F].apply(Projection.safeCartouches(s.cartouches)).flatMap { cartouches =>
         MonadState[F, InterpretationState].get flatMap { state =>
           val undefinedKey = state.uniqueKey.concat("_cartesian_empty")
+
           if (cartouches.isEmpty)
             unfocus[F] as List(Pipeline.Match(o.obj(Map(undefinedKey -> o.bool(false)))))
           else {
+
             val ns = x => state.uniqueKey.concat(x)
+
             val interpretations: F[List[List[Pipeline[U]]]] =
               cartouches.toList.traverse {
                 case (alias, (_, instructions)) => for {
@@ -53,12 +56,14 @@ object Cartesian {
               val defaultObject = cartouches map {
                 case (alias, _) => ns(alias.name) -> o.str("$".concat(ns(alias.name)))
               }
+
               val initialProjection: Pipeline[U] =
                 Pipeline.Project(
                   Map("_id" -> o.int(0)) ++ (cartouches.map {
                     case (alias, (field, instructions)) =>
                       ns(alias.name) -> o.projection(state.mapper.projection(Projection.key(field.name)))
                   }))
+
               val instructions = is.flatMap(_.flatMap( {
                 case Pipeline.Project(mp) =>
                   List(Pipeline.Project(defaultObject ++ mp))
@@ -69,6 +74,7 @@ object Cartesian {
                 case x =>
                   List(x)
               }))
+
               val removeEmptyFields = Pipeline.Project { cartouches map {
                 case (alias, _) => alias.name -> o.cond(
                   o.eqx(List(
@@ -77,10 +83,12 @@ object Cartesian {
                   missingKey[Expr, U](ns(alias.name)),
                   o.str("$".concat(ns(alias.name))))
               }}
+
               val removeEmptyObjects =
                 Pipeline.Match(o.or(cartouches.toList map {
                   case (k, v) => o.obj(Map(k.name -> o.exists(o.bool(true))))
                 }))
+
               List(initialProjection) ++ instructions ++ List(removeEmptyFields, removeEmptyObjects)
             } flatMap { pipes =>
               unfocus[F] as pipes

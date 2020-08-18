@@ -118,7 +118,7 @@ trait StageInterpreterSpec extends JsonSpec {
       c <- uniqueCollection
       _ <- dropCollection(c, mongo)
       _ <- insertValues(c, mongo, inp map mapper)
-      stream <- mongo.evaluate(c, stages)
+      stream <- mongo.evaluate(c, stages, None)
       actual <- stream._2.compile.toList
       _ <- dropCollection(c, mongo)
     } yield actual).unsafeRunSync()
