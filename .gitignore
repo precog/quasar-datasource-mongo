@@ -16,3 +16,7 @@ tags
 /pubring.pgp.enc
 /scripts/readVersion
 /secring.pgp.enc
+
+# To avoid having to regenerate the ssh key every time:
+key_for_docker
+key_for_docker.pub
