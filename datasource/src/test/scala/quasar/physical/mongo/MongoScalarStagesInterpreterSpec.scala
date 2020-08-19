@@ -191,6 +191,10 @@ class MongoScalarStagesInterpreterSpec
     }
   }
 
+  "seeking" >> {
+    pending
+  }
+
   val RootKey: String = "rootKey"
 
   val RootProjection = Project(CPath.parse(".rootKey"))

@@ -52,6 +52,7 @@ object Interpreter {
   def interpret(version: Version, pushdown: PushdownLevel, uuid: String): Interpret = { (stages, offset) =>
     val stage = interpretStage[InState, Fix[Expr]](pushdown)
     val idStatus = interpretIdStatus[InState, Fix[Expr]](uuid)
+    val offsetDocs = offset.toList.flatMap(interpretOffset[Fix[Expr]].apply(_))
 
     def refine(inp: Interpretation): InState[Either[Interpretation, Interpretation]] =
       inp.stages match {
@@ -60,15 +61,14 @@ object Interpreter {
         case hd :: tail =>
           val nextStep = for {
             pipes <- stage.apply(hd)
-            matchPrefix = offset.map(offsetMatch[Fix[Expr]](_)).toList
-            docs <- Compiler.compile[InState, Fix[Expr]](version, uuid, matchPrefix ++ pipes)
+            docs <- Compiler.compile[InState, Fix[Expr]](version, uuid, pipes)
           } yield Interpretation(tail, inp.docs ++ docs).asLeft[Interpretation]
 
           nextStep <+> inp.asRight.pure[InState]
       }
     val interpreted = for {
       initPipes <- idStatus(stages.idStatus)
-      initDocs <- Compiler.compile[InState, Fix[Expr]](version, uuid, initPipes)
+      initDocs <- Compiler.compile[InState, Fix[Expr]](version, uuid, offsetDocs ++ initPipes)
       refined <- Monad[InState].tailRecM(Interpretation(stages.stages, initDocs))(refine)
     } yield refined
 
@@ -79,6 +79,41 @@ object Interpreter {
         (a, state.mapper)
     }
   }
+
+  def interpretOffset[U: Basis[Expr, ?]]
+      : Interpreter[Id, U, Offset] =
+    new Interpreter[Id, U, Offset] {
+      def apply(offset: Offset): List[Pipeline[U]] = {
+        val path = offset.path
+        val key = offset.value
+
+        val path0 = path map {
+          case Left(field) => field
+          case Right(right) => right.show
+        }
+
+        val value = key match {
+          case ∃(offsetKey : OffsetKey.RealKey[Id]) =>
+            if (offsetKey.value.isValidInt)
+              o.int(offsetKey.value.intValue)
+            else if (offsetKey.value.isValidLong)
+              o.long(offsetKey.value.longValue)
+            else
+              o.double(offsetKey.value.doubleValue)
+
+          case ∃(offsetKey : OffsetKey.StringKey[Id]) =>
+            o.str(offsetKey.value)
+
+          case ∃(offsetKey : OffsetKey.DateTimeKey[Id]) =>
+            o.dateTime(offsetKey.value)
+        }
+
+        val filterField = "$" + path0.intercalate(".")
+
+        List(
+          Pipeline.Match(o.obj(Map(filterField -> o.gte(value)))))
+      }
+    }
 
   def interpretStage[F[_]: Monad: MonadInState: MonoidK, U: Basis[Expr, ?]](pushdown: PushdownLevel)
       : Interpreter[F, U, ScalarStage] =
@@ -98,36 +133,6 @@ object Interpreter {
 
   ////
 
-  private def offsetMatch[U](offset: Offset)(implicit U: Basis[Expr, U]): Pipeline[U] = {
-    val o = Optics.full(Optics.basisPrism[Expr, U])
-
-    val path = offset.path
-    val key = offset.value
-
-    val path0 = path map {
-      case Left(field) => field
-      case Right(right) => right.show
-    }
-
-    val value = key match {
-      case ∃(offsetKey : OffsetKey.RealKey[Id]) =>
-        if (offsetKey.value.isValidInt)
-          o.int(offsetKey.value.intValue)
-        else if (offsetKey.value.isValidLong)
-          o.long(offsetKey.value.longValue)
-        else
-          o.double(offsetKey.value.doubleValue)
-
-      case ∃(offsetKey : OffsetKey.StringKey[Id]) =>
-        o.str(offsetKey.value)
-      case ∃(offsetKey : OffsetKey.DateTimeKey[Id]) =>
-        o.dateTime(offsetKey.value)
-    }
-
-    val filterField = "$" + path0.intercalate(".")
-
-    Pipeline.Match(o.obj(Map(filterField -> o.gte(value))))
-  }
 
   private def interpretIdStatus[F[_]: Applicative: MonadInState, U: Basis[Expr, ?]](uq: String)
       : Interpreter[F, U, IdStatus] =

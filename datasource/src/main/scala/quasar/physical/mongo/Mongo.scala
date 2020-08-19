@@ -177,10 +177,13 @@ final class Mongo[F[_]: MonadResourceErr: ConcurrentEffect: ContextShift] privat
       aggs: List[BsonDocument],
       fallback: F[Stream[F, BsonValue]])
       : F[(Boolean, Stream[F, BsonValue])] = {
+
     val aggregated =
       aggregate(collection, aggs)
+
     val hd: F[Either[Throwable, Option[BsonValue]]] =
       F.attempt(aggregated flatMap (_.head.compile.last))
+
     hd flatMap {
       case Right(_) =>
         aggregated map ((true, _))
