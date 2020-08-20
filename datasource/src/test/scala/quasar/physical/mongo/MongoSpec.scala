@@ -347,10 +347,11 @@ object MongoSpec {
         MongoConfig(connectionStringInvalidPort, 64, PushdownLevel.Full, None, None),
         blocker)
 
-      interpreter = Interpreter.interpret(Version(0, 0, 0), PushdownLevel.Full, "redundant")
+      stages = Interpreter.stages(Version(0, 0, 0), PushdownLevel.Full, "redundant")
+      offset = Interpreter.offset(Version(0, 0, 0), "redundant")
     } yield {
       new Mongo[IO](
-        client, BatchSize.toLong, PushdownLevel.Full, interpreter, None)
+        client, BatchSize.toLong, PushdownLevel.Full, stages, offset, None)
     }
 
   def mkBMongo: Resource[IO, Mongo[IO]] =

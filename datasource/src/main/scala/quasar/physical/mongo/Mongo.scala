@@ -42,7 +42,8 @@ final class Mongo[F[_]: MonadResourceErr: ConcurrentEffect: ContextShift] privat
     client: MongoClient,
     batchSize: Long,
     pushdownLevel: PushdownLevel,
-    interpret: Interpreter.Interpret,
+    interpret: Interpreter.StageInterpret,
+    offsetInterpret: Interpreter.OffsetInterpret,
     accessedResource: Option[MongoResource]) {
   import Mongo._
 
@@ -172,10 +173,7 @@ final class Mongo[F[_]: MonadResourceErr: ConcurrentEffect: ContextShift] privat
       getCollection(collection).aggregate[BsonValue](aggs)
         .allowDiskUse(true))
 
-  def evaluateImpl(
-      collection: Collection,
-      aggs: List[BsonDocument],
-      fallback: F[Stream[F, BsonValue]])
+  def evaluateImpl(collection: Collection, aggs: List[BsonDocument], fallback: F[Stream[F, BsonValue]])
       : F[(Boolean, Stream[F, BsonValue])] = {
 
     val aggregated =
@@ -186,16 +184,13 @@ final class Mongo[F[_]: MonadResourceErr: ConcurrentEffect: ContextShift] privat
 
     hd flatMap {
       case Right(_) =>
-        aggregated map ((true, _))
+        aggregated.tupleLeft(true)
       case Left(_) =>
-        fallback map ((false, _))
+        fallback.tupleLeft(false)
     }
   }
 
-  def evaluate(
-      collection: Collection,
-      stages: ScalarStages,
-      offset: Option[Offset])
+  def evaluate(collection: Collection, stages: ScalarStages, offset: Option[Offset])
       : F[(ScalarStages, Stream[F, BsonValue])] = {
 
     val allDocuments: F[Stream[F, BsonValue]] =
@@ -363,8 +358,17 @@ object Mongo {
     mkClient(config, blocker) evalMap { client =>
       for {
         version <- getVersion(client)
-        interpreter <- Interpreter(version, config.pushdownLevel)
-      } yield new Mongo[F](client, scala.math.max(1L, config.batchSize.toLong), config.pushdownLevel, interpreter, config.accessedResource)
+        uuid <- Sync[F].delay(java.util.UUID.randomUUID.toString)
+        stageInterpreter = Interpreter.stages(version, config.pushdownLevel, uuid)
+        offsetInterpreter = Interpreter.offset(version, uuid)
+        batchSize = scala.math.max(1L, config.batchSize.toLong)
+      } yield new Mongo[F](
+        client,
+        batchSize,
+        config.pushdownLevel,
+        stageInterpreter,
+        offsetInterpreter,
+        config.accessedResource)
     }
   }
 }

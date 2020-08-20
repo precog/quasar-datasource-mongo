@@ -25,7 +25,6 @@ import quasar.physical.mongo.expression._
 import quasar.physical.mongo.interpreter._
 
 import cats.{Applicative, Monad, MonoidK, Id}
-import cats.effect.Sync
 import cats.implicits._
 import cats.mtl.implicits._
 import higherkindness.droste.Basis
@@ -44,12 +43,10 @@ object Interpreter {
 
   final case class Interpretation(stages: List[ScalarStage], docs: List[BsonDocument])
 
-  type Interpret = (ScalarStages, Option[Offset]) => (Interpretation, Mapper)
+  type StageInterpret = (ScalarStages, Option[Offset]) => (Interpretation, Mapper)
+  type OffsetInterpret = Offset => Option[List[BsonDocument]]
 
-  def apply[F[_]: Sync](version: Version, pushdown: PushdownLevel): F[Interpret] =
-    Sync[F].delay(java.util.UUID.randomUUID.toString) map (interpret(version, pushdown, _))
-
-  def interpret(version: Version, pushdown: PushdownLevel, uuid: String): Interpret = { (stages, offset) =>
+  def stages(version: Version, pushdown: PushdownLevel, uuid: String): StageInterpret = { (stages, offset) =>
     val stage = interpretStage[InState, Fix[Expr]](pushdown)
     val idStatus = interpretIdStatus[InState, Fix[Expr]](uuid)
     val offsetDocs = offset.toList.flatMap(interpretOffset[Fix[Expr]].apply(_))
@@ -66,6 +63,7 @@ object Interpreter {
 
           nextStep <+> inp.asRight.pure[InState]
       }
+
     val interpreted = for {
       initPipes <- idStatus(stages.idStatus)
       initDocs <- Compiler.compile[InState, Fix[Expr]](version, uuid, offsetDocs ++ initPipes)
@@ -79,6 +77,9 @@ object Interpreter {
         (a, state.mapper)
     }
   }
+
+  def offset(version: Version, uuid: String): OffsetInterpret =
+    offset => Compiler.compile[Option, Fix[Expr]](version, uuid, interpretOffset.apply(offset))
 
   def interpretOffset[U: Basis[Expr, ?]]
       : Interpreter[Id, U, Offset] =
