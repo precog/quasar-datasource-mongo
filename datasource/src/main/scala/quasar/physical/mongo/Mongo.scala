@@ -173,8 +173,8 @@ final class Mongo[F[_]: MonadResourceErr: ConcurrentEffect: ContextShift] privat
       getCollection(collection).aggregate[BsonValue](aggs)
         .allowDiskUse(true))
 
-  def evaluateImpl(collection: Collection, aggs: List[BsonDocument], fallback: F[Stream[F, BsonValue]])
-      : F[(Boolean, Stream[F, BsonValue])] = {
+  def evaluateImpl(collection: Collection, aggs: List[BsonDocument])
+      : F[Either[Throwable, Stream[F, BsonValue]]] = {
 
     val aggregated =
       aggregate(collection, aggs)
@@ -182,47 +182,54 @@ final class Mongo[F[_]: MonadResourceErr: ConcurrentEffect: ContextShift] privat
     val hd: F[Either[Throwable, Option[BsonValue]]] =
       F.attempt(aggregated flatMap (_.head.compile.last))
 
-    hd flatMap {
-      case Right(_) =>
-        aggregated.tupleLeft(true)
-      case Left(_) =>
-        fallback.tupleLeft(false)
-    }
+    hd.flatMap(_.as(aggregated).sequence)
   }
 
   def evaluate(collection: Collection, stages: ScalarStages, offset: Option[Offset])
       : F[(ScalarStages, Stream[F, BsonValue])] = {
+    (stages, pushdownLevel, offset) match {
+      case (ScalarStages.Id, _, Some(offset)) =>
+        evaluateNoPushdownWithOffset(collection, stages, offset)
 
-    val allDocuments: F[Stream[F, BsonValue]] =
-      findAll(collection)
+      case (_, PushdownLevel.Disabled, Some(offset)) =>
+        evaluateNoPushdownWithOffset(collection, stages, offset)
 
-    val fallback: F[(ScalarStages, Stream[F, BsonValue])] =
-      allDocuments.tupleLeft(stages)
+      case (_, _, offset) =>
+        val (interpretation, mapper) = interpret(stages, offset)
 
-    if (ScalarStages.Id === stages || pushdownLevel === PushdownLevel.Disabled)
-      fallback
-    else {
-      val (interpretation, mapper) = interpret(stages, offset)
+        val fallback: F[(ScalarStages, Stream[F, BsonValue])] =
+          findAll(collection).tupleLeft(stages)
 
-      if (interpretation.docs.isEmpty)
-        fallback
-      else
-        evaluateImpl(collection, interpretation.docs, allDocuments) flatMap {
-          case (isOk, stream) if isOk =>
-            val newStream = stream map mapper.bson
+        if (interpretation.docs.isEmpty)
+          fallback
+        else
+          evaluateImpl(collection, interpretation.docs) flatMap {
+            case Right(stream) =>
+              val newStream = stream map mapper.bson
 
-            val newStages = ScalarStages(IdStatus.ExcludeId, interpretation.stages)
+              val newStages = ScalarStages(IdStatus.ExcludeId, interpretation.stages)
 
-            (newStages, newStream).pure[F]
+              (newStages, newStream).pure[F]
 
-          case _ => fallback
-        }
+            case _ => fallback
+          }
     }
   }
 
   private [mongo] def getCollection(collection: Collection): MongoCollection[Document] =
     client.getDatabase(collection.database.name).getCollection(collection.name)
 
+  private def evaluateNoPushdownWithOffset(collection: Collection, stages: ScalarStages, offset: Offset)
+      : F[(ScalarStages, Stream[F, BsonValue])] =
+    offsetInterpret(offset) match {
+      case Some(pipelineDocs) =>
+        evaluateImpl(collection, pipelineDocs) flatMap {
+          case Right(results) => (stages, results).pure[F]
+          case Left(_) => MonadResourceErr[F].raiseError(ResourceError.seekFailed(collection.resourcePath))
+        }
+      case None =>
+        MonadResourceErr[F].raiseError(ResourceError.seekFailed(collection.resourcePath))
+    }
 }
 
 object Mongo {

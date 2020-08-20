@@ -150,17 +150,10 @@ class MongoSpec extends EffectfulQSpec[IO] {
     }
   )
 
-  "evaluteImpl works falls back if there is an exception" >> Fragment.foreach(MongoSpec.correctCollections)(col =>
+  "evaluateImpl detects an evaluation exception on the pipeline" >> Fragment.foreach(MongoSpec.correctCollections)(col =>
     s"checking ${col.database.name} :: ${col.name}" >>* mkMongo.use { mongo =>
-      mongo.evaluateImpl(col, incorrectPipeline, mongo.findAll(col)).flatMap { case (_, stream) =>
-        stream
-          .fold(List[BsonValue]())((lst, col) => col :: lst)
-          .map(bsons => bsons match {
-            case (bson: BsonDocument) :: List() => AsResult(bson.getString(col.name).getValue() === col.database.name)
-            case _ => AsResult(false)
-          })
-          .compile
-          .lastOrError
+      mongo.evaluateImpl(col, incorrectPipeline) map { res =>
+        res must beLeft
       }
     }
   )

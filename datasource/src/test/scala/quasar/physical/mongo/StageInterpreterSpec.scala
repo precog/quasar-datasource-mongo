@@ -27,6 +27,7 @@ import org.bson.types.Decimal128
 import org.mongodb.scala._
 import org.typelevel.jawn.{AsyncParser, Facade}
 
+import quasar.connector.Offset
 import quasar.contrib.std.errorImpossible
 import quasar.{JsonSpec, ScalarStages}
 
@@ -113,19 +114,23 @@ trait StageInterpreterSpec extends JsonSpec {
     def makeObject(a: BsonDocument): BsonValue = a
   }
 
-  def interpret(stages: ScalarStages, inp: JsonStream, mapper: (BsonValue => BsonValue)): JsonStream = {
+  def interpret(stages: ScalarStages, inp: JsonStream, mapper: (BsonValue => BsonValue)): JsonStream =
+    interpretWithOffset(stages, inp, None, mapper)
+
+  def interpretWithOffset(stages: ScalarStages, inp: JsonStream, offset: Option[Offset], mapper: (BsonValue => BsonValue))
+      : JsonStream = {
     mkMongo.use(mongo => for {
       c <- uniqueCollection
       _ <- dropCollection(c, mongo)
       _ <- insertValues(c, mongo, inp map mapper)
-      stream <- mongo.evaluate(c, stages, None)
-      actual <- stream._2.compile.toList
+      (_, stream) <- mongo.evaluate(c, stages, offset)
+      actual <- stream.compile.toList
       _ <- dropCollection(c, mongo)
-    } yield actual).unsafeRunSync()
+    } yield actual).unsafeRunSync
   }
 
   protected def ldjson(str: String): JsonStream = {
-    implicit val facade: Facade[JsonElement] = QDataFacade[JsonElement](isPrecise = false)
+    implicit val facade: Facade[JsonElement] = QDataFacade[JsonElement](isPrecise = true)
 
     val parser: AsyncParser[JsonElement] =
       AsyncParser[JsonElement](AsyncParser.ValueStream)

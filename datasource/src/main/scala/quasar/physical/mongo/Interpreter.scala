@@ -109,7 +109,7 @@ object Interpreter {
             o.dateTime(offsetKey.value)
         }
 
-        val filterField = "$" + path0.intercalate(".")
+        val filterField = path0.intercalate(".")
 
         List(
           Pipeline.Match(o.obj(Map(filterField -> o.gte(value)))))

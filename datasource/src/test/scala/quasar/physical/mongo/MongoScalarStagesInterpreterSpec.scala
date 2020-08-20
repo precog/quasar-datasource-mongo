@@ -18,11 +18,23 @@ package quasar.physical.mongo
 
 import slamdata.Predef._
 
+import cats.data.NonEmptyList
+import cats.implicits._
+
 import org.bson.{Document => _, _}
 
 import quasar.api.ColumnType
+import quasar.api.push.OffsetKey
+import quasar.connector.Offset
 import quasar.common.{CPath, CPathField}
+import quasar.connector.Offset
 import quasar.{IdStatus, ScalarStageSpec => Spec, ScalarStage, ScalarStages}
+
+import java.time.{OffsetDateTime, ZoneOffset}
+
+import skolems.∃
+
+import org.specs2.matcher.Matcher
 
 class MongoScalarStagesInterpreterSpec
     extends Spec.WrapSpec
@@ -191,8 +203,32 @@ class MongoScalarStagesInterpreterSpec
     }
   }
 
-  "seeking" >> {
-    pending
+  "Seeking" >> {
+    "without pushdown" >> {
+      "on datetime" >> {
+        val input = ldjson("""
+          {"foo": 1, "bar": {"qux": { "ts": { "$offsetdatetime": "2020-07-20T10:50:33.592Z" } } } }
+          {"foo": 2, "bar": {"qux": { "ts": { "$offsetdatetime": "2020-07-21T10:50:33.592Z" } } } }
+          {"foo": 3, "bar": {"qux": { "ts": { "$offsetdatetime": "2020-07-22T10:50:33.592Z" } } } }
+          {"foo": 4, "bar": {"qux": { "ts": { "$offsetdatetime": "2020-07-23T10:50:33.592Z" } } } }
+          """)
+
+        val expected = ldjson("""
+          {"foo": 3, "bar": {"qux": { "ts": { "$offsetdatetime": "2020-07-22T10:50:33.592Z" } } } }
+          {"foo": 4, "bar": {"qux": { "ts": { "$offsetdatetime": "2020-07-23T10:50:33.592Z" } } } }
+          """)
+
+        val after = OffsetDateTime.of(2020, 7, 22, 5, 0, 0, 0, ZoneOffset.UTC)
+        val offset = Offset(NonEmptyList.of("bar".asLeft, "qux".asLeft, "ts".asLeft), ∃(OffsetKey.Actual.dateTime(after)))
+        val actual = interpretWithOffset(ScalarStages.Id, input, offset.some, x => x)
+
+        actual must bestSemanticEqualNoId(expected)
+      }
+
+      "on integer" >> {
+        ok
+      }
+    }
   }
 
   val RootKey: String = "rootKey"
@@ -224,4 +260,14 @@ class MongoScalarStagesInterpreterSpec
 
   def evalFull(stages: ScalarStages, stream: JsonStream): JsonStream =
     interpret(stages, stream, (x => x))
+
+  def bestSemanticEqualNoId(js: JsonStream): Matcher[JsonStream] =
+    bestSemanticEqual(js) ^^ ((jsons: JsonStream) => jsons map {
+      case (doc: BsonDocument) => {
+        doc.remove("_id")
+
+        doc
+      }
+      case otherwise => otherwise
+    })
 }

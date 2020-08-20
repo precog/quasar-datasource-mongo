@@ -270,7 +270,7 @@ object Compiler {
           case Core.String(s) =>
             new BsonString(s)
           case Core.DateTime(d) =>
-            new BsonDateTime(d.toEpochSecond)
+            new BsonDateTime(d.toInstant.toEpochMilli)
           case Core.Bool(b) =>
             new BsonBoolean(b)
           case Core.Array(as) =>
