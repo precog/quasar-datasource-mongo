@@ -34,6 +34,8 @@ import java.time.{OffsetDateTime, ZoneOffset}
 
 import skolems.∃
 
+import spire.math.Real
+
 import org.specs2.matcher.Matcher
 
 class MongoScalarStagesInterpreterSpec
@@ -226,7 +228,87 @@ class MongoScalarStagesInterpreterSpec
       }
 
       "on integer" >> {
-        ok
+        val input = ldjson("""
+          {"foo": 1, "bar": {"qux": { "ix": ["a", 1] } } }
+          {"foo": 2, "bar": {"qux": { "ix": ["b", 2] } } }
+          {"foo": 3, "bar": {"qux": { "ix": ["c", 3] } } }
+          {"foo": 4, "bar": {"qux": { "ix": ["d", 4] } } }
+          """)
+
+        val expected = ldjson("""
+          {"foo": 3, "bar": {"qux": { "ix": ["c", 3] } } }
+          {"foo": 4, "bar": {"qux": { "ix": ["d", 4] } } }
+          """)
+
+        val offset = Offset(
+          NonEmptyList.of("bar".asLeft, "qux".asLeft, "ix".asLeft, 1.asRight), ∃(OffsetKey.Actual.real(Real(3))))
+        val actual = interpretWithOffset(ScalarStages.Id, input, offset.some, x => x)
+
+        actual must bestSemanticEqualNoId(expected)
+      }
+
+      "on long" >> {
+        val startId = Int.MaxValue.toLong + 1
+
+        val input = ldjson(s"""
+          {"foo": 1, "bar": {"qux": { "ix": ["a", ${startId + 1}] } } }
+          {"foo": 2, "bar": {"qux": { "ix": ["b", ${startId + 2}] } } }
+          {"foo": 3, "bar": {"qux": { "ix": ["c", ${startId + 3}] } } }
+          {"foo": 4, "bar": {"qux": { "ix": ["d", ${startId + 4}] } } }
+          """)
+
+        val expected = ldjson(s"""
+          {"foo": 3, "bar": {"qux": { "ix": ["c", ${startId + 3}] } } }
+          {"foo": 4, "bar": {"qux": { "ix": ["d", ${startId + 4}] } } }
+          """)
+
+        val offset = Offset(
+          NonEmptyList.of("bar".asLeft, "qux".asLeft, "ix".asLeft, 1.asRight), ∃(OffsetKey.Actual.real(Real(startId + 3))))
+        val actual = interpretWithOffset(ScalarStages.Id, input, offset.some, x => x)
+
+        actual must bestSemanticEqualNoId(expected)
+      }
+
+      "on float" >> {
+        val input = ldjson("""
+          {"foo": 1, "bar": {"qux": { "ix": ["a", 0.1] } } }
+          {"foo": 2, "bar": {"qux": { "ix": ["b", 0.2] } } }
+          {"foo": 3, "bar": {"qux": { "ix": ["c", 0.3] } } }
+          {"foo": 4, "bar": {"qux": { "ix": ["d", 0.4] } } }
+          """)
+
+        val expected = ldjson("""
+          {"foo": 3, "bar": {"qux": { "ix": ["c", 0.3] } } }
+          {"foo": 4, "bar": {"qux": { "ix": ["d", 0.4] } } }
+          """)
+
+        val offset = Offset(
+          NonEmptyList.of("bar".asLeft, "qux".asLeft, "ix".asLeft, 1.asRight), ∃(OffsetKey.Actual.real(Real(0.3))))
+
+        val actual = interpretWithOffset(ScalarStages.Id, input, offset.some, x => x)
+
+        actual must bestSemanticEqualNoId(expected)
+      }
+
+      "on string" >> {
+        val input = ldjson("""
+          {"foo": 1, "bar": {"qux": { "ix": ["a", "aaa"] } } }
+          {"foo": 2, "bar": {"qux": { "ix": ["b", "aab"] } } }
+          {"foo": 3, "bar": {"qux": { "ix": ["c", "aac"] } } }
+          {"foo": 4, "bar": {"qux": { "ix": ["d", "aad"] } } }
+          """)
+
+        val expected = ldjson("""
+          {"foo": 3, "bar": {"qux": { "ix": ["c", "aac"] } } }
+          {"foo": 4, "bar": {"qux": { "ix": ["d", "aad"] } } }
+          """)
+
+        val offset = Offset(
+          NonEmptyList.of("bar".asLeft, "qux".asLeft, "ix".asLeft, 1.asRight), ∃(OffsetKey.Actual.string("aac")))
+
+        val actual = interpretWithOffset(ScalarStages.Id, input, offset.some, x => x)
+
+        actual must bestSemanticEqualNoId(expected)
       }
     }
   }
