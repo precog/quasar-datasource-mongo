@@ -206,7 +206,6 @@ final class Mongo[F[_]: MonadResourceErr: ConcurrentEffect: ContextShift] privat
           evaluateImpl(collection, interpretation.docs) flatMap {
             case Right(stream) =>
               val newStream = stream map mapper.bson
-
               val newStages = ScalarStages(IdStatus.ExcludeId, interpretation.stages)
 
               (newStages, newStream).pure[F]

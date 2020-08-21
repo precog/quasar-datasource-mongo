@@ -206,6 +206,49 @@ class MongoScalarStagesInterpreterSpec
   }
 
   "Seeking" >> {
+    "with pushdown" >> {
+      "on datetime" >> {
+        val input = ldjson("""
+          {"foo": ["a", "b"], "bar": [1, 2] , "baz": {"qux": { "ts": { "$offsetdatetime": "2020-07-20T10:50:33.592Z" } } } }
+          {"foo": ["c", "d"], "bar": [3, 4] , "baz": {"qux": { "ts": { "$offsetdatetime": "2020-07-21T10:50:33.592Z" } } } }
+          {"foo": ["e", "f"], "bar": [5, 6] , "baz": {"qux": { "ts": { "$offsetdatetime": "2020-07-22T10:50:33.592Z" } } } }
+          {"foo": ["g", "h"], "bar": [7, 8] , "baz": {"qux": { "ts": { "$offsetdatetime": "2020-07-23T10:50:33.592Z" } } } }
+          """)
+
+        val expected = ldjson("""
+          {"foo": "e", "bar": 5, "baz": {"qux": { "ts": { "$offsetdatetime": "2020-07-22T10:50:33.592Z" } } } }
+          {"foo": "e", "bar": 6, "baz": {"qux": { "ts": { "$offsetdatetime": "2020-07-22T10:50:33.592Z" } } } }
+          {"foo": "f", "bar": 5, "baz": {"qux": { "ts": { "$offsetdatetime": "2020-07-22T10:50:33.592Z" } } } }
+          {"foo": "f", "bar": 6, "baz": {"qux": { "ts": { "$offsetdatetime": "2020-07-22T10:50:33.592Z" } } } }
+          {"foo": "g", "bar": 7, "baz": {"qux": { "ts": { "$offsetdatetime": "2020-07-23T10:50:33.592Z" } } } }
+          {"foo": "g", "bar": 8, "baz": {"qux": { "ts": { "$offsetdatetime": "2020-07-23T10:50:33.592Z" } } } }
+          {"foo": "h", "bar": 7, "baz": {"qux": { "ts": { "$offsetdatetime": "2020-07-23T10:50:33.592Z" } } } }
+          {"foo": "h", "bar": 8, "baz": {"qux": { "ts": { "$offsetdatetime": "2020-07-23T10:50:33.592Z" } } } }
+          """)
+
+        val after = OffsetDateTime.of(2020, 7, 22, 5, 0, 0, 0, ZoneOffset.UTC)
+        val offset = Offset(NonEmptyList.of("baz".asLeft, "qux".asLeft, "ts".asLeft), ∃(OffsetKey.Actual.dateTime(after)))
+        val stages =
+          ScalarStages(
+            IdStatus.ExcludeId,
+            List(
+              ScalarStage.Mask(
+                Map(
+                  CPath.parse("foo") -> Set(ColumnType.Array),
+                  CPath.parse("bar") -> Set(ColumnType.Array),
+                  CPath.parse("baz") -> ColumnType.Top)),
+              ScalarStage.Cartesian(
+                Map(
+                  CPathField("foo") -> (CPathField("foo") -> List(Pivot(IdStatus.ExcludeId, ColumnType.Array))),
+                  CPathField("bar") -> (CPathField("bar") -> List(Pivot(IdStatus.ExcludeId, ColumnType.Array))),
+                  CPathField("baz") -> (CPathField("baz") -> List.empty)))))
+
+        val actual = interpretWithOffset(stages, input, offset.some, x => x)
+
+        actual must bestSemanticEqualNoId(expected)
+      }
+    }
+
     "without pushdown" >> {
       "on datetime" >> {
         val input = ldjson("""
