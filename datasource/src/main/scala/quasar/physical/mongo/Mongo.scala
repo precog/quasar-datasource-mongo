@@ -224,10 +224,10 @@ final class Mongo[F[_]: MonadResourceErr: ConcurrentEffect: ContextShift] privat
       case Some(pipelineDocs) =>
         evaluateImpl(collection, pipelineDocs) flatMap {
           case Right(results) => (stages, results).pure[F]
-          case Left(_) => MonadResourceErr[F].raiseError(ResourceError.seekFailed(collection.resourcePath))
+          case Left(_) => MonadResourceErr[F].raiseError(ResourceError.seekFailed(collection.resourcePath, "Could not execute $match stage"))
         }
       case None =>
-        MonadResourceErr[F].raiseError(ResourceError.seekFailed(collection.resourcePath))
+        MonadResourceErr[F].raiseError(ResourceError.seekFailed(collection.resourcePath, "Could not compile offset into $match stage"))
     }
 }
 
