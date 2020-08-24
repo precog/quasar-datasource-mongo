@@ -21,18 +21,13 @@ import slamdata.Predef._
 import cats.effect._
 import cats.effect.concurrent.MVar
 import cats.effect.syntax.bracket._
-import cats.syntax.eq._
-import cats.syntax.flatMap._
-import cats.syntax.functor._
-import cats.syntax.either._
-import cats.syntax.functor._
-import cats.syntax.either._
+import cats.implicits._
 
 import fs2.concurrent.{NoneTerminatedQueue, Queue}
 import fs2.Stream
 
 import quasar.api.resource.ResourcePath
-import quasar.connector.{MonadResourceErr, ResourceError}
+import quasar.connector.{MonadResourceErr, Offset, ResourceError}
 import quasar.physical.mongo.MongoResource.{Collection, Database}
 import quasar.{IdStatus, ScalarStages}
 
@@ -43,12 +38,13 @@ import org.mongodb.scala._
 
 import shims.equalToCats
 
-class Mongo[F[_]: MonadResourceErr : ConcurrentEffect : ContextShift] private[mongo](
+final class Mongo[F[_]: MonadResourceErr: ConcurrentEffect: ContextShift] private[mongo](
     client: MongoClient,
     batchSize: Long,
     pushdownLevel: PushdownLevel,
-    val interpret: Interpreter.Interpret,
-    val accessedResource: Option[MongoResource]) {
+    interpret: Interpreter.StageInterpret,
+    offsetInterpret: Interpreter.OffsetInterpret,
+    accessedResource: Option[MongoResource]) {
   import Mongo._
 
   val F: ConcurrentEffect[F] = ConcurrentEffect[F]
@@ -106,7 +102,7 @@ class Mongo[F[_]: MonadResourceErr : ConcurrentEffect : ContextShift] private[mo
       Stream.eval(MonadResourceErr.raiseError(ResourceError.connectionFailed(path, Some(detail), Some(ex))))
     case MongoAccessDenied((ex, detail)) =>
       Stream.eval(MonadResourceErr.raiseError(ResourceError.accessDenied(path, Some(detail), Some(ex))))
-    case t => Stream.raiseError(t)
+    case t => Stream.raiseError[F](t)
   }
 
   def databases: Stream[F, Database] = {
@@ -116,8 +112,8 @@ class Mongo[F[_]: MonadResourceErr : ConcurrentEffect : ContextShift] private[mo
       fallbackDb.fold[Stream[F, Database]](ifEmpty)(Stream.emit)
 
     val recoverAccessDenied: Throwable => Stream[F, Database] = {
-      case MongoAccessDenied((ex, _)) => emitFallbackOr(Stream.raiseError(ex))
-      case t: Throwable => Stream.raiseError(t)
+      case MongoAccessDenied((ex, _)) => emitFallbackOr(Stream.raiseError[F](ex))
+      case t: Throwable => Stream.raiseError[F](t)
     }
 
     val dbs = observableAsStream(client.listDatabaseNames, DefaultQueueSize)
@@ -142,8 +138,8 @@ class Mongo[F[_]: MonadResourceErr : ConcurrentEffect : ContextShift] private[mo
     }
 
     val recoverAccessDenied: Throwable => Stream[F, Collection] = {
-      case MongoAccessDenied((ex, _)) => emitFallbackOr(Stream.raiseError(ex))
-      case t: Throwable => Stream.raiseError(t)
+      case MongoAccessDenied((ex, _)) => emitFallbackOr(Stream.raiseError[F](ex))
+      case t: Throwable => Stream.raiseError[F](t)
     }
 
     val cols = for {
@@ -177,48 +173,62 @@ class Mongo[F[_]: MonadResourceErr : ConcurrentEffect : ContextShift] private[mo
       getCollection(collection).aggregate[BsonValue](aggs)
         .allowDiskUse(true))
 
-  def evaluateImpl(
-      collection: Collection,
-      aggs: List[BsonDocument],
-      fallback: F[Stream[F, BsonValue]])
-      : F[(Boolean, Stream[F, BsonValue])] = {
+  def evaluateImpl(collection: Collection, aggs: List[BsonDocument])
+      : F[Either[Throwable, Stream[F, BsonValue]]] = {
+
     val aggregated =
       aggregate(collection, aggs)
+
     val hd: F[Either[Throwable, Option[BsonValue]]] =
       F.attempt(aggregated flatMap (_.head.compile.last))
-    hd flatMap {
-      case Right(_) =>
-        aggregated map ((true, _))
-      case Left(_) =>
-        fallback map ((false, _))
-    }
+
+    hd.flatMap(_.as(aggregated).sequence)
   }
 
-  def evaluate(
-      collection: Collection,
-      stages: ScalarStages)
+  def evaluate(collection: Collection, stages: ScalarStages, offset: Option[Offset])
       : F[(ScalarStages, Stream[F, BsonValue])] = {
+    (stages, pushdownLevel, offset) match {
+      case (ScalarStages.Id, _, Some(offset)) =>
+        evaluateNoPushdownWithOffset(collection, stages, offset)
 
-    val fallback: F[(ScalarStages, Stream[F, BsonValue])] =
-      findAll(collection) map (x => (stages, x))
+      case (_, PushdownLevel.Disabled, Some(offset)) =>
+        evaluateNoPushdownWithOffset(collection, stages, offset)
 
-    if (ScalarStages.Id === stages || pushdownLevel === PushdownLevel.Disabled) fallback
-    else {
-      val result = interpret(stages)
-      if (result._1.docs.isEmpty) fallback
-      else evaluateImpl(collection, result._1.docs, fallback map (_._2)) flatMap {
-        case (isOk, stream) if isOk =>
-          val newStream = stream map result._2.bson
-          val newStages = ScalarStages(IdStatus.ExcludeId, result._1.stages)
-          F.point((newStages, newStream))
-        case _ => fallback
-      }
+      case (_, _, offset) =>
+        val (interpretation, mapper) = interpret(stages, offset)
+
+        val fallback: F[(ScalarStages, Stream[F, BsonValue])] =
+          findAll(collection).tupleLeft(stages)
+
+        if (interpretation.docs.isEmpty)
+          fallback
+        else
+          evaluateImpl(collection, interpretation.docs) flatMap {
+            case Right(stream) =>
+              val newStream = stream map mapper.bson
+              val newStages = ScalarStages(IdStatus.ExcludeId, interpretation.stages)
+
+              (newStages, newStream).pure[F]
+
+            case _ => fallback
+          }
     }
   }
 
   private [mongo] def getCollection(collection: Collection): MongoCollection[Document] =
     client.getDatabase(collection.database.name).getCollection(collection.name)
 
+  private def evaluateNoPushdownWithOffset(collection: Collection, stages: ScalarStages, offset: Offset)
+      : F[(ScalarStages, Stream[F, BsonValue])] =
+    offsetInterpret(offset) match {
+      case Some(pipelineDocs) =>
+        evaluateImpl(collection, pipelineDocs) flatMap {
+          case Right(results) => (stages, results).pure[F]
+          case Left(_) => MonadResourceErr[F].raiseError(ResourceError.seekFailed(collection.resourcePath, "Could not execute $match stage"))
+        }
+      case None =>
+        MonadResourceErr[F].raiseError(ResourceError.seekFailed(collection.resourcePath, "Could not compile offset into $match stage"))
+    }
 }
 
 object Mongo {
@@ -354,8 +364,17 @@ object Mongo {
     mkClient(config, blocker) evalMap { client =>
       for {
         version <- getVersion(client)
-        interpreter <- Interpreter(version, config.pushdownLevel)
-      } yield new Mongo[F](client, scala.math.max(1L, config.batchSize.toLong), config.pushdownLevel, interpreter, config.accessedResource)
+        uuid <- Sync[F].delay(java.util.UUID.randomUUID.toString)
+        stageInterpreter = Interpreter.stages(version, config.pushdownLevel, uuid)
+        offsetInterpreter = Interpreter.offset(version, uuid)
+        batchSize = scala.math.max(1L, config.batchSize.toLong)
+      } yield new Mongo[F](
+        client,
+        batchSize,
+        config.pushdownLevel,
+        stageInterpreter,
+        offsetInterpreter,
+        config.accessedResource)
     }
   }
 }

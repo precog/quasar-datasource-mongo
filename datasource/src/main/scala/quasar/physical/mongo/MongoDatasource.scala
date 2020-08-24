@@ -26,36 +26,20 @@ import fs2.Stream
 
 import quasar.api.datasource.DatasourceType
 import quasar.api.resource.{ResourceName, ResourcePath, ResourcePathType}
-import quasar.connector.{MonadResourceErr, QueryResult, ResourceError}
+import quasar.connector.{MonadResourceErr, Offset, QueryResult, ResourceError}
 import quasar.connector.datasource._
 import quasar.physical.mongo.decoder.qdataDecoder
 import quasar.physical.mongo.MongoResource.{Collection, Database}
 import quasar.qscript.InterpretedRead
 
-class MongoDataSource[F[_]: ConcurrentEffect: ContextShift: MonadResourceErr: Timer](mongo: Mongo[F])
-    extends LightweightDatasource[Resource[F, ?], Stream[F, ?], QueryResult[F]] {
+final class MongoDataSource[F[_]: ConcurrentEffect: ContextShift: MonadResourceErr: Timer](
+  mongo: Mongo[F]) extends LightweightDatasource[Resource[F, ?], Stream[F, ?], QueryResult[F]] {
 
   val kind = MongoDataSource.kind
 
-  val loaders = NonEmptyList.of(Loader.Batch(BatchLoader.Full { (iRead: InterpretedRead[ResourcePath]) =>
-    val path = iRead.path
-    val errored =
-      MonadResourceErr.raiseError(ResourceError.pathNotFound(path))
-
-    val fStreamPair = path match {
-      case ResourcePath.Root => errored
-      case ResourcePath.Leaf(file) => MongoResource.ofFile(file) match {
-        case None => errored
-        case Some(Database(_)) => errored
-        case Some(collection@Collection(_, _)) =>
-          mongo.evaluate(collection, iRead.stages)
-      }
-    }
-
-    Resource.liftF(fStreamPair map {
-      case (insts, stream) => QueryResult.parsed(qdataDecoder, stream, insts)
-    })
-  }))
+  val loaders = NonEmptyList.of(
+    Loader.Batch(BatchLoader.Full(loader(_, none))),
+    Loader.Batch(BatchLoader.Seek(loader(_, _))))
 
   def pathIsResource(path: ResourcePath): Resource[F, Boolean] =
     Resource.liftF(path match {
@@ -67,7 +51,7 @@ class MongoDataSource[F[_]: ConcurrentEffect: ContextShift: MonadResourceErr: Ti
       }
     })
 
-  override def prefixedChildPaths(prefixPath: ResourcePath)
+  def prefixedChildPaths(prefixPath: ResourcePath)
       : Resource[F, Option[Stream[F, (ResourceName, ResourcePathType.Physical)]]] =
     Resource.liftF(prefixPath match {
       case ResourcePath.Root =>
@@ -92,6 +76,29 @@ class MongoDataSource[F[_]: ConcurrentEffect: ContextShift: MonadResourceErr: Ti
           }
       }
     })
+
+  ////
+
+  private def loader(iRead: InterpretedRead[ResourcePath], offset: Option[Offset]):
+      Resource[F, QueryResult[F]] = {
+    val path = iRead.path
+    val errored =
+      MonadResourceErr.raiseError(ResourceError.pathNotFound(path))
+
+    val fStreamPair = path match {
+      case ResourcePath.Root => errored
+      case ResourcePath.Leaf(file) => MongoResource.ofFile(file) match {
+        case None => errored
+        case Some(Database(_)) => errored
+        case Some(collection@Collection(_, _)) =>
+          mongo.evaluate(collection, iRead.stages, offset)
+      }
+    }
+
+    Resource.liftF(fStreamPair map {
+      case (insts, stream) => QueryResult.parsed(qdataDecoder, stream, insts)
+    })
+  }
 }
 
 object MongoDataSource {

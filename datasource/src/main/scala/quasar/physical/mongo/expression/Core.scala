@@ -20,6 +20,8 @@ import slamdata.{Predef => s}, s.{Int => _, String => _, Eq => _, _}
 
 import quasar.{RenderTree, NonTerminal, Terminal}
 
+import java.time.OffsetDateTime
+
 import cats._
 import cats.implicits._
 import higherkindness.droste.Delay
@@ -33,7 +35,10 @@ object Core {
   final case class Object[A](value: Map[s.String, A]) extends Core[A]
   final case class Bool[A](value: Boolean) extends Core[A]
   final case class Int[A](value: s.Int) extends Core[A]
+  final case class Long[A](value: s.Long) extends Core[A]
+  final case class Double[A](value: s.Double) extends Core[A]
   final case class String[A](value: s.String) extends Core[A]
+  final case class DateTime[A](value: OffsetDateTime) extends Core[A]
   final case class Null[A]() extends Core[A]
 
 
@@ -43,7 +48,10 @@ object Core {
       case Object(v) => v.toList.traverse(_.traverse(f)).map(x => Object(x.toMap))
       case Bool(v) => (Bool(v): Core[B]).pure[G]
       case Int(v) => (Int(v): Core[B]).pure[G]
+      case Long(v) => (Long(v): Core[B]).pure[G]
+      case Double(v) => (Double(v): Core[B]).pure[G]
       case String(v) => (String(v): Core[B]).pure[G]
+      case DateTime(v) => (DateTime(v): Core[B]).pure[G]
       case Null() => (Null(): Core[B]).pure[G]
     }
   }
@@ -59,8 +67,14 @@ object Core {
       Prism.partial[Core[A], Boolean]{case Bool(v) => v}(Bool(_))
     val _int =
       Prism.partial[Core[A], s.Int]{case Int(v) => v}(Int(_))
+    val _long =
+      Prism.partial[Core[A], s.Long]{case Long(v) => v}(Long(_))
+    val _double =
+      Prism.partial[Core[A], s.Double]{case Double(v) => v}(Double(_))
     val _str =
       Prism.partial[Core[A], s.String]{case String(v) => v}(String(_))
+    val _dateTime =
+      Prism.partial[Core[A], OffsetDateTime]{case DateTime(v) => v}(DateTime(_))
     val _nil =
       Prism.partial[Core[A], Unit]{case Null() => ()}(x => Null())
 
@@ -68,7 +82,10 @@ object Core {
     val obj = core composePrism _obj
     val bool = core composePrism _bool
     val int = core composePrism _int
+    val long = core composePrism _long
+    val double = core composePrism _double
     val str = core composePrism _str
+    val dateTime = core composePrism _dateTime
     val nil = core composePrism _nil
   }
 
@@ -80,7 +97,10 @@ object Core {
       })
       case Bool(a) => Terminal(List("Boolean"), Some(a.toString))
       case Int(a) => Terminal(List("Int"), Some(a.toString))
+      case Long(a) => Terminal(List("Long"), Some(a.toString))
+      case Double(a) => Terminal(List("Double"), Some(a.toString))
       case String(a) => Terminal(List("String"), Some(a))
+      case DateTime(a) => Terminal(List("DateTime"), Some(a.toString))
       case Null() => Terminal(List("Null"), None)
     }
   }
