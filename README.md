@@ -28,15 +28,31 @@ Configuration
 
 ## Testing
 
-The simplest way to test is using Nix system and run subset of `.travis.yml`:
+The simplest way to test is using Nix system and run subset of `.travis.yml`. One time only, generate an ssh key:
 
 ```bash
-$> docker run -d -p 127.0.0.1:27018:27017 --name mongodb -e MONGODB_ROOT_PASSWORD=secret bitnami/mongodb:4.1.4
-$> docker-compose up -d
+$> """ssh-keygen -t rsa -N "passphrase" -f key_for_docker""",
 ```
 
-The second command starts two containers:
+Then, when you want to test, run this:
+
+```bash
+$> docker swarm init
+$> docker stack deploy -c docker-compose.yml teststack
+```
+
+It starts multiple containers:
 + sshd with `root:root` with `22222` ssh port
 + mongo aliased as `mng` for sshd container.
++ plain mongo on port 27018
++ SSL-enabled mongo on port 27019
++ SSL-enabled mongo with client-required key on port 27020
+
+You can stop it afterwards with
+
+```bash
+$> docker stack rm teststack
+$> docker swarm leave --force
+```
 
 (Unfortunately `docker-compose` doesn't work on Windows for me @cryogenian 29.04.2019)

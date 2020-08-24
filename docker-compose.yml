@@ -1,18 +1,54 @@
-version: '3'
+version: '3.8'
 
 services:
   sshd:
     image: rastasheep/ubuntu-sshd:18.04
-    network_mode: "bridge"
     ports:
       - "22222:22"
-    links:
-      - "mongo:mng"
+    secrets:
+      - source: authorized_keys
+        target: /root/.ssh/authorized_keys
+        mode: 0600
 
   mongo:
     image: bitnami/mongodb:4.1.4
-    network_mode: "bridge"
-    expose:
-      - "27017"
     environment:
       MONGODB_ROOT_PASSWORD: secret
+    networks:
+      default:
+        aliases:
+          - mng
+
+  mongodb:
+    image: bitnami/mongodb:4.1.4
+    ports:
+      - "27018:27017"
+    environment:
+      MONGODB_ROOT_PASSWORD: secret
+
+  mongodb-ssl:
+    image: bitnami/mongodb:4.1.4
+    ports:
+      - "27019:27017"
+    environment:
+      MONGODB_EXTRA_FLAGS: --sslMode requireSSL --sslPEMKeyFile /run/secrets/cert.pem
+    secrets:
+      - "cert.pem"
+
+  mongodb-ssl-client:
+    image: bitnami/mongodb:4.1.4
+    ports:
+      - "27020:27017"
+    environment:
+      MONGODB_EXTRA_FLAGS: --sslMode requireSSL --sslPEMKeyFile /run/secrets/cert.pem --sslCAFile /run/secrets/ca.pem
+    secrets:
+      - "cert.pem"
+      - "ca.pem"
+
+secrets:
+  authorized_keys:
+    file: ./key_for_docker.pub
+  "cert.pem":
+    file: ./certs/quasar-mongo-travis.pem
+  "ca.pem":
+    file: ./certs/client.crt
