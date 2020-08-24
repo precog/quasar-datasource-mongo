@@ -90,7 +90,7 @@ object Interpreter {
 
         val path0 = path map {
           case Left(field) => field
-          case Right(right) => right.show
+          case Right(right) => right.toString
         }
 
         val value = key match {
