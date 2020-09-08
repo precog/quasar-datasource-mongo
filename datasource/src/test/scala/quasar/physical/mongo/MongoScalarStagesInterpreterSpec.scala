@@ -25,9 +25,7 @@ import org.bson.{Document => _, _}
 
 import quasar.api.ColumnType
 import quasar.api.push.OffsetKey
-import quasar.connector.Offset
 import quasar.common.{CPath, CPathField}
-import quasar.connector.Offset
 import quasar.{IdStatus, ScalarStageSpec => Spec, ScalarStage, ScalarStages}
 
 import java.time.{OffsetDateTime, ZoneOffset}
@@ -227,7 +225,7 @@ class MongoScalarStagesInterpreterSpec
           """)
 
         val after = OffsetDateTime.of(2020, 7, 22, 5, 0, 0, 0, ZoneOffset.UTC)
-        val offset = Offset(NonEmptyList.of("baz".asLeft, "qux".asLeft, "ts".asLeft), ∃(OffsetKey.Actual.dateTime(after)))
+        val offset = MongoOffset(NonEmptyList.of("baz".asLeft, "qux".asLeft, "ts".asLeft), ∃(OffsetKey.Actual.dateTime(after)))
         val stages =
           ScalarStages(
             IdStatus.ExcludeId,
@@ -264,7 +262,7 @@ class MongoScalarStagesInterpreterSpec
           """)
 
         val after = OffsetDateTime.of(2020, 7, 22, 5, 0, 0, 0, ZoneOffset.UTC)
-        val offset = Offset(NonEmptyList.of("bar".asLeft, "qux".asLeft, "ts".asLeft), ∃(OffsetKey.Actual.dateTime(after)))
+        val offset = MongoOffset(NonEmptyList.of("bar".asLeft, "qux".asLeft, "ts".asLeft), ∃(OffsetKey.Actual.dateTime(after)))
         val actual = interpretWithOffset(ScalarStages.Id, input, offset.some, x => x)
 
         actual must bestSemanticEqualNoId(expected)
@@ -283,7 +281,7 @@ class MongoScalarStagesInterpreterSpec
           {"foo": 4, "bar": {"qux": { "ix": ["d", 4] } } }
           """)
 
-        val offset = Offset(
+        val offset = MongoOffset(
           NonEmptyList.of("bar".asLeft, "qux".asLeft, "ix".asLeft, 1.asRight), ∃(OffsetKey.Actual.real(Real(3))))
         val actual = interpretWithOffset(ScalarStages.Id, input, offset.some, x => x)
 
@@ -305,7 +303,7 @@ class MongoScalarStagesInterpreterSpec
           {"foo": 4, "bar": {"qux": { "ix": ["d", ${startId + 4}] } } }
           """)
 
-        val offset = Offset(
+        val offset = MongoOffset(
           NonEmptyList.of("bar".asLeft, "qux".asLeft, "ix".asLeft, 1.asRight), ∃(OffsetKey.Actual.real(Real(startId + 3))))
         val actual = interpretWithOffset(ScalarStages.Id, input, offset.some, x => x)
 
@@ -325,7 +323,7 @@ class MongoScalarStagesInterpreterSpec
           {"foo": 4, "bar": {"qux": { "ix": ["d", 0.4] } } }
           """)
 
-        val offset = Offset(
+        val offset = MongoOffset(
           NonEmptyList.of("bar".asLeft, "qux".asLeft, "ix".asLeft, 1.asRight), ∃(OffsetKey.Actual.real(Real(0.3))))
 
         val actual = interpretWithOffset(ScalarStages.Id, input, offset.some, x => x)
@@ -346,7 +344,7 @@ class MongoScalarStagesInterpreterSpec
           {"foo": 4, "bar": {"qux": { "ix": ["d", "aad"] } } }
           """)
 
-        val offset = Offset(
+        val offset = MongoOffset(
           NonEmptyList.of("bar".asLeft, "qux".asLeft, "ix".asLeft, 1.asRight), ∃(OffsetKey.Actual.string("aac")))
 
         val actual = interpretWithOffset(ScalarStages.Id, input, offset.some, x => x)

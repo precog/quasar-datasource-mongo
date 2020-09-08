@@ -24,6 +24,7 @@ import cats.implicits._
 
 import fs2.Stream
 
+import quasar.api.DataPathSegment
 import quasar.api.datasource.DatasourceType
 import quasar.api.resource.{ResourceName, ResourcePath, ResourcePathType}
 import quasar.connector.{MonadResourceErr, Offset, QueryResult, ResourceError}
@@ -33,13 +34,12 @@ import quasar.physical.mongo.MongoResource.{Collection, Database}
 import quasar.qscript.InterpretedRead
 
 final class MongoDataSource[F[_]: ConcurrentEffect: ContextShift: MonadResourceErr: Timer](
-  mongo: Mongo[F]) extends LightweightDatasource[Resource[F, ?], Stream[F, ?], QueryResult[F]] {
+    mongo: Mongo[F])
+    extends LightweightDatasource[Resource[F, ?], Stream[F, ?], QueryResult[F]] {
 
   val kind = MongoDataSource.kind
 
-  val loaders = NonEmptyList.of(
-    Loader.Batch(BatchLoader.Full(loader(_, none))),
-    Loader.Batch(BatchLoader.Seek(loader(_, _))))
+  val loaders = NonEmptyList.of(Loader.Batch(BatchLoader.Seek(loader(_, _))))
 
   def pathIsResource(path: ResourcePath): Resource[F, Boolean] =
     Resource.liftF(path match {
@@ -91,13 +91,36 @@ final class MongoDataSource[F[_]: ConcurrentEffect: ContextShift: MonadResourceE
         case None => errored
         case Some(Database(_)) => errored
         case Some(collection@Collection(_, _)) =>
-          mongo.evaluate(collection, iRead.stages, offset)
+          offset
+            .traverse(mongoOffset(path, _))
+            .flatMap(mongo.evaluate(collection, iRead.stages, _))
       }
     }
 
     Resource.liftF(fStreamPair map {
       case (insts, stream) => QueryResult.parsed(qdataDecoder, stream, insts)
     })
+  }
+
+  private def mongoOffset(forResource: ResourcePath, offset: Offset): F[MongoOffset] = {
+    type S = Either[String, Int]
+
+    val supportedPath = offset.path traverse {
+      case DataPathSegment.Field(n) => (Left(n): S).pure[F]
+      case DataPathSegment.Index(i) => (Right(i): S).pure[F]
+
+      case DataPathSegment.AllFields =>
+        MonadResourceErr.raiseError[S](ResourceError.seekFailed(
+          forResource,
+          "Offset path containing 'all fields' is not supported."))
+
+      case DataPathSegment.AllIndices =>
+        MonadResourceErr.raiseError[S](ResourceError.seekFailed(
+          forResource,
+          "Offset path containing 'all indicies' is not supported."))
+    }
+
+    supportedPath.map(MongoOffset(_, offset.value))
   }
 }
 

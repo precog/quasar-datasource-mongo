@@ -27,7 +27,6 @@ import org.bson.types.Decimal128
 import org.mongodb.scala._
 import org.typelevel.jawn.{AsyncParser, Facade}
 
-import quasar.connector.Offset
 import quasar.contrib.std.errorImpossible
 import quasar.{JsonSpec, ScalarStages}
 
@@ -117,7 +116,7 @@ trait StageInterpreterSpec extends JsonSpec {
   def interpret(stages: ScalarStages, inp: JsonStream, mapper: (BsonValue => BsonValue)): JsonStream =
     interpretWithOffset(stages, inp, None, mapper)
 
-  def interpretWithOffset(stages: ScalarStages, inp: JsonStream, offset: Option[Offset], mapper: (BsonValue => BsonValue))
+  def interpretWithOffset(stages: ScalarStages, inp: JsonStream, offset: Option[MongoOffset], mapper: (BsonValue => BsonValue))
       : JsonStream = {
     mkMongo.use(mongo => for {
       c <- uniqueCollection
