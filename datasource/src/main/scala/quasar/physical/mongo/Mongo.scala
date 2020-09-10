@@ -27,7 +27,7 @@ import fs2.concurrent.{NoneTerminatedQueue, Queue}
 import fs2.Stream
 
 import quasar.api.resource.ResourcePath
-import quasar.connector.{MonadResourceErr, Offset, ResourceError}
+import quasar.connector.{MonadResourceErr, ResourceError}
 import quasar.physical.mongo.MongoResource.{Collection, Database}
 import quasar.{IdStatus, ScalarStages}
 
@@ -185,7 +185,7 @@ final class Mongo[F[_]: MonadResourceErr: ConcurrentEffect: ContextShift] privat
     hd.flatMap(_.as(aggregated).sequence)
   }
 
-  def evaluate(collection: Collection, stages: ScalarStages, offset: Option[Offset])
+  def evaluate(collection: Collection, stages: ScalarStages, offset: Option[MongoOffset])
       : F[(ScalarStages, Stream[F, BsonValue])] = {
     (stages, pushdownLevel, offset) match {
       case (ScalarStages.Id, _, Some(offset)) =>
@@ -218,7 +218,7 @@ final class Mongo[F[_]: MonadResourceErr: ConcurrentEffect: ContextShift] privat
   private [mongo] def getCollection(collection: Collection): MongoCollection[Document] =
     client.getDatabase(collection.database.name).getCollection(collection.name)
 
-  private def evaluateNoPushdownWithOffset(collection: Collection, stages: ScalarStages, offset: Offset)
+  private def evaluateNoPushdownWithOffset(collection: Collection, stages: ScalarStages, offset: MongoOffset)
       : F[(ScalarStages, Stream[F, BsonValue])] =
     offsetInterpret(offset) match {
       case Some(pipelineDocs) =>

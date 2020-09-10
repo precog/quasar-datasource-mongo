@@ -18,9 +18,8 @@ package quasar.physical.mongo
 
 import slamdata.Predef._
 
-import quasar.api.push.OffsetKey
 import quasar.{ScalarStage, ScalarStages, IdStatus}
-import quasar.connector.Offset
+import quasar.api.push.OffsetKey
 import quasar.physical.mongo.expression._
 import quasar.physical.mongo.interpreter._
 
@@ -32,9 +31,7 @@ import higherkindness.droste.data.Fix
 
 import org.bson._
 
-import skolems.∃
-
-trait Interpreter[F[_], U, -S] {
+trait Interpreter[F[_], U, -S] extends (S => F[List[Pipeline[U]]]) {
   def o(implicit U: Basis[Expr, U]) = Optics.full(Optics.basisPrism[Expr, U])
   def apply(s: S): F[List[Pipeline[U]]]
 }
@@ -43,13 +40,13 @@ object Interpreter {
 
   final case class Interpretation(stages: List[ScalarStage], docs: List[BsonDocument])
 
-  type StageInterpret = (ScalarStages, Option[Offset]) => (Interpretation, Mapper)
-  type OffsetInterpret = Offset => Option[List[BsonDocument]]
+  type StageInterpret = (ScalarStages, Option[MongoOffset]) => (Interpretation, Mapper)
+  type OffsetInterpret = MongoOffset => Option[List[BsonDocument]]
 
   def stages(version: Version, pushdown: PushdownLevel, uuid: String): StageInterpret = { (stages, offset) =>
     val stage = interpretStage[InState, Fix[Expr]](pushdown)
     val idStatus = interpretIdStatus[InState, Fix[Expr]](uuid)
-    val offsetDocs = offset.toList.flatMap(interpretOffset[Fix[Expr]].apply(_))
+    val offsetDocs = offset.toList.flatMap(interpretOffset[Fix[Expr]])
 
     def refine(inp: Interpretation): InState[Either[Interpretation, Interpretation]] =
       inp.stages match {
@@ -79,14 +76,14 @@ object Interpreter {
   }
 
   def offset(version: Version, uuid: String): OffsetInterpret =
-    offset => Compiler.compile[Option, Fix[Expr]](version, uuid, interpretOffset.apply(offset))
+    interpretOffset.andThen(Compiler.compile[Option, Fix[Expr]](version, uuid, _))
 
   def interpretOffset[U: Basis[Expr, ?]]
-      : Interpreter[Id, U, Offset] =
-    new Interpreter[Id, U, Offset] {
-      def apply(offset: Offset): List[Pipeline[U]] = {
+      : Interpreter[Id, U, MongoOffset] =
+    new Interpreter[Id, U, MongoOffset] {
+      def apply(offset: MongoOffset): List[Pipeline[U]] = {
         val path = offset.path
-        val key = offset.value
+        val key: OffsetKey[Id, _] = offset.value.value
 
         val path0 = path map {
           case Left(field) => field
@@ -94,25 +91,24 @@ object Interpreter {
         }
 
         val value = key match {
-          case ∃(offsetKey : OffsetKey.RealKey[Id]) =>
-            if (offsetKey.value.isValidInt)
-              o.int(offsetKey.value.intValue)
-            else if (offsetKey.value.isValidLong)
-              o.long(offsetKey.value.longValue)
+          case OffsetKey.RealKey(k) =>
+            if (k.isValidInt)
+              o.int(k.intValue)
+            else if (k.isValidLong)
+              o.long(k.longValue)
             else
-              o.double(offsetKey.value.doubleValue)
+              o.double(k.doubleValue)
 
-          case ∃(offsetKey : OffsetKey.StringKey[Id]) =>
-            o.str(offsetKey.value)
+          case OffsetKey.StringKey(k) =>
+            o.str(k)
 
-          case ∃(offsetKey : OffsetKey.DateTimeKey[Id]) =>
-            o.dateTime(offsetKey.value)
+          case OffsetKey.DateTimeKey(k) =>
+            o.dateTime(k)
         }
 
         val filterField = path0.intercalate(".")
 
-        List(
-          Pipeline.Match(o.obj(Map(filterField -> o.gte(value)))))
+        List(Pipeline.Match(o.obj(Map(filterField -> o.gte(value)))))
       }
     }
 
