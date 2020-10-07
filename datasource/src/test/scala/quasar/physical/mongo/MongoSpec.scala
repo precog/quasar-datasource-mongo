@@ -23,7 +23,8 @@ import cats.instances.list._
 import cats.syntax.apply._
 import cats.syntax.traverse._
 
-import quasar.{concurrent => qt}
+import quasar.concurrent._
+import quasar.concurrent.unsafe._
 import quasar.connector.ResourceError
 import quasar.physical.mongo.MongoResource.{Collection, Database}
 import quasar.EffectfulQSpec
@@ -51,17 +52,15 @@ class MongoSpec extends EffectfulQSpec[IO] {
 
   "can't create client from incorrect connection string" >> {
     "for incorrect protocol" >> {
-      Mongo[IO](
-        MongoConfig.basic("http://localhost"),
-        qt.Blocker.cached("not-used"))
+      Blocker.cached[IO]("not-used")
+        .flatMap(Mongo[IO](MongoConfig.basic("http://localhost"), _))
         .use(IO.pure)
         .unsafeRunSync() must throwA[java.lang.IllegalArgumentException]
     }
 
     "for unreachable config" >> {
-      Mongo[IO](
-        MongoConfig.basic("mongodb://unreachable"),
-        qt.Blocker.cached("not-used"))
+      Blocker.cached[IO]("not-used")
+        .flatMap(Mongo[IO](MongoConfig.basic("mongodb://unreachable"), _))
         .use(IO.pure)
         .unsafeRunSync() must throwA[MongoTimeoutException]
     }
@@ -167,7 +166,7 @@ class MongoSpec extends EffectfulQSpec[IO] {
   )
 
   "ssl" >> {
-    val fileReadBlocker: Blocker = qt.Blocker.cached("fs2-io-file")
+    val fileReadBlocker: Blocker = Blocker.unsafeCached("fs2-io-file")
     def fileInCerts(name: String): Resource[IO, String] =
       file.readAll[IO](Paths.get("certs", name), fileReadBlocker, 1024).compile.resource.toVector.map { (x: Vector[Byte]) =>
         new String(x.toArray, "UTF-8")
@@ -271,7 +270,7 @@ object MongoSpec {
   import Mongo._
   import TunnelConfig.Pass._
 
-  private lazy val blocker: Blocker = qt.Blocker.cached("mongo-datasource")
+  private lazy val blocker: Blocker = Blocker.unsafeCached("mongo-datasource")
 
   val dbs = List("A", "B", "C", "D")
   val cols = List("a", "b", "c", "d")
