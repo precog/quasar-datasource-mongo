@@ -19,13 +19,13 @@ package quasar.physical.mongo
 import slamdata.Predef._
 
 import cats.effect.IO
-import cats.syntax.foldable._
-import cats.instances.list._
+import cats.implicits._
 
-import org.bson.{Document => _, _}
+import org.bson._
 import org.bson.types.Decimal128
-import org.mongodb.scala._
 import org.typelevel.jawn.{AsyncParser, Facade}
+
+import fs2.interop.reactivestreams._
 
 import quasar.contrib.std.errorImpossible
 import quasar.{JsonSpec, ScalarStages}
@@ -44,6 +44,8 @@ import java.time.{
 
 import spire.math.Real
 
+import scala.collection.JavaConverters._
+
 import shims._
 import testImplicits._
 
@@ -56,19 +58,23 @@ trait StageInterpreterSpec extends JsonSpec {
 
   def mkCollection(name: String): Collection = Collection(Database("aggregation_test"), name)
 
-  def dropCollection(collection: Collection, mongo: Mongo[IO]): IO[Unit] = {
-    Mongo.singleObservableAsF[IO, Completed](mongo.getCollection(collection).drop())
+  def dropCollection(collection: Collection, mongo: Mongo[IO]): IO[Unit] =
+    mongo.getCollection(collection).drop()
+      .toStream[IO]
+      .compile
+      .lastOrError
       .attempt
-      .map(_ => ())
-  }
+      .void
 
   def insertValues(collection: Collection, mongo: Mongo[IO], vals: List[BsonValue]): IO[Unit] = {
-    def docs: List[Document] = vals foldMap {
-      case x: BsonDocument => List(Document(x))
-      case _ => List()
+    val docs: List[Document] = vals mapFilter {
+      case (d: BsonDocument) =>
+        Some(new Document(d.asInstanceOf[java.util.Map[String, AnyRef]]))
+      case _ =>
+        None
     }
-    Mongo.singleObservableAsF[IO, Completed](
-      mongo.getCollection(collection) insertMany docs) map (_ => ())
+
+    mongo.getCollection(collection).insertMany(docs.asJava).toStream[IO].compile.lastOrError.void
   }
 
   val uniqueCollection: IO[Collection] =

@@ -25,8 +25,8 @@ lazy val root = project
   .settings(noPublishSettings)
   .aggregate(core)
 
-val mongoVersion = "2.7.0"
 val shimsVersion = "2.2.0"
+val mongoReactiveVersion = "4.1.1"
 val slf4jVersion = "1.7.25"
 val specsVersion = "4.10.5"
 val jsrVersion = "3.0.2"
@@ -35,6 +35,7 @@ val catsEffectVersion   = "2.2.0"
 val iotaVersion = "0.3.10"
 val drosteVersion = "0.8.0"
 val catsMTLVersion = "0.7.1"
+val fs2Version = "2.3.0"
 
 lazy val core = project
   .in(file("datasource"))
@@ -46,19 +47,20 @@ lazy val core = project
     quasarPluginQuasarVersion := managedVersions.value("precog-quasar"),
     quasarPluginDatasourceFqcn := Some("quasar.physical.mongo.MongoDataSourceModule$"),
     quasarPluginDependencies ++= Seq(
-      "com.codecommit"             %% "shims"                      % shimsVersion,
-      "io.higherkindness"          %% "droste-core"                % drosteVersion,
-      "io.frees"                   %% "iota-core"                  % iotaVersion,
-      "org.typelevel"              %% "cats-effect"                % catsEffectVersion,
-      "org.typelevel"              %% "cats-mtl-core"              % catsMTLVersion,
-      "org.mongodb.scala"          %% "mongo-scala-driver"         % mongoVersion,
-      "com.jcraft"                 % "jsch"                        % jschVersion,
-      "com.precog"                 %% "quasar-foundation"          % managedVersions.value("precog-quasar") % Test classifier "tests",
-      "com.precog"                 %% "quasar-frontend"            % managedVersions.value("precog-quasar") % Test classifier "tests",
-      "org.slf4j"                  %  "slf4j-log4j12"              % slf4jVersion % Test,
-      "org.specs2"                 %% "specs2-core"                % specsVersion % Test,
-      "org.specs2"                 %% "specs2-scalaz"              % specsVersion % Test,
-      "org.specs2"                 %% "specs2-scalacheck"          % specsVersion % Test,
+      "com.codecommit"             %% "shims"                          % shimsVersion,
+      "io.higherkindness"          %% "droste-core"                    % drosteVersion,
+      "io.frees"                   %% "iota-core"                      % iotaVersion,
+      "co.fs2"                     %% "fs2-reactive-streams"           % fs2Version,
+      "org.typelevel"              %% "cats-effect"                    % catsEffectVersion,
+      "org.typelevel"              %% "cats-mtl-core"                  % catsMTLVersion,
+      "org.mongodb"                %  "mongodb-driver-reactivestreams" % mongoReactiveVersion,
+      "com.jcraft"                 % "jsch"                            % jschVersion,
+      "com.precog"                 %% "quasar-foundation"              % managedVersions.value("precog-quasar") % Test classifier "tests",
+      "com.precog"                 %% "quasar-frontend"                % managedVersions.value("precog-quasar") % Test classifier "tests",
+      "org.slf4j"                  %  "slf4j-log4j12"                  % slf4jVersion % Test,
+      "org.specs2"                 %% "specs2-core"                    % specsVersion % Test,
+      "org.specs2"                 %% "specs2-scalaz"                  % specsVersion % Test,
+      "org.specs2"                 %% "specs2-scalacheck"              % specsVersion % Test,
 
       // mongo's `getDatabase` and `getCollection` have `Nullable` annotations and they raise
       // warnings w/o this dependency
