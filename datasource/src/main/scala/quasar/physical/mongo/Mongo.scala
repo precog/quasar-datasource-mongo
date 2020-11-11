@@ -19,7 +19,7 @@ package quasar.physical.mongo
 import slamdata.Predef._
 
 import cats.effect._
-import cats.effect.concurrent.MVar
+import cats.effect.concurrent.{MVar, MVar2}
 import cats.effect.syntax.bracket._
 import cats.implicits._
 
@@ -52,7 +52,7 @@ final class Mongo[F[_]: MonadResourceErr: ConcurrentEffect: ContextShift] privat
   private def observableAsStream[A](obs: Observable[A], queueSize: Long): Stream[F, A] = {
     def run(action: F[Unit]): Unit = F.runAsync(action)(_ => IO.unit).unsafeRunSync
 
-    def handler(subVar: MVar[F, Subscription], cb: Option[Either[Throwable, A]] => Unit): Unit = {
+    def handler(subVar: MVar2[F, Subscription], cb: Option[Either[Throwable, A]] => Unit): Unit = {
       obs.subscribe(new Observer[A] {
         override def onSubscribe(sub: Subscription): Unit = run {
           for {
@@ -76,7 +76,7 @@ final class Mongo[F[_]: MonadResourceErr: ConcurrentEffect: ContextShift] privat
 
     def enqueueObservable(
         obsQ: NoneTerminatedQueue[F, Either[Throwable, A]],
-        subVar: MVar[F, Subscription])
+        subVar: MVar2[F, Subscription])
         : Stream[F, Unit] =
       Stream.eval(F.delay(handler(subVar, { x => run(obsQ.enqueue1(x)) })))
 
