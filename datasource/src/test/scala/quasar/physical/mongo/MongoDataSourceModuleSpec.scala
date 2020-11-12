@@ -44,4 +44,10 @@ class MongoDataSourceModuleSpec extends EffectfulQSpec[IO] {
     RateLimiter[IO, UUID](1.0, IO.delay(UUID.randomUUID()), NoopRateLimitUpdater[IO, UUID]).flatMap(rl =>
       MongoDataSourceModule.lightweightDatasource[IO, UUID](config, rl, ByteStore.void[IO], _ => IO(None)).use(r => IO(r must beRight)))
   }
+
+  "Using unreachable config produces Right Disposable too" >>* {
+    val config = MongoConfig.basic("mongodb://unreachable/?serverSelectionTimeoutMS=1000").withBatchSize(1).asJson
+    RateLimiter[IO, UUID](1.0, IO.delay(UUID.randomUUID()), NoopRateLimitUpdater[IO, UUID]).flatMap(rl =>
+      MongoDataSourceModule.lightweightDatasource[IO, UUID](config, rl, ByteStore.void[IO], _ => IO(None)).use(r => IO(r must beRight)))
+  }
 }

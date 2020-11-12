@@ -23,7 +23,6 @@ import quasar.api.datasource.{DatasourceError, DatasourceType}, DatasourceError.
 import quasar.concurrent._
 import quasar.connector.{ByteStore, MonadResourceErr, ExternalCredentials}
 import quasar.connector.datasource.{LightweightDatasourceModule, Reconfiguration}
-//import quasar.physical.mongo.Mongo.{MongoAccessDenied, MongoConnectionFailed}
 
 import java.util.UUID
 import scala.concurrent.ExecutionContext
