@@ -45,7 +45,7 @@ import shims.equalToCats
 
 final class Mongo[F[_]: MonadResourceErr: ConcurrentEffect: ContextShift] private[mongo](
     client: MongoClient,
-    batchSize: Long,
+    batchSize: Int,
     pushdownLevel: PushdownLevel,
     interpret: Interpreter.StageInterpret,
     offsetInterpret: Interpreter.OffsetInterpret,
@@ -125,12 +125,21 @@ final class Mongo[F[_]: MonadResourceErr: ConcurrentEffect: ContextShift] privat
     }
 
   def findAll(collection: Collection): F[Stream[F, BsonValue]] =
-    withCollectionExists(collection, getCollection(collection).find(classOf[BsonValue]).toStream)
+    withCollectionExists(
+      collection,
+      getCollection(collection)
+        .find(classOf[BsonValue])
+        .batchSize(batchSize)
+        .toStream)
 
   def aggregate(collection: Collection, aggs: List[BsonDocument]): F[Stream[F, BsonValue]] =
     withCollectionExists(
       collection,
-      getCollection(collection).aggregate(aggs.asJava, classOf[BsonValue]).allowDiskUse(true).toStream)
+      getCollection(collection)
+        .aggregate(aggs.asJava, classOf[BsonValue])
+        .allowDiskUse(true)
+        .batchSize(batchSize)
+        .toStream)
 
   def evaluateImpl(collection: Collection, aggs: List[BsonDocument])
       : F[Either[Throwable, Stream[F, BsonValue]]] = {
@@ -315,7 +324,7 @@ object Mongo {
         uuid <- Sync[F].delay(java.util.UUID.randomUUID.toString)
         stageInterpreter = Interpreter.stages(version, config.pushdownLevel, uuid)
         offsetInterpreter = Interpreter.offset(version, uuid)
-        batchSize = scala.math.max(1L, config.batchSize.toLong)
+        batchSize = scala.math.max(1, config.batchSize)
       } yield new Mongo[F](
         client,
         batchSize,
