@@ -17,7 +17,6 @@
 package quasar.physical.mongo
 
 import slamdata.Predef._
-import scala.Predef.classOf
 
 import cats.effect.{Blocker, IO, Resource}
 import cats.implicits._
@@ -28,11 +27,10 @@ import quasar.connector.ResourceError
 import quasar.physical.mongo.MongoResource.{Collection, Database}
 import quasar.EffectfulQSpec
 
-import org.bson._
+import org.bson.{Document => _, _}
+import org.mongodb.scala._
 
 import org.reactivestreams.Publisher
-
-import com.mongodb._
 
 import org.specs2.specification.core._
 import org.specs2.execute.AsResult
@@ -44,8 +42,6 @@ import fs2.interop.reactivestreams._
 
 import java.nio.file.Paths
 import java.lang.Void
-
-import scala.collection.JavaConverters._
 
 import shims._
 import testImplicits._
@@ -348,11 +344,9 @@ object MongoSpec {
         blocker)
 
       stages = Interpreter.stages(Version(0, 0, 0), PushdownLevel.Full, "redundant")
+
       offset = Interpreter.offset(Version(0, 0, 0), "redundant")
-    } yield {
-      new Mongo[IO](
-        client, BatchSize.toLong, PushdownLevel.Full, stages, offset, None)
-    }
+    } yield new Mongo[IO](client, BatchSize, PushdownLevel.Full, stages, offset, None)
 
   def mkBMongo: Resource[IO, Mongo[IO]] =
     Mongo[IO](MongoConfig(bConnectionString, BatchSize, PushdownLevel.Full, None, None), blocker)
@@ -397,9 +391,7 @@ object MongoSpec {
 
         _ <- singletonPublisher[Void](mongoCollection.drop).attempt
 
-        _ <- singletonPublisher(
-          mongoCollection.insertOne(
-            new Document(col.name, new BsonString(col.database.name))))
+        _ <- singletonPublisher(mongoCollection.insertOne(Document(col.name -> col.database.name)))
 
         // aUser:aPassword --> read only access to only one db, this
         // means that aUser can't run listDatabases
@@ -407,35 +399,21 @@ object MongoSpec {
 
         _ <- singletonPublisher[Document](
           aDatabase.runCommand(
-            new Document(
-              Map[String, AnyRef](
-                "createUser" -> "aUser",
-                "pwd" -> "aPassword",
-                "roles" ->
-                  new BsonArray(
-                    List(
-                      new BsonDocument(List(
-                        new BsonElement("role", new BsonString("read")),
-                        new BsonElement("db", new BsonString("A"))).asJava)).asJava)).asJava),
-            classOf[Document])).attempt
+            Document(
+              "createUser" -> "aUser",
+              "pwd" -> "aPassword",
+              "roles" -> List(Document("role" -> "read", "db" -> "A"))))).attempt
 
         // bUser:bPassword --> can do anything with "B" roles, but
         // can't do anything with data level listCollections
         bDatabase <- IO.delay(client.getDatabase("B"))
 
         _ <- singletonPublisher[Document](
-          bDatabase.runCommand(
-            new Document(
-              Map[String, AnyRef](
-                "createUser" -> "bUser",
-                "pwd" -> "bPassword",
-                "roles" ->
-                  new BsonArray(
-                    List(
-                      new BsonDocument(List(
-                        new BsonElement("role", new BsonString("userAdmin")),
-                        new BsonElement("db", new BsonString("B"))).asJava)).asJava)).asJava),
-            classOf[Document])).attempt
+          aDatabase.runCommand(
+            Document(
+              "createUser" -> "bUser",
+              "pwd" -> "bPassword",
+              "roles" -> List(Document("role" -> "userAdmin", "db" -> "B"))))).attempt
         } yield ()
       }
     } yield ())

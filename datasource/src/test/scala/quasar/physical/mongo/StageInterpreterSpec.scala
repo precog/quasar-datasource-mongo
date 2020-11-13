@@ -21,7 +21,8 @@ import slamdata.Predef._
 import cats.effect.IO
 import cats.implicits._
 
-import org.bson._
+import org.bson.{Document => _, _}
+import org.mongodb.scala._
 import org.bson.types.Decimal128
 import org.typelevel.jawn.{AsyncParser, Facade}
 
@@ -43,8 +44,6 @@ import java.time.{
 }
 
 import spire.math.Real
-
-import scala.collection.JavaConverters._
 
 import shims._
 import testImplicits._
@@ -68,13 +67,11 @@ trait StageInterpreterSpec extends JsonSpec {
 
   def insertValues(collection: Collection, mongo: Mongo[IO], vals: List[BsonValue]): IO[Unit] = {
     val docs: List[Document] = vals mapFilter {
-      case (d: BsonDocument) =>
-        Some(new Document(d.asInstanceOf[java.util.Map[String, AnyRef]]))
-      case _ =>
-        None
+      case (d: BsonDocument) => Some(Document(d))
+      case _ => None
     }
 
-    mongo.getCollection(collection).insertMany(docs.asJava).toStream[IO].compile.lastOrError.void
+    mongo.getCollection(collection).insertMany(docs).toStream[IO].compile.lastOrError.void
   }
 
   val uniqueCollection: IO[Collection] =

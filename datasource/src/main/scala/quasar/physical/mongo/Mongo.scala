@@ -17,7 +17,6 @@
 package quasar.physical.mongo
 
 import slamdata.Predef._
-import scala.Predef.{boolean2Boolean, classOf}
 import scala.util.Either
 
 import cats.effect._
@@ -31,13 +30,12 @@ import quasar.connector.{MonadResourceErr, ResourceError}
 import quasar.physical.mongo.MongoResource.{Collection, Database}
 import quasar.{IdStatus, ScalarStages}
 
-import org.bson._
+import org.bson.{Document => _, _}
 
-import com.mongodb._
-import com.mongodb.connection.{ClusterSettings, SslSettings}
-import com.mongodb.reactivestreams.client._
+import org.mongodb.scala._
+import org.mongodb.scala.connection.{ClusterSettings, SslSettings}
 
-import scala.collection.JavaConverters._
+import com.mongodb.Block
 
 import java.lang.{ClassCastException, NumberFormatException}
 
@@ -128,7 +126,7 @@ final class Mongo[F[_]: MonadResourceErr: ConcurrentEffect: ContextShift] privat
     withCollectionExists(
       collection,
       getCollection(collection)
-        .find(classOf[BsonValue])
+        .find[BsonValue]
         .batchSize(batchSize)
         .toStream)
 
@@ -136,7 +134,7 @@ final class Mongo[F[_]: MonadResourceErr: ConcurrentEffect: ContextShift] privat
     withCollectionExists(
       collection,
       getCollection(collection)
-        .aggregate(aggs.asJava, classOf[BsonValue])
+        .aggregate[BsonValue](aggs)
         .allowDiskUse(true)
         .batchSize(batchSize)
         .toStream)
@@ -235,12 +233,18 @@ object Mongo {
         conn <- F.delay { new ConnectionString(config.connectionString) }
 
         rawSettings <- F.delay {
-          val updateCluster: Block[ClusterSettings.Builder] = new Block[ClusterSettings.Builder] {
-            def apply(t: ClusterSettings.Builder): Unit = {
-              val _ = t.applySettings(clusterSettings); ()
+          val updateCluster: Block[ClusterSettings.Builder] =
+            new Block[ClusterSettings.Builder] {
+              def apply(t: ClusterSettings.Builder): Unit = {
+                val _ = t.applySettings(clusterSettings); ()
+              }
             }
-          }
-          MongoClientSettings.builder.applyConnectionString(conn).applyToClusterSettings(updateCluster).build
+
+          MongoClientSettings
+            .builder
+            .applyConnectionString(conn)
+            .applyToClusterSettings(updateCluster)
+            .build
         }
 
         rawSslSettings <- F.delay(SslSettings.builder.applyConnectionString(conn).build)
@@ -277,7 +281,7 @@ object Mongo {
               .build
           else rawSettings
         }
-        client <- F.delay(MongoClients.create(settings))
+        client <- F.delay(MongoClient(settings))
       } yield (client, close(client)))
     }
 
@@ -292,7 +296,7 @@ object Mongo {
     def buildInfo(client: MongoClient): F[Document] =
       client
         .getDatabase("admin")
-        .runCommand(new BsonDocument("buildInfo", new BsonInt32(1)), classOf[Document])
+        .runCommand[Document](Document("buildInfo" -> 1))
         .toStream
         .compile
         .lastOrError
