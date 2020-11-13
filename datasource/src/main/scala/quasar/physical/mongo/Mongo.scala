@@ -297,7 +297,7 @@ object Mongo {
       client
         .getDatabase("admin")
         .runCommand[Document](Document("buildInfo" -> 1))
-        .toStream
+        .toStream[IO](1)
         .compile
         .lastOrError
 
