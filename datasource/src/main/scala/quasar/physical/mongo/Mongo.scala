@@ -128,7 +128,7 @@ final class Mongo[F[_]: MonadResourceErr: ConcurrentEffect: ContextShift] privat
       getCollection(collection)
         .find[BsonValue]
         .batchSize(batchSize)
-        .toStream)
+        .toStream(batchSize))
 
   def aggregate(collection: Collection, aggs: List[BsonDocument]): F[Stream[F, BsonValue]] =
     withCollectionExists(
@@ -137,7 +137,7 @@ final class Mongo[F[_]: MonadResourceErr: ConcurrentEffect: ContextShift] privat
         .aggregate[BsonValue](aggs)
         .allowDiskUse(true)
         .batchSize(batchSize)
-        .toStream)
+        .toStream(batchSize))
 
   def evaluateImpl(collection: Collection, aggs: List[BsonDocument])
       : F[Either[Throwable, Stream[F, BsonValue]]] = {
