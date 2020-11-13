@@ -37,10 +37,10 @@ import testImplicits._
 
 class MongoDataSourceSpec extends EffectfulQSpec[IO] {
   def mkDataSource: Resource[IO, MongoDataSource[IO]] =
-    MongoSpec.mkMongo.map(MongoDataSource[IO](_))
+    MongoDataSource[IO](MongoSpec.mkMongo).pure[Resource[IO, ?]]
 
   val mkInaccessibleDataSource: Resource[IO, MongoDataSource[IO]] =
-    MongoSpec.mkMongoInvalidPort.map(MongoDataSource[IO](_))
+    MongoDataSource[IO](MongoSpec.mkMongoInvalidPort).pure[Resource[IO, ?]]
 
   step(MongoSpec.setupDB.unsafeRunSync())
 

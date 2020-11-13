@@ -86,13 +86,13 @@ class MongoSpec extends EffectfulQSpec[IO] {
 
   "databaseExists returns true for existing dbs" >> Fragment.foreach(MongoSpec.correctDbs)(db =>
       s"checking ${db.name}" >>* mkMongo.use { mongo =>
-        mongo.databaseExists(db).compile.lastOrError
+        mongo.databaseExists(db)
       }
   )
 
   "databaseExists returns false for non-existing dbs" >> Fragment.foreach(MongoSpec.incorrectDbs)(db =>
     s"checking ${db.name}" >>* mkMongo.use { mongo =>
-      mongo.databaseExists(db).map(!_).compile.lastOrError
+      mongo.databaseExists(db).map(!_)
     }
   )
 
@@ -124,13 +124,13 @@ class MongoSpec extends EffectfulQSpec[IO] {
 
   "collectionExists returns true for existent collections" >> Fragment.foreach(MongoSpec.correctCollections)(col =>
     s"checking ${col.database.name} :: ${col.name}" >>* mkMongo.use { mongo =>
-      mongo.collectionExists(col).compile.lastOrError
+      mongo.collectionExists(col)
     }
   )
 
   "collectionExists returns false for non-existent collections" >> Fragment.foreach(MongoSpec.incorrectCollections)(col =>
     s"checking ${col.database.name} :: ${col.name}" >>* mkMongo.use { mongo =>
-      mongo.collectionExists(col).map(!_).compile.lastOrError
+      mongo.collectionExists(col).map(!_)
     }
   )
 
