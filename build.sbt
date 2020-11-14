@@ -35,7 +35,7 @@ val catsEffectVersion   = "2.2.0"
 val iotaVersion = "0.3.10"
 val drosteVersion = "0.8.0"
 val catsMTLVersion = "0.7.1"
-val fs2Version = "2.4.4-batch-size"
+val fs2Version = "2.4.4-queue-batch"
 
 lazy val core = project
   .in(file("datasource"))
