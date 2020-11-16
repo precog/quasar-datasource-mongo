@@ -19,7 +19,7 @@ package quasar.physical.mongo
 import slamdata.Predef._
 
 import cats.effect._
-import cats.effect.concurrent.MVar
+import cats.effect.concurrent.{MVar, MVar2}
 import cats.effect.syntax.bracket._
 import cats.implicits._
 
@@ -52,7 +52,7 @@ final class Mongo[F[_]: MonadResourceErr: ConcurrentEffect: ContextShift] privat
   private def observableAsStream[A](obs: Observable[A], queueSize: Long): Stream[F, A] = {
     def run(action: F[Unit]): Unit = F.runAsync(action)(_ => IO.unit).unsafeRunSync
 
-    def handler(subVar: MVar[F, Subscription], cb: Option[Either[Throwable, A]] => Unit): Unit = {
+    def handler(subVar: MVar2[F, Subscription], cb: Option[Either[Throwable, A]] => Unit): Unit = {
       obs.subscribe(new Observer[A] {
         override def onSubscribe(sub: Subscription): Unit = run {
           for {
@@ -76,7 +76,7 @@ final class Mongo[F[_]: MonadResourceErr: ConcurrentEffect: ContextShift] privat
 
     def enqueueObservable(
         obsQ: NoneTerminatedQueue[F, Either[Throwable, A]],
-        subVar: MVar[F, Subscription])
+        subVar: MVar2[F, Subscription])
         : Stream[F, Unit] =
       Stream.eval(F.delay(handler(subVar, { x => run(obsQ.enqueue1(x)) })))
 
@@ -126,8 +126,8 @@ final class Mongo[F[_]: MonadResourceErr: ConcurrentEffect: ContextShift] privat
     })
   }
 
-  def databaseExists(database: Database): Stream[F, Boolean] =
-    databases.exists(_ === database)
+  def databaseExists(database: Database): F[Boolean] =
+    databases.exists(_ === database).compile.last.map(_ getOrElse false)
 
   def collections(database: Database): Stream[F, Collection] = {
 
@@ -143,7 +143,7 @@ final class Mongo[F[_]: MonadResourceErr: ConcurrentEffect: ContextShift] privat
     }
 
     val cols = for {
-      dbExists <- databaseExists(database)
+      dbExists <- Stream.eval(databaseExists(database))
       res <- if (!dbExists) Stream.empty else
         observableAsStream(client.getDatabase(database.name).listCollectionNames(), DefaultQueueSize).map(Collection(database, _))
           .handleErrorWith(recoverAccessDenied)
@@ -155,11 +155,11 @@ final class Mongo[F[_]: MonadResourceErr: ConcurrentEffect: ContextShift] privat
     })
   }
 
-  def collectionExists(collection: Collection): Stream[F, Boolean] =
-    collections(collection.database).exists(_ === collection)
+  def collectionExists(collection: Collection): F[Boolean] =
+    collections(collection.database).exists(_ === collection).compile.last.map(_ getOrElse false)
 
   private def withCollectionExists[A](collection: Collection, obs: Observable[A]): F[Stream[F, A]] =
-    collectionExists(collection).compile.last map(_ getOrElse false) flatMap { exists =>
+    collectionExists(collection) flatMap { exists =>
       if (exists) F.point(observableAsStream(obs, batchSize))
       else MonadResourceErr.raiseError(ResourceError.pathNotFound(collection.resourcePath))
     }

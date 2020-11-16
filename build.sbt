@@ -1,6 +1,6 @@
 import scala.collection.Seq
 
-scalaVersion in ThisBuild := "2.12.10"
+scalaVersion in ThisBuild := "2.12.12"
 
 ThisBuild / githubRepository := "quasar-datasource-mongo"
 
@@ -26,15 +26,15 @@ lazy val root = project
   .aggregate(core)
 
 val mongoVersion = "2.7.0"
-val shimsVersion = "2.0.0"
+val shimsVersion = "2.2.0"
 val slf4jVersion = "1.7.25"
-val specsVersion = "4.7.1"
+val specsVersion = "4.10.5"
 val jsrVersion = "3.0.2"
 val jschVersion = "0.1.55"
-val catsEffectVersion   = "2.1.0"
+val catsEffectVersion   = "2.2.0"
 val iotaVersion = "0.3.10"
 val drosteVersion = "0.8.0"
-val catsMTLVersion = "0.7.0"
+val catsMTLVersion = "0.7.1"
 
 lazy val core = project
   .in(file("datasource"))
