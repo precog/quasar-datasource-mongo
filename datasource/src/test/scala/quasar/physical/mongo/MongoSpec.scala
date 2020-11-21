@@ -408,7 +408,7 @@ object MongoSpec {
         bDatabase <- IO.delay(client.getDatabase("B"))
 
         _ <- singletonPublisher[Document](
-          aDatabase.runCommand(
+          bDatabase.runCommand(
             Document(
               "createUser" -> "bUser",
               "pwd" -> "bPassword",
