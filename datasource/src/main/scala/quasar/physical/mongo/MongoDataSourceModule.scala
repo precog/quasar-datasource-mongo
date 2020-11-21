@@ -23,7 +23,6 @@ import quasar.api.datasource.{DatasourceError, DatasourceType}, DatasourceError.
 import quasar.concurrent._
 import quasar.connector.{ByteStore, MonadResourceErr, ExternalCredentials}
 import quasar.connector.datasource.{LightweightDatasourceModule, Reconfiguration}
-import quasar.physical.mongo.Mongo.{MongoAccessDenied, MongoConnectionFailed}
 
 import java.util.UUID
 import scala.concurrent.ExecutionContext
@@ -32,9 +31,7 @@ import argonaut._
 
 import cats.effect.{Blocker, ConcurrentEffect, ContextShift, Resource, Sync, Timer}
 import cats.kernel.Hash
-import cats.syntax.applicative._
-import cats.syntax.applicativeError._
-import cats.syntax.either._
+import cats.implicits._
 
 import scalaz.NonEmptyList
 
@@ -46,18 +43,6 @@ object MongoDataSourceModule extends LightweightDatasourceModule {
       kind,
       sanitizeConfig(config),
       NonEmptyList(msg))
-
-  private def mkError[F[_]](config: Json, throwable: Throwable): Error =
-    throwable match {
-      case MongoConnectionFailed((ex, _)) =>
-        DatasourceError.ConnectionFailed(kind, sanitizeConfig(config), ex)
-
-      case MongoAccessDenied((_, detail)) =>
-        DatasourceError.AccessDenied(kind, sanitizeConfig(config), detail)
-
-      case t =>
-        mkInvalidCfgError(config, t.getMessage)
-    }
 
   @SuppressWarnings(Array("org.wartremover.warts.ImplicitParameter"))
   def lightweightDatasource[F[_]: ConcurrentEffect: ContextShift: MonadResourceErr: Timer, A: Hash](
@@ -74,17 +59,15 @@ object MongoDataSourceModule extends LightweightDatasourceModule {
           .pure[Resource[F, ?]]
 
       case Right(mongoConfig) =>
-        Blocker.cached[F]("mongo-datasource")
-          .flatMap(Mongo(mongoConfig, _))
-          .attempt
-          .map(_.bimap(mkError(config, _), MongoDataSource[F](_)))
+        val mongoResource = Resource.suspend(Sync[F].delay(Blocker.cached[F]("mongo-datasource").flatMap(Mongo(mongoConfig, _))))
+        MongoDataSource(mongoResource).asRight[Error].pure[Resource[F, ?]]
     }
 
   def kind: DatasourceType = MongoDataSource.kind
 
   def sanitizeConfig(config: Json): Json = MongoConfig.sanitize(config)
 
-   def migrateConfig[F[_]: Sync](config: Json): F[Either[ConfigurationError[Json], Json]] =
+   def migrateConfig[F[_]: Sync](from: Long, to: Long, config: Json): F[Either[ConfigurationError[Json], Json]] =
      Sync[F].pure(Right(config))
 
   def reconfigure(original: Json, patch: Json): Either[ConfigurationError[Json], (Reconfiguration, Json)] =

@@ -83,8 +83,8 @@ final class Mongo[F[_]: MonadResourceErr: ConcurrentEffect: ContextShift] privat
     })
   }
 
-  def databaseExists(database: Database): Stream[F, Boolean] =
-    databases.exists(_ === database)
+  def databaseExists(database: Database): F[Boolean] =
+    databases.exists(_ === database).compile.last.map(_ getOrElse false)
 
   def collections(database: Database): Stream[F, Collection] = {
 
@@ -100,7 +100,7 @@ final class Mongo[F[_]: MonadResourceErr: ConcurrentEffect: ContextShift] privat
     }
 
     val cols = for {
-      dbExists <- databaseExists(database)
+      dbExists <- Stream.eval(databaseExists(database))
       res <- if (!dbExists) Stream.empty else
         StreamSubscriber
           .fromPublisher(client.getDatabase(database.name).listCollectionNames)
@@ -114,11 +114,11 @@ final class Mongo[F[_]: MonadResourceErr: ConcurrentEffect: ContextShift] privat
     })
   }
 
-  def collectionExists(collection: Collection): Stream[F, Boolean] =
-    collections(collection.database).exists(_ === collection)
+  def collectionExists(collection: Collection): F[Boolean] =
+    collections(collection.database).exists(_ === collection).compile.last.map(_ getOrElse false)
 
   private def withCollectionExists[A](collection: Collection, str: Stream[F, A]): F[Stream[F, A]] =
-    collectionExists(collection).compile.last map(_ getOrElse false) flatMap { exists =>
+    collectionExists(collection) flatMap { exists =>
       if (exists) str.pure[F]
       else MonadResourceErr.raiseError(ResourceError.pathNotFound(collection.resourcePath))
     }
