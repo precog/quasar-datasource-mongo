@@ -19,24 +19,28 @@ package quasar.physical.mongo
 import slamdata.Predef._
 
 import cats.effect.{Blocker, IO, Resource}
-import cats.instances.list._
-import cats.syntax.apply._
-import cats.syntax.traverse._
+import cats.implicits._
 
 import quasar.concurrent._
 import quasar.concurrent.unsafe._
 import quasar.connector.ResourceError
+import quasar.physical.mongo.contrib.fs2.StreamSubscriber
 import quasar.physical.mongo.MongoResource.{Collection, Database}
 import quasar.EffectfulQSpec
 
 import org.bson.{Document => _, _}
-import org.mongodb.scala.{Completed, Document, MongoSecurityException, MongoTimeoutException}
+import org.mongodb.scala._
+import org.reactivestreams.Publisher
+
 import org.specs2.specification.core._
 import org.specs2.execute.AsResult
+
 import scala.io.Source
 
 import fs2.io.file
+
 import java.nio.file.Paths
+import java.lang.Void
 
 import shims._
 import testImplicits._
@@ -267,7 +271,6 @@ class MongoSpec extends EffectfulQSpec[IO] {
 object MongoSpec {
   import java.nio.file.{Files, Paths}
 
-  import Mongo._
   import TunnelConfig.Pass._
 
   private lazy val blocker: Blocker = Blocker.unsafeCached("mongo-datasource")
@@ -340,11 +343,9 @@ object MongoSpec {
         blocker)
 
       stages = Interpreter.stages(Version(0, 0, 0), PushdownLevel.Full, "redundant")
+
       offset = Interpreter.offset(Version(0, 0, 0), "redundant")
-    } yield {
-      new Mongo[IO](
-        client, BatchSize.toLong, PushdownLevel.Full, stages, offset, None)
-    }
+    } yield new Mongo[IO](client, BatchSize, PushdownLevel.Full, stages, offset, None)
 
   def mkBMongo: Resource[IO, Mongo[IO]] =
     Mongo[IO](MongoConfig(bConnectionString, BatchSize, PushdownLevel.Full, None, None), blocker)
@@ -376,6 +377,9 @@ object MongoSpec {
 
   val incorrectPipeline: List[BsonDocument] = List(new BsonDocument("$incorrect", new BsonInt32(0)))
 
+  def singletonPublisher[A](publisher: Publisher[A]): IO[A] =
+    StreamSubscriber.fromPublisher[IO, A](publisher).compile.lastOrError
+
   def setupDB(): IO[Unit] = {
     val clientR =
       Mongo.mkClient[IO](MongoConfig(connectionString, BatchSize, PushdownLevel.Full, None, None), blocker)
@@ -383,20 +387,32 @@ object MongoSpec {
     clientR.use(client => for {
       _ <- correctCollections.traverse { col => for {
         mongoCollection <- IO.delay(client.getDatabase(col.database.name).getCollection(col.name))
-        _ <- singleObservableAsF[IO, Completed](mongoCollection.drop).attempt
-        _ <- singleObservableAsF[IO, Completed](mongoCollection.insertOne(Document(col.name -> col.database.name)))
-        // aUser:aPassword --> read only access to only one db, this means that aUser can't run listDatabases
+
+        _ <- singletonPublisher[Void](mongoCollection.drop).attempt
+
+        _ <- singletonPublisher(mongoCollection.insertOne(Document(col.name -> col.database.name)))
+
+        // aUser:aPassword --> read only access to only one db, this
+        // means that aUser can't run listDatabases
         aDatabase <- IO.delay(client.getDatabase("A"))
-        _ <- singleObservableAsF[IO, Document](aDatabase.runCommand[Document](Document(
-          "createUser" -> "aUser",
-          "pwd" -> "aPassword",
-          "roles" -> List(Document("role" -> "read", "db" -> "A"))))).attempt
-        // bUser:bPassword --> can do anything with "B" roles, but can't do anything with data level listCollections
+
+        _ <- singletonPublisher[Document](
+          aDatabase.runCommand(
+            Document(
+              "createUser" -> "aUser",
+              "pwd" -> "aPassword",
+              "roles" -> List(Document("role" -> "read", "db" -> "A"))))).attempt
+
+        // bUser:bPassword --> can do anything with "B" roles, but
+        // can't do anything with data level listCollections
         bDatabase <- IO.delay(client.getDatabase("B"))
-        _ <- singleObservableAsF[IO, Document](bDatabase.runCommand[Document](Document(
-          "createUser" -> "bUser",
-          "pwd" -> "bPassword",
-          "roles" -> List(Document("role" -> "userAdmin", "db" -> "B"))))).attempt
+
+        _ <- singletonPublisher[Document](
+          bDatabase.runCommand(
+            Document(
+              "createUser" -> "bUser",
+              "pwd" -> "bPassword",
+              "roles" -> List(Document("role" -> "userAdmin", "db" -> "B"))))).attempt
         } yield ()
       }
     } yield ())
