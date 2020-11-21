@@ -21,14 +21,14 @@ import slamdata.Predef._
 import cats.effect.IO
 import cats.implicits._
 
+import org.bson.types.Decimal128
 import org.bson.{Document => _, _}
 import org.mongodb.scala._
-import org.bson.types.Decimal128
+import org.mongodb.scala.result.InsertManyResult
 import org.typelevel.jawn.{AsyncParser, Facade}
 
-import fs2.interop.reactivestreams._
-
 import quasar.contrib.std.errorImpossible
+import quasar.physical.mongo.contrib.fs2.StreamSubscriber
 import quasar.{JsonSpec, ScalarStages}
 
 import qdata.QDataEncode
@@ -48,6 +48,8 @@ import spire.math.Real
 import shims._
 import testImplicits._
 
+import java.lang.Void
+
 trait StageInterpreterSpec extends JsonSpec {
   import MongoSpec.mkMongo
 
@@ -58,8 +60,8 @@ trait StageInterpreterSpec extends JsonSpec {
   def mkCollection(name: String): Collection = Collection(Database("aggregation_test"), name)
 
   def dropCollection(collection: Collection, mongo: Mongo[IO]): IO[Unit] =
-    mongo.getCollection(collection).drop()
-      .toStream[IO]
+    StreamSubscriber
+      .fromPublisher[IO, Void](mongo.getCollection(collection).drop())
       .compile
       .lastOrError
       .attempt
@@ -71,7 +73,12 @@ trait StageInterpreterSpec extends JsonSpec {
       case _ => None
     }
 
-    mongo.getCollection(collection).insertMany(docs).toStream[IO].compile.lastOrError.void
+    StreamSubscriber
+      .fromPublisher[IO, InsertManyResult](
+        mongo.getCollection(collection).insertMany(docs))
+      .compile
+      .lastOrError
+      .void
   }
 
   val uniqueCollection: IO[Collection] =

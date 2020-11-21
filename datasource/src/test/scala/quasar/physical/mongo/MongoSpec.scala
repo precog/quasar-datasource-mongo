@@ -24,12 +24,12 @@ import cats.implicits._
 import quasar.concurrent._
 import quasar.concurrent.unsafe._
 import quasar.connector.ResourceError
+import quasar.physical.mongo.contrib.fs2.StreamSubscriber
 import quasar.physical.mongo.MongoResource.{Collection, Database}
 import quasar.EffectfulQSpec
 
 import org.bson.{Document => _, _}
 import org.mongodb.scala._
-
 import org.reactivestreams.Publisher
 
 import org.specs2.specification.core._
@@ -38,7 +38,6 @@ import org.specs2.execute.AsResult
 import scala.io.Source
 
 import fs2.io.file
-import fs2.interop.reactivestreams._
 
 import java.nio.file.Paths
 import java.lang.Void
@@ -379,7 +378,7 @@ object MongoSpec {
   val incorrectPipeline: List[BsonDocument] = List(new BsonDocument("$incorrect", new BsonInt32(0)))
 
   def singletonPublisher[A](publisher: Publisher[A]): IO[A] =
-    publisher.toStream[IO].compile.lastOrError
+    StreamSubscriber.fromPublisher[IO, A](publisher).compile.lastOrError
 
   def setupDB(): IO[Unit] = {
     val clientR =

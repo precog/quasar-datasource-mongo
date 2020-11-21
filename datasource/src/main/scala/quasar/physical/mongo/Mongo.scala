@@ -23,10 +23,10 @@ import cats.effect._
 import cats.implicits._
 
 import fs2.Stream
-import fs2.interop.reactivestreams._
 
 import quasar.api.resource.ResourcePath
 import quasar.connector.{MonadResourceErr, ResourceError}
+import quasar.physical.mongo.contrib.fs2.StreamSubscriber
 import quasar.physical.mongo.MongoResource.{Collection, Database}
 import quasar.{IdStatus, ScalarStages}
 
@@ -72,8 +72,8 @@ final class Mongo[F[_]: MonadResourceErr: ConcurrentEffect: ContextShift] privat
     }
 
     val dbs =
-      client.listDatabaseNames
-        .toStream
+      StreamSubscriber
+        .fromPublisher(client.listDatabaseNames)
         .map(Database(_))
         .handleErrorWith(recoverAccessDenied)
         .handleErrorWith(errorHandler(ResourcePath.root()))
@@ -102,7 +102,8 @@ final class Mongo[F[_]: MonadResourceErr: ConcurrentEffect: ContextShift] privat
     val cols = for {
       dbExists <- databaseExists(database)
       res <- if (!dbExists) Stream.empty else
-        client.getDatabase(database.name).listCollectionNames.toStream
+        StreamSubscriber
+          .fromPublisher(client.getDatabase(database.name).listCollectionNames)
           .map(Collection(database, _))
           .handleErrorWith(recoverAccessDenied)
           .handleErrorWith(errorHandler(database.resourcePath))
@@ -125,19 +126,21 @@ final class Mongo[F[_]: MonadResourceErr: ConcurrentEffect: ContextShift] privat
   def findAll(collection: Collection): F[Stream[F, BsonValue]] =
     withCollectionExists(
       collection,
-      getCollection(collection)
-        .find[BsonValue]
-        .batchSize(batchSize)
-        .toStream(batchSize))
+      StreamSubscriber.fromPublisher(
+        getCollection(collection)
+          .find[BsonValue]
+          .batchSize(batchSize),
+        batchSize))
 
   def aggregate(collection: Collection, aggs: List[BsonDocument]): F[Stream[F, BsonValue]] =
     withCollectionExists(
       collection,
-      getCollection(collection)
-        .aggregate[BsonValue](aggs)
-        .allowDiskUse(true)
-        .batchSize(batchSize)
-        .toStream(batchSize))
+      StreamSubscriber.fromPublisher(
+        getCollection(collection)
+          .aggregate[BsonValue](aggs)
+          .allowDiskUse(true)
+          .batchSize(batchSize),
+        batchSize))
 
   def evaluateImpl(collection: Collection, aggs: List[BsonDocument])
       : F[Either[Throwable, Stream[F, BsonValue]]] = {
@@ -294,10 +297,11 @@ object Mongo {
       : Resource[F, Mongo[F]] = {
 
     def buildInfo(client: MongoClient): F[Document] =
-      client
-        .getDatabase("admin")
-        .runCommand[Document](Document("buildInfo" -> 1))
-        .toStream[IO](1)
+      StreamSubscriber
+        .fromPublisher(
+          client
+            .getDatabase("admin")
+            .runCommand[Document](Document("buildInfo" -> 1)))
         .compile
         .lastOrError
 
