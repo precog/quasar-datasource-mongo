@@ -26,8 +26,9 @@ import fs2.Stream
 
 import quasar.api.DataPathSegment
 import quasar.api.datasource.DatasourceType
+import quasar.api.push.OffsetPath
 import quasar.api.resource.{ResourceName, ResourcePath, ResourcePathType}
-import quasar.connector.{MonadResourceErr, Offset, QueryResult, ResourceError}
+import quasar.connector.{MonadResourceErr, Offset, QueryResult, ResourceError, ResultData}
 import quasar.connector.datasource._
 import quasar.physical.mongo.decoder.qdataDecoder
 import quasar.physical.mongo.MongoResource.{Collection, Database}
@@ -102,14 +103,14 @@ final class MongoDataSource[F[_]: ConcurrentEffect: ContextShift: MonadResourceE
     }
 
     rStreamPair map {
-      case (insts, stream) => QueryResult.parsed(qdataDecoder, stream, insts)
+      case (insts, stream) => QueryResult.parsed(qdataDecoder, ResultData.Continuous(stream), insts)
     }
   }
 
   private def mongoOffset(forResource: ResourcePath, offset: Offset): F[MongoOffset] = {
     type S = Either[String, Int]
 
-    val supportedPath = offset.path traverse {
+    def supportedPath(path: OffsetPath): F[NonEmptyList[S]] = path traverse {
       case DataPathSegment.Field(n) => (Left(n): S).pure[F]
       case DataPathSegment.Index(i) => (Right(i): S).pure[F]
 
@@ -124,7 +125,16 @@ final class MongoDataSource[F[_]: ConcurrentEffect: ContextShift: MonadResourceE
           "Offset path containing 'all indicies' is not supported."))
     }
 
-    supportedPath.map(MongoOffset(_, offset.value))
+    for {
+      internalOffset <- offset match {
+        case internal: Offset.Internal => internal.pure[F]
+        case _ =>
+          MonadResourceErr.raiseError[Offset.Internal](ResourceError.seekFailed(
+            forResource,
+            "External offsets are not supported"))
+      }
+      p <- supportedPath(internalOffset.path)
+    } yield MongoOffset(p, internalOffset.value)
   }
 }
 
