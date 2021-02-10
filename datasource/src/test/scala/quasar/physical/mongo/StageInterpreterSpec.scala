@@ -19,15 +19,16 @@ package quasar.physical.mongo
 import slamdata.Predef._
 
 import cats.effect.IO
-import cats.syntax.foldable._
-import cats.instances.list._
+import cats.implicits._
 
-import org.bson.{Document => _, _}
 import org.bson.types.Decimal128
+import org.bson.{Document => _, _}
 import org.mongodb.scala._
+import org.mongodb.scala.result.InsertManyResult
 import org.typelevel.jawn.{AsyncParser, Facade}
 
 import quasar.contrib.std.errorImpossible
+import quasar.physical.mongo.contrib.fs2.StreamSubscriber
 import quasar.{JsonSpec, ScalarStages}
 
 import qdata.QDataEncode
@@ -47,6 +48,8 @@ import spire.math.Real
 import shims._
 import testImplicits._
 
+import java.lang.Void
+
 trait StageInterpreterSpec extends JsonSpec {
   import MongoSpec.mkMongo
 
@@ -56,19 +59,26 @@ trait StageInterpreterSpec extends JsonSpec {
 
   def mkCollection(name: String): Collection = Collection(Database("aggregation_test"), name)
 
-  def dropCollection(collection: Collection, mongo: Mongo[IO]): IO[Unit] = {
-    Mongo.singleObservableAsF[IO, Completed](mongo.getCollection(collection).drop())
+  def dropCollection(collection: Collection, mongo: Mongo[IO]): IO[Unit] =
+    StreamSubscriber
+      .fromPublisher[IO, Void](mongo.getCollection(collection).drop())
+      .compile
+      .lastOrError
       .attempt
-      .map(_ => ())
-  }
+      .void
 
   def insertValues(collection: Collection, mongo: Mongo[IO], vals: List[BsonValue]): IO[Unit] = {
-    def docs: List[Document] = vals foldMap {
-      case x: BsonDocument => List(Document(x))
-      case _ => List()
+    val docs: List[Document] = vals mapFilter {
+      case (d: BsonDocument) => Some(Document(d))
+      case _ => None
     }
-    Mongo.singleObservableAsF[IO, Completed](
-      mongo.getCollection(collection) insertMany docs) map (_ => ())
+
+    StreamSubscriber
+      .fromPublisher[IO, InsertManyResult](
+        mongo.getCollection(collection).insertMany(docs))
+      .compile
+      .lastOrError
+      .void
   }
 
   val uniqueCollection: IO[Collection] =

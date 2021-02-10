@@ -17,30 +17,33 @@
 package quasar.physical.mongo
 
 import slamdata.Predef._
+import scala.util.Either
 
 import cats.effect._
-import cats.effect.concurrent.{MVar, MVar2}
-import cats.effect.syntax.bracket._
 import cats.implicits._
 
-import fs2.concurrent.{NoneTerminatedQueue, Queue}
 import fs2.Stream
 
 import quasar.api.resource.ResourcePath
 import quasar.connector.{MonadResourceErr, ResourceError}
+import quasar.physical.mongo.contrib.fs2.StreamSubscriber
 import quasar.physical.mongo.MongoResource.{Collection, Database}
 import quasar.{IdStatus, ScalarStages}
 
 import org.bson.{Document => _, _}
-import com.mongodb.{Block, ConnectionString}
-import com.mongodb.connection.{ClusterSettings, SslSettings}
+
 import org.mongodb.scala._
+import org.mongodb.scala.connection.{ClusterSettings, SslSettings}
+
+import com.mongodb.Block
+
+import java.lang.{ClassCastException, NumberFormatException}
 
 import shims.equalToCats
 
 final class Mongo[F[_]: MonadResourceErr: ConcurrentEffect: ContextShift] private[mongo](
     client: MongoClient,
-    batchSize: Long,
+    batchSize: Int,
     pushdownLevel: PushdownLevel,
     interpret: Interpreter.StageInterpret,
     offsetInterpret: Interpreter.OffsetInterpret,
@@ -48,54 +51,6 @@ final class Mongo[F[_]: MonadResourceErr: ConcurrentEffect: ContextShift] privat
   import Mongo._
 
   val F: ConcurrentEffect[F] = ConcurrentEffect[F]
-
-  private def observableAsStream[A](obs: Observable[A], queueSize: Long): Stream[F, A] = {
-    def run(action: F[Unit]): Unit = F.runAsync(action)(_ => IO.unit).unsafeRunSync
-
-    def handler(subVar: MVar2[F, Subscription], cb: Option[Either[Throwable, A]] => Unit): Unit = {
-      obs.subscribe(new Observer[A] {
-        override def onSubscribe(sub: Subscription): Unit = run {
-          for {
-            _ <- subVar.put(sub)
-            _ <- request(sub, queueSize)
-          } yield ()
-        }
-
-        override def onNext(result: A): Unit =
-          cb(Some(Right(result)))
-
-        override def onError(e: Throwable): Unit = cb(Some(Left(e)))
-
-        override def onComplete(): Unit = cb(None)
-      })
-    }
-
-    def unsubscribe(s: Subscription): F[Unit] = F.delay {
-      if (!s.isUnsubscribed()) s.unsubscribe()
-    }
-
-    def enqueueObservable(
-        obsQ: NoneTerminatedQueue[F, Either[Throwable, A]],
-        subVar: MVar2[F, Subscription])
-        : Stream[F, Unit] =
-      Stream.eval(F.delay(handler(subVar, { x => run(obsQ.enqueue1(x)) })))
-
-    // This is necessary because `.request(size)` depends on internal driver state
-    // that might be changed by threads that we can't control, and `.request` can throw an error.
-    // We can't rely on `MVar[F, Option[Subscription]]` because actual change of internal state happens
-    // in java driver depth and it might happen even during flatMap.
-    def request(s: Subscription, size: Long): F[Unit] =
-      F.attempt(F.delay(s.request(size))).void
-
-    (for {
-      obsQ <- Stream.eval(Queue.boundedNoneTerminated[F, Either[Throwable, A]](queueSize.toInt))
-      subVar <- Stream.eval(MVar[F].empty[Subscription])
-      _ <- enqueueObservable(obsQ, subVar)
-      res <- obsQ.dequeue.chunks.flatMap( c =>
-        Stream.evalUnChunk(subVar.read.flatMap(request(_, c.size.toLong)).as(c))
-      ).rethrow.onFinalize(subVar.take.flatMap(unsubscribe))
-    } yield res)
-  }
 
   def errorHandler[A](path: ResourcePath): Throwable => Stream[F, A] = {
     case MongoConnectionFailed((ex, detail)) =>
@@ -116,10 +71,12 @@ final class Mongo[F[_]: MonadResourceErr: ConcurrentEffect: ContextShift] privat
       case t: Throwable => Stream.raiseError[F](t)
     }
 
-    val dbs = observableAsStream(client.listDatabaseNames, DefaultQueueSize)
-      .map(Database(_))
-      .handleErrorWith(recoverAccessDenied)
-      .handleErrorWith(errorHandler(ResourcePath.root()))
+    val dbs =
+      StreamSubscriber
+        .fromPublisher(client.listDatabaseNames)
+        .map(Database(_))
+        .handleErrorWith(recoverAccessDenied)
+        .handleErrorWith(errorHandler(ResourcePath.root()))
 
     Stream.force(dbs.compile.toList.map { (list: List[Database]) =>
       if (list.isEmpty) emitFallbackOr(Stream.empty) else Stream.emits(list)
@@ -145,7 +102,9 @@ final class Mongo[F[_]: MonadResourceErr: ConcurrentEffect: ContextShift] privat
     val cols = for {
       dbExists <- Stream.eval(databaseExists(database))
       res <- if (!dbExists) Stream.empty else
-        observableAsStream(client.getDatabase(database.name).listCollectionNames(), DefaultQueueSize).map(Collection(database, _))
+        StreamSubscriber
+          .fromPublisher(client.getDatabase(database.name).listCollectionNames)
+          .map(Collection(database, _))
           .handleErrorWith(recoverAccessDenied)
           .handleErrorWith(errorHandler(database.resourcePath))
     } yield res
@@ -158,20 +117,30 @@ final class Mongo[F[_]: MonadResourceErr: ConcurrentEffect: ContextShift] privat
   def collectionExists(collection: Collection): F[Boolean] =
     collections(collection.database).exists(_ === collection).compile.last.map(_ getOrElse false)
 
-  private def withCollectionExists[A](collection: Collection, obs: Observable[A]): F[Stream[F, A]] =
+  private def withCollectionExists[A](collection: Collection, str: Stream[F, A]): F[Stream[F, A]] =
     collectionExists(collection) flatMap { exists =>
-      if (exists) F.point(observableAsStream(obs, batchSize))
+      if (exists) str.pure[F]
       else MonadResourceErr.raiseError(ResourceError.pathNotFound(collection.resourcePath))
     }
 
   def findAll(collection: Collection): F[Stream[F, BsonValue]] =
-    withCollectionExists(collection, getCollection(collection).find[BsonValue]())
+    withCollectionExists(
+      collection,
+      StreamSubscriber.fromPublisher(
+        getCollection(collection)
+          .find[BsonValue]
+          .batchSize(batchSize),
+        batchSize))
 
   def aggregate(collection: Collection, aggs: List[BsonDocument]): F[Stream[F, BsonValue]] =
     withCollectionExists(
       collection,
-      getCollection(collection).aggregate[BsonValue](aggs)
-        .allowDiskUse(true))
+      StreamSubscriber.fromPublisher(
+        getCollection(collection)
+          .aggregate[BsonValue](aggs)
+          .allowDiskUse(true)
+          .batchSize(batchSize),
+        batchSize))
 
   def evaluateImpl(collection: Collection, aggs: List[BsonDocument])
       : F[Either[Throwable, Stream[F, BsonValue]]] = {
@@ -257,17 +226,6 @@ object Mongo {
     }
   }
 
-  def singleObservableAsF[F[_]: Async: ContextShift, A](obs: SingleObservable[A]): F[A] =
-    Async[F].async { cb: (Either[Throwable, A] => Unit) =>
-      obs.subscribe(new Observer[A] {
-        override def onNext(r: A): Unit = cb(Right(r))
-
-        override def onError(e: Throwable): Unit = cb(Left(e))
-
-        override def onComplete() = ()
-      })
-    } guarantee ContextShift[F].shift
-
   def mkClient[F[_]: ContextShift](
       config: MongoConfig,
       blocker: Blocker)(
@@ -278,12 +236,18 @@ object Mongo {
         conn <- F.delay { new ConnectionString(config.connectionString) }
 
         rawSettings <- F.delay {
-          val updateCluster: Block[ClusterSettings.Builder] = new Block[ClusterSettings.Builder] {
-            def apply(t: ClusterSettings.Builder): Unit = {
-              val _ = t.applySettings(clusterSettings); ()
+          val updateCluster: Block[ClusterSettings.Builder] =
+            new Block[ClusterSettings.Builder] {
+              def apply(t: ClusterSettings.Builder): Unit = {
+                val _ = t.applySettings(clusterSettings); ()
+              }
             }
-          }
-          MongoClientSettings.builder.applyConnectionString(conn).applyToClusterSettings(updateCluster).build
+
+          MongoClientSettings
+            .builder
+            .applyConnectionString(conn)
+            .applyToClusterSettings(updateCluster)
+            .build
         }
 
         rawSslSettings <- F.delay(SslSettings.builder.applyConnectionString(conn).build)
@@ -331,25 +295,26 @@ object Mongo {
       config: MongoConfig,
       blocker: Blocker)
       : Resource[F, Mongo[F]] = {
-    val F = ConcurrentEffect[F]
 
     def buildInfo(client: MongoClient): F[Document] =
-      F.suspend(singleObservableAsF[F, Document](client.getDatabase("admin")
-        .runCommand[Document](Document("buildInfo" -> 1))))
+      StreamSubscriber
+        .fromPublisher(
+          client
+            .getDatabase("admin")
+            .runCommand[Document](Document("buildInfo" -> 1)))
+        .compile
+        .lastOrError
 
     def getVersionString(doc: Document): Option[String] =
-      doc.get("version") flatMap {
-        case x: BsonString => Some(x.getValue())
-        case _ => None
-      }
+      Either.catchOnly[ClassCastException](doc.getString("version")).toOption
 
     def mkVersion(parts: Array[String]): Option[Version] = for {
       majorString <- parts.lift(0)
       minorString <- parts.lift(1)
       patchString <- parts.lift(2)
-      major <- scala.Either.catchNonFatal(majorString.toInt).toOption
-      minor <- scala.Either.catchNonFatal(minorString.toInt).toOption
-      patch <- scala.Either.catchNonFatal(patchString.toInt).toOption
+      major <- Either.catchOnly[NumberFormatException](majorString.toInt).toOption
+      minor <- Either.catchOnly[NumberFormatException](minorString.toInt).toOption
+      patch <- Either.catchOnly[NumberFormatException](patchString.toInt).toOption
     } yield Version(major, minor, patch)
 
 
@@ -367,7 +332,7 @@ object Mongo {
         uuid <- Sync[F].delay(java.util.UUID.randomUUID.toString)
         stageInterpreter = Interpreter.stages(version, config.pushdownLevel, uuid)
         offsetInterpreter = Interpreter.offset(version, uuid)
-        batchSize = scala.math.max(1L, config.batchSize.toLong)
+        batchSize = scala.math.max(1, config.batchSize)
       } yield new Mongo[F](
         client,
         batchSize,
