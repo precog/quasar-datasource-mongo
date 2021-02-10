@@ -99,8 +99,8 @@ class MongoDataSourceSpec extends EffectfulQSpec[IO] {
 
           mkDataSource.flatMap(_.loadFull(iRead(coll.resourcePath)).value) use { r =>
             val bsons: Stream[IO, Any] = r match {
-              case Some(QueryResult.Parsed(_, data, _)) => data
-              case Some(QueryResult.Typed(_, data, _)) => data
+              case Some(QueryResult.Parsed(_, data, _)) => data.data
+              case Some(QueryResult.Typed(_, data, _)) => data.data
               case _ => Stream.empty
             }
 

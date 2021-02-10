@@ -18,11 +18,11 @@ package quasar.physical.mongo
 
 import slamdata.Predef._
 
-import quasar.api.push.OffsetKey
+import quasar.api.push.InternalKey
 
 import cats.data.NonEmptyList
 
 import skolems.∃
 
 /** The subset of offsets currently supported. */
-final case class MongoOffset(path: NonEmptyList[Either[String, Int]], value: ∃[OffsetKey.Actual])
+final case class MongoOffset(path: NonEmptyList[Either[String, Int]], value: ∃[InternalKey.Actual])

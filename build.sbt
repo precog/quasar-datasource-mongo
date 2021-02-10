@@ -67,4 +67,6 @@ lazy val core = project
       "com.google.code.findbugs"   %  "jsr305"      % jsrVersion % Provided
     ))
   .evictToLocal("QUASAR_PATH", "foundation", true)
+  .evictToLocal("QUASAR_PATH", "api", true)
+  .evictToLocal("QUASAR_PATH", "connector", true)
   .enablePlugins(QuasarPlugin)
