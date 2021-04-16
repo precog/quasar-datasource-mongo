@@ -56,3 +56,4 @@ $> docker swarm leave --force
 ```
 
 (Unfortunately `docker-compose` doesn't work on Windows for me @cryogenian 29.04.2019)
+
