@@ -31,7 +31,7 @@ Configuration
 The simplest way to test is using Nix system and run subset of `.travis.yml`. One time only, generate an ssh key:
 
 ```bash
-$> """ssh-keygen -t rsa -N "passphrase" -f key_for_docker""",
+$> """ssh-keygen -t rsa -N "passphrase" -f key_for_docker -m PEM""",
 ```
 
 Then, when you want to test, run this:
@@ -56,4 +56,3 @@ $> docker swarm leave --force
 ```
 
 (Unfortunately `docker-compose` doesn't work on Windows for me @cryogenian 29.04.2019)
-
