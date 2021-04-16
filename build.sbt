@@ -15,7 +15,7 @@ scmInfo in ThisBuild := Some(ScmInfo(
 ThisBuild / githubWorkflowBuildPreamble ++= Seq(
   WorkflowStep.Run(
     List(
-      """ssh-keygen -t rsa -N "passphrase" -f key_for_docker""",
+      """ssh-keygen -t rsa -N "passphrase" -f key_for_docker -m PEM""",
       "docker swarm init",
       "docker stack deploy -c docker-compose.yml teststack"),
     name = Some("Start mongo instances and sshd server")))
