@@ -18,7 +18,7 @@ package quasar.physical.mongo
 
 import slamdata.Predef._
 
-import quasar.{EffectfulQSpec, RateLimiter, NoopRateLimitUpdater}
+import quasar.{EffectfulQSpec, RateLimiter}
 import quasar.api.datasource.DatasourceError
 import quasar.connector.ByteStore
 import quasar.physical.mongo.testImplicits._
@@ -34,20 +34,22 @@ class MongoDataSourceModuleSpec extends EffectfulQSpec[IO] {
   "Using incorrect config leads to Left invalid configuration" >>* {
     val config = Json.obj("foo" -> Json.jString("bar"), "batchSize" -> Json.jNumber(64), "pushdownLevel" -> Json.jString("full"))
 
-    RateLimiter[IO, UUID](1.0, IO.delay(UUID.randomUUID()), NoopRateLimitUpdater[IO, UUID]).flatMap(rl =>
-      MongoDataSourceModule.lightweightDatasource[IO, UUID](config, rl, ByteStore.void[IO], _ => IO(None)).use(r =>
-        IO(r must_=== Left(DatasourceError.InvalidConfiguration(MongoDataSource.kind, config, NonEmptyList("Attempt to decode value on failed cursor."))))))
+    RateLimiter[IO, UUID](IO.delay(UUID.randomUUID())).flatMap(rl =>
+      MongoDataSourceModule.lightweightDatasource[IO, UUID](config, rl, ByteStore.void[IO], _ => IO(None))).use(r =>
+        IO(r must_=== Left(DatasourceError.InvalidConfiguration(MongoDataSource.kind, config, NonEmptyList("Attempt to decode value on failed cursor.")))))
   }
 
   "Using correct config produces Right Disposable" >>* {
     val config = MongoConfig.basic(MongoSpec.connectionString).withBatchSize(12).withPushdown(PushdownLevel.Full).asJson
-    RateLimiter[IO, UUID](1.0, IO.delay(UUID.randomUUID()), NoopRateLimitUpdater[IO, UUID]).flatMap(rl =>
-      MongoDataSourceModule.lightweightDatasource[IO, UUID](config, rl, ByteStore.void[IO], _ => IO(None)).use(r => IO(r must beRight)))
+
+    RateLimiter[IO, UUID](IO.delay(UUID.randomUUID())).flatMap(rl =>
+      MongoDataSourceModule.lightweightDatasource[IO, UUID](config, rl, ByteStore.void[IO], _ => IO(None))).use(r => IO(r must beRight))
   }
 
   "Using unreachable config produces Right Disposable too" >>* {
     val config = MongoConfig.basic("mongodb://unreachable/?serverSelectionTimeoutMS=1000").withBatchSize(1).asJson
-    RateLimiter[IO, UUID](1.0, IO.delay(UUID.randomUUID()), NoopRateLimitUpdater[IO, UUID]).flatMap(rl =>
-      MongoDataSourceModule.lightweightDatasource[IO, UUID](config, rl, ByteStore.void[IO], _ => IO(None)).use(r => IO(r must beRight)))
+
+    RateLimiter[IO, UUID](IO.delay(UUID.randomUUID())).flatMap(rl =>
+      MongoDataSourceModule.lightweightDatasource[IO, UUID](config, rl, ByteStore.void[IO], _ => IO(None))).use(r => IO(r must beRight))
   }
 }

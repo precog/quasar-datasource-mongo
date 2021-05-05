@@ -18,7 +18,7 @@ package quasar.physical.mongo
 
 import slamdata.Predef._
 
-import quasar.{RateLimiter, NoopRateLimitUpdater}
+import quasar.RateLimiter
 import quasar.api.resource.{ResourceName, ResourcePath, ResourcePathType}
 import quasar.connector.ByteStore
 import quasar.connector.datasource.{Datasource, DatasourceSpec}
@@ -47,7 +47,7 @@ class DatasourceContractSpec extends DatasourceSpec[IO, Stream[IO, ?], ResourceP
     "pushdownLevel" -> jString("full"))
 
   val datasource =
-    Resource.liftF(RateLimiter[IO, UUID](1.0, IO.delay(UUID.randomUUID()), NoopRateLimitUpdater[IO, UUID]))
+    RateLimiter[IO, UUID](IO.delay(UUID.randomUUID()))
       .flatMap(rl => MongoDataSourceModule.lightweightDatasource[IO, UUID](cfg, rl, ByteStore.void[IO], _ => IO(None)))
       .flatMap {
         case Right(ds) =>
