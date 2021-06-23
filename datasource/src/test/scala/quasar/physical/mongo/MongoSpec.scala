@@ -322,7 +322,7 @@ object MongoSpec {
       blocker)
 
   def keyTunneledMongo: Resource[IO, Mongo[IO]] =
-    Resource.liftF(privateKey) flatMap { key =>
+    Resource.eval(privateKey) flatMap { key =>
       Mongo[IO](MongoConfig.basic(TunneledURL)
         .withPushdown(PushdownLevel.Full)
         .viaTunnel(TunnelConfig(TunnelHost, TunnelPort, TunnelUser, Some(Identity(key, TunnelPassphrase)))),
