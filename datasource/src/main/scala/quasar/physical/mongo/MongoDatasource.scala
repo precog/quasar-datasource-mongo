@@ -67,7 +67,7 @@ final class MongoDataSource[F[_]: ConcurrentEffect: ContextShift: MonadResourceE
         case Some(db@Database(_)) =>
           for {
             mongo <- rMongo
-            exists <- Resource.liftF(mongo.databaseExists(db))
+            exists <- Resource.eval(mongo.databaseExists(db))
           } yield {
             if (exists)
               mongo.collections(db).map(x => (ResourceName(x.name), ResourcePathType.leafResource)).some
@@ -83,7 +83,7 @@ final class MongoDataSource[F[_]: ConcurrentEffect: ContextShift: MonadResourceE
       Resource[F, QueryResult[F]] = {
     val path = iRead.path
     val errored =
-      Resource.liftF(MonadResourceErr.raiseError(ResourceError.pathNotFound(path)))
+      Resource.eval(MonadResourceErr.raiseError(ResourceError.pathNotFound(path)))
 
     val rStreamPair = path match {
       case ResourcePath.Root =>
@@ -96,8 +96,8 @@ final class MongoDataSource[F[_]: ConcurrentEffect: ContextShift: MonadResourceE
         case Some(collection@Collection(_, _)) =>
           for {
             mongo <- rMongo
-            off <- Resource.liftF(offset.traverse(mongoOffset(path, _)))
-            res <- Resource.liftF(mongo.evaluate(collection, iRead.stages, off))
+            off <- Resource.eval(offset.traverse(mongoOffset(path, _)))
+            res <- Resource.eval(mongo.evaluate(collection, iRead.stages, off))
           } yield res
       }
     }
