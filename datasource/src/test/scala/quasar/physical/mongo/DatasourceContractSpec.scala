@@ -48,7 +48,7 @@ class DatasourceContractSpec extends DatasourceSpec[IO, Stream[IO, ?], ResourceP
 
   val datasource =
     RateLimiter[IO, UUID](IO.delay(UUID.randomUUID()))
-      .flatMap(rl => MongoDataSourceModule.lightweightDatasource[IO, UUID](cfg, rl, ByteStore.void[IO], _ => IO(None)))
+      .flatMap(rl => MongoDataSourceModule.datasource[IO, UUID](cfg, rl, ByteStore.void[IO], _ => IO(None)))
       .flatMap {
         case Right(ds) =>
           Resource.pure[IO, Datasource[Resource[IO, ?], Stream[IO, ?], _, _, ResourcePathType.Physical]](ds)

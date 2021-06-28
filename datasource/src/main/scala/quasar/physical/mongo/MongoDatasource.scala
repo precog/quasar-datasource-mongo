@@ -36,7 +36,7 @@ import quasar.qscript.InterpretedRead
 
 final class MongoDataSource[F[_]: ConcurrentEffect: ContextShift: MonadResourceErr: Timer](
     rMongo: => Resource[F, Mongo[F]])
-    extends LightweightDatasource[Resource[F, ?], Stream[F, ?], QueryResult[F]] {
+    extends DatasourceModule.DS[F] {
 
   val kind = MongoDataSource.kind
 

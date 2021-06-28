@@ -35,7 +35,7 @@ class MongoDataSourceModuleSpec extends EffectfulQSpec[IO] {
     val config = Json.obj("foo" -> Json.jString("bar"), "batchSize" -> Json.jNumber(64), "pushdownLevel" -> Json.jString("full"))
 
     RateLimiter[IO, UUID](IO.delay(UUID.randomUUID())).flatMap(rl =>
-      MongoDataSourceModule.lightweightDatasource[IO, UUID](config, rl, ByteStore.void[IO], _ => IO(None))).use(r =>
+      MongoDataSourceModule.datasource[IO, UUID](config, rl, ByteStore.void[IO], _ => IO(None))).use(r =>
         IO(r must_=== Left(DatasourceError.InvalidConfiguration(MongoDataSource.kind, config, NonEmptyList("Attempt to decode value on failed cursor.")))))
   }
 
@@ -43,13 +43,13 @@ class MongoDataSourceModuleSpec extends EffectfulQSpec[IO] {
     val config = MongoConfig.basic(MongoSpec.connectionString).withBatchSize(12).withPushdown(PushdownLevel.Full).asJson
 
     RateLimiter[IO, UUID](IO.delay(UUID.randomUUID())).flatMap(rl =>
-      MongoDataSourceModule.lightweightDatasource[IO, UUID](config, rl, ByteStore.void[IO], _ => IO(None))).use(r => IO(r must beRight))
+      MongoDataSourceModule.datasource[IO, UUID](config, rl, ByteStore.void[IO], _ => IO(None))).use(r => IO(r must beRight))
   }
 
   "Using unreachable config produces Right Disposable too" >>* {
     val config = MongoConfig.basic("mongodb://unreachable/?serverSelectionTimeoutMS=1000").withBatchSize(1).asJson
 
     RateLimiter[IO, UUID](IO.delay(UUID.randomUUID())).flatMap(rl =>
-      MongoDataSourceModule.lightweightDatasource[IO, UUID](config, rl, ByteStore.void[IO], _ => IO(None))).use(r => IO(r must beRight))
+      MongoDataSourceModule.datasource[IO, UUID](config, rl, ByteStore.void[IO], _ => IO(None))).use(r => IO(r must beRight))
   }
 }
