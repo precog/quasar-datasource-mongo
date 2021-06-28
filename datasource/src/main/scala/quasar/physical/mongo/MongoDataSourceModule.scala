@@ -22,7 +22,7 @@ import quasar.RateLimiting
 import quasar.api.datasource.{DatasourceError, DatasourceType}, DatasourceError.{ConfigurationError, InitializationError}
 import quasar.concurrent._
 import quasar.connector.{ByteStore, MonadResourceErr, ExternalCredentials}
-import quasar.connector.datasource.{LightweightDatasourceModule, Reconfiguration}
+import quasar.connector.datasource.{DatasourceModule, Reconfiguration}
 
 import java.util.UUID
 import scala.concurrent.ExecutionContext
@@ -35,7 +35,7 @@ import cats.implicits._
 
 import scalaz.NonEmptyList
 
-object MongoDataSourceModule extends LightweightDatasourceModule {
+object MongoDataSourceModule extends DatasourceModule {
   type Error = InitializationError[Json]
 
   private def mkInvalidCfgError[F[_]](config: Json, msg: String): Error =
@@ -45,17 +45,17 @@ object MongoDataSourceModule extends LightweightDatasourceModule {
       NonEmptyList(msg))
 
   @SuppressWarnings(Array("org.wartremover.warts.ImplicitParameter"))
-  def lightweightDatasource[F[_]: ConcurrentEffect: ContextShift: MonadResourceErr: Timer, A: Hash](
+  def datasource[F[_]: ConcurrentEffect: ContextShift: MonadResourceErr: Timer, A: Hash](
       config: Json,
       rateLimiter: RateLimiting[F, A],
       byteStore: ByteStore[F],
       getAuth: UUID => F[Option[ExternalCredentials[F]]])(
       implicit ec: ExecutionContext)
-      : Resource[F, Either[Error, LightweightDatasourceModule.DS[F]]] =
+      : Resource[F, Either[Error, DatasourceModule.DS[F]]] =
     config.as[MongoConfig].result match {
       case Left((msg, _)) =>
         mkInvalidCfgError[F](config, msg)
-          .asLeft[LightweightDatasourceModule.DS[F]]
+          .asLeft[DatasourceModule.DS[F]]
           .pure[Resource[F, ?]]
 
       case Right(mongoConfig) =>

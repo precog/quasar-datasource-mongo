@@ -69,4 +69,5 @@ lazy val core = project
   .evictToLocal("QUASAR_PATH", "foundation", true)
   .evictToLocal("QUASAR_PATH", "api", true)
   .evictToLocal("QUASAR_PATH", "connector", true)
+  .evictToLocal("QUASAR_PATH", "frontend", true)
   .enablePlugins(QuasarPlugin)
