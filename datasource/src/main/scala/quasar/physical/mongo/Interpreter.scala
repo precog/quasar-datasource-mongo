@@ -19,7 +19,6 @@ package quasar.physical.mongo
 import slamdata.Predef._
 
 import quasar.{ScalarStage, ScalarStages, IdStatus}
-import quasar.api.push.InternalKey
 import quasar.physical.mongo.expression._
 import quasar.physical.mongo.interpreter._
 
@@ -83,15 +82,14 @@ object Interpreter {
     new Interpreter[Id, U, MongoOffset] {
       def apply(offset: MongoOffset): List[Pipeline[U]] = {
         val path = offset.path
-        val key: InternalKey[Id, _] = offset.value.value
 
         val path0 = path map {
           case Left(field) => field
           case Right(right) => right.toString
         }
 
-        val value = key match {
-          case InternalKey.RealKey(k) =>
+        val value = offset match {
+          case MongoOffset.RealOffset(_, k) =>
             if (k.isValidInt)
               o.int(k.intValue)
             else if (k.isValidLong)
@@ -99,10 +97,10 @@ object Interpreter {
             else
               o.double(k.doubleValue)
 
-          case InternalKey.StringKey(k) =>
+          case MongoOffset.StringOffset(_, k) =>
             o.str(k)
 
-          case InternalKey.DateTimeKey(k) =>
+          case MongoOffset.DateTimeOffset(_, k) =>
             o.dateTime(k)
         }
 

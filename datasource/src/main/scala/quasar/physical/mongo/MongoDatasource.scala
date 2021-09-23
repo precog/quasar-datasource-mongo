@@ -134,7 +134,14 @@ final class MongoDataSource[F[_]: ConcurrentEffect: ContextShift: MonadResourceE
             "External offsets are not supported"))
       }
       p <- supportedPath(internalOffset.path)
-    } yield MongoOffset(p, internalOffset.value)
+      moff <- MongoOffset(p, internalOffset.value) match {
+        case Right(o) =>
+          o.pure[F]
+        case Left(e) =>
+          MonadResourceErr.raiseError[MongoOffset](
+            ResourceError.seekFailed(forResource, e))
+      }
+    } yield moff
   }
 }
 
