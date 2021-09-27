@@ -26,7 +26,7 @@ import skolems.∃
 
 import spire.math.Real
 
-import java.time.OffsetDateTime
+import java.time._
 
 /** The subset of offsets currently supported. */
 sealed trait MongoOffset extends Product with Serializable {
@@ -52,6 +52,10 @@ object MongoOffset {
         Right(StringOffset(path, n))
       case InternalKey.DateTimeKey(n) =>
         Right(DateTimeOffset(path, n))
+      case InternalKey.LocalDateKey(n) =>
+        Right(DateTimeOffset(path, OffsetDateTime.of(n, LocalTime.MIDNIGHT, ZoneOffset.UTC)))
+      case InternalKey.LocalDateTimeKey(n) =>
+        Right(DateTimeOffset(path, OffsetDateTime.of(n, ZoneOffset.UTC)))
       case other =>
         Left(s"MongoDB doesn't support $other offset")
     }

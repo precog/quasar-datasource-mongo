@@ -225,7 +225,9 @@ class MongoScalarStagesInterpreterSpec
           """)
 
         val after = OffsetDateTime.of(2020, 7, 22, 5, 0, 0, 0, ZoneOffset.UTC)
-        val offset = MongoOffset(NonEmptyList.of("baz".asLeft, "qux".asLeft, "ts".asLeft), ∃(InternalKey.Actual.dateTime(after)))
+        val offset = MongoOffset(
+          NonEmptyList.of("baz".asLeft, "qux".asLeft, "ts".asLeft),
+          ∃(InternalKey.Actual.dateTime(after))).toOption
         val stages =
           ScalarStages(
             IdStatus.ExcludeId,
@@ -241,7 +243,7 @@ class MongoScalarStagesInterpreterSpec
                   CPathField("bar") -> (CPathField("bar") -> List(Pivot(IdStatus.ExcludeId, ColumnType.Array))),
                   CPathField("baz") -> (CPathField("baz") -> List.empty)))))
 
-        val actual = interpretWithOffset(stages, input, offset.some, x => x)
+        val actual = interpretWithOffset(stages, input, offset, x => x)
 
         actual must bestSemanticEqualNoId(expected)
       }
@@ -262,8 +264,11 @@ class MongoScalarStagesInterpreterSpec
           """)
 
         val after = OffsetDateTime.of(2020, 7, 22, 5, 0, 0, 0, ZoneOffset.UTC)
-        val offset = MongoOffset(NonEmptyList.of("bar".asLeft, "qux".asLeft, "ts".asLeft), ∃(InternalKey.Actual.dateTime(after)))
-        val actual = interpretWithOffset(ScalarStages.Id, input, offset.some, x => x)
+        val offset = MongoOffset(
+          NonEmptyList.of("bar".asLeft, "qux".asLeft, "ts".asLeft),
+          ∃(InternalKey.Actual.dateTime(after))).toOption
+
+        val actual = interpretWithOffset(ScalarStages.Id, input, offset, x => x)
 
         actual must bestSemanticEqualNoId(expected)
       }
@@ -282,8 +287,10 @@ class MongoScalarStagesInterpreterSpec
           """)
 
         val offset = MongoOffset(
-          NonEmptyList.of("bar".asLeft, "qux".asLeft, "ix".asLeft, 1.asRight), ∃(InternalKey.Actual.real(Real(3))))
-        val actual = interpretWithOffset(ScalarStages.Id, input, offset.some, x => x)
+          NonEmptyList.of("bar".asLeft, "qux".asLeft, "ix".asLeft, 1.asRight),
+          ∃(InternalKey.Actual.real(Real(3)))).toOption
+
+        val actual = interpretWithOffset(ScalarStages.Id, input, offset, x => x)
 
         actual must bestSemanticEqualNoId(expected)
       }
@@ -304,8 +311,10 @@ class MongoScalarStagesInterpreterSpec
           """)
 
         val offset = MongoOffset(
-          NonEmptyList.of("bar".asLeft, "qux".asLeft, "ix".asLeft, 1.asRight), ∃(InternalKey.Actual.real(Real(startId + 3))))
-        val actual = interpretWithOffset(ScalarStages.Id, input, offset.some, x => x)
+          NonEmptyList.of("bar".asLeft, "qux".asLeft, "ix".asLeft, 1.asRight),
+          ∃(InternalKey.Actual.real(Real(startId + 3)))).toOption
+
+        val actual = interpretWithOffset(ScalarStages.Id, input, offset, x => x)
 
         actual must bestSemanticEqualNoId(expected)
       }
@@ -324,9 +333,10 @@ class MongoScalarStagesInterpreterSpec
           """)
 
         val offset = MongoOffset(
-          NonEmptyList.of("bar".asLeft, "qux".asLeft, "ix".asLeft, 1.asRight), ∃(InternalKey.Actual.real(Real(0.3))))
+          NonEmptyList.of("bar".asLeft, "qux".asLeft, "ix".asLeft, 1.asRight),
+          ∃(InternalKey.Actual.real(Real(0.3)))).toOption
 
-        val actual = interpretWithOffset(ScalarStages.Id, input, offset.some, x => x)
+        val actual = interpretWithOffset(ScalarStages.Id, input, offset, x => x)
 
         actual must bestSemanticEqualNoId(expected)
       }
@@ -345,9 +355,10 @@ class MongoScalarStagesInterpreterSpec
           """)
 
         val offset = MongoOffset(
-          NonEmptyList.of("bar".asLeft, "qux".asLeft, "ix".asLeft, 1.asRight), ∃(InternalKey.Actual.string("aac")))
+          NonEmptyList.of("bar".asLeft, "qux".asLeft, "ix".asLeft, 1.asRight),
+          ∃(InternalKey.Actual.string("aac"))).toOption
 
-        val actual = interpretWithOffset(ScalarStages.Id, input, offset.some, x => x)
+        val actual = interpretWithOffset(ScalarStages.Id, input, offset, x => x)
 
         actual must bestSemanticEqualNoId(expected)
       }
