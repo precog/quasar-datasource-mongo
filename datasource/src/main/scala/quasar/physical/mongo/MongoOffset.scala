@@ -24,5 +24,40 @@ import cats.data.NonEmptyList
 
 import skolems.∃
 
+import spire.math.Real
+
+import java.time._
+
 /** The subset of offsets currently supported. */
-final case class MongoOffset(path: NonEmptyList[Either[String, Int]], value: ∃[InternalKey.Actual])
+sealed trait MongoOffset extends Product with Serializable {
+  def path: NonEmptyList[Either[String, Int]]
+}
+
+object MongoOffset {
+  final case class RealOffset(path: NonEmptyList[Either[String, Int]], value: Real)
+      extends MongoOffset
+  final case class StringOffset(path: NonEmptyList[Either[String, Int]], value: String)
+      extends MongoOffset
+  final case class DateTimeOffset(path: NonEmptyList[Either[String, Int]], value: OffsetDateTime)
+      extends MongoOffset
+
+  def apply(path: NonEmptyList[Either[String, Int]], offset: ∃[InternalKey.Actual])
+      : Either[String, MongoOffset] = {
+    val offset0: InternalKey.Actual[_] = offset.value
+
+    offset0 match {
+      case InternalKey.RealKey(n) =>
+        Right(RealOffset(path, n))
+      case InternalKey.StringKey(n) =>
+        Right(StringOffset(path, n))
+      case InternalKey.DateTimeKey(n) =>
+        Right(DateTimeOffset(path, n))
+      case InternalKey.LocalDateKey(n) =>
+        Right(DateTimeOffset(path, OffsetDateTime.of(n, LocalTime.MIDNIGHT, ZoneOffset.UTC)))
+      case InternalKey.LocalDateTimeKey(n) =>
+        Right(DateTimeOffset(path, OffsetDateTime.of(n, ZoneOffset.UTC)))
+      case other =>
+        Left(s"MongoDB doesn't support $other offset")
+    }
+  }
+}
