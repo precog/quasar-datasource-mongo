@@ -63,13 +63,20 @@ object Mask {
     }
   }
   private def parseTypeStrings(parseType: ColumnType): List[String] = parseType match {
-    case ColumnType.Boolean => List("bool")
-    case ColumnType.Null => List("null")
-    case ColumnType.Number => List("double", "long", "int", "decimal")
-    case ColumnType.String => List("string", "objectId")
-    case ColumnType.OffsetDateTime => List("date")
-    case ColumnType.Array => List("array")
-    case ColumnType.Object => List("object")
+    case ColumnType.Boolean =>
+      List("bool")
+    case ColumnType.Null =>
+      List("null")
+    case ColumnType.Number =>
+      List("double", "long", "int", "decimal")
+    case ColumnType.String =>
+      List("string", "objectId", "binData", "dbPointer", "symbol", "javascript", "javascriptWithScope", "regex")
+    case ColumnType.OffsetDateTime =>
+      List("date")
+    case ColumnType.Array =>
+      List("array")
+    case ColumnType.Object =>
+      List("object")
     case _ => List()
   }
 
