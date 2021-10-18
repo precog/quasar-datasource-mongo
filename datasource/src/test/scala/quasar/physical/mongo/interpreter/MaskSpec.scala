@@ -67,7 +67,13 @@ class MaskSpec extends Specification with quasar.TreeMatchers {
           "foo" -> o.cond(
             o.or(List(
               o.eqx(List(o.typ(o.str("$foo")), o.str("string"))),
-              o.eqx(List(o.typ(o.str("$foo")), o.str("objectId"))))),
+              o.eqx(List(o.typ(o.str("$foo")), o.str("objectId"))),
+              o.eqx(List(o.typ(o.str("$foo")), o.str("binData"))),
+              o.eqx(List(o.typ(o.str("$foo")), o.str("dbPointer"))),
+              o.eqx(List(o.typ(o.str("$foo")), o.str("symbol"))),
+              o.eqx(List(o.typ(o.str("$foo")), o.str("javascript"))),
+              o.eqx(List(o.typ(o.str("$foo")), o.str("javascriptWithScope"))),
+              o.eqx(List(o.typ(o.str("$foo")), o.str("regex"))))),
             o.str("$foo"),
             o.str("$unique_missing")))))))
       pipeEqualWithKey("unique", result map (_._2), expected) and (
@@ -149,7 +155,13 @@ class MaskSpec extends Specification with quasar.TreeMatchers {
 
       val abCheck = o.or(List(
         typeEq(o.str("$root.a.b"), "string"),
-        typeEq(o.str("$root.a.b"), "objectId")))
+        typeEq(o.str("$root.a.b"), "objectId"),
+        typeEq(o.str("$root.a.b"), "binData"),
+        typeEq(o.str("$root.a.b"), "dbPointer"),
+        typeEq(o.str("$root.a.b"), "symbol"),
+        typeEq(o.str("$root.a.b"), "javascript"),
+        typeEq(o.str("$root.a.b"), "javascriptWithScope"),
+        typeEq(o.str("$root.a.b"), "regex")))
 
       val expected =
         wrapWithProject(o.obj(Map(

@@ -215,13 +215,37 @@ class DecodeSpec extends Specification {
       refined must haveClass[BsonString]
     }
     "binary" >> {
-      val obj = new BsonBinary(Array[Byte]())
-      val meta = qdataDecoder.getMetaMeta(obj)
-      val refined = qdataDecoder.getMetaValue(obj)
-      meta must haveClass[BsonDocument]
-      getStringVal(meta, "type") === "mongo:binary"
-      refined must haveClass[BsonString]
-      refined.asString().getValue() === ""
+      "common" >> {
+        val obj = new BsonBinary("ABCDEFGH123".getBytes())
+        val meta = qdataDecoder.getMetaMeta(obj)
+        val refined = qdataDecoder.getMetaValue(obj)
+        meta must haveClass[BsonDocument]
+        getStringVal(meta, "type") === "mongo:binary"
+        refined must haveClass[BsonString]
+        refined.asString().getValue() === "QUJDREVGR0gxMjM="
+      }
+      "uuid" >> {
+        val uuid = java.util.UUID.randomUUID()
+        val obj = new BsonBinary(uuid)
+        val meta = qdataDecoder.getMetaMeta(obj)
+        val refined = qdataDecoder.getMetaValue(obj)
+        meta must haveClass[BsonDocument]
+        getStringVal(meta, "type") === "mongo:binary"
+        refined must haveClass[BsonString]
+        refined.asString().getValue() === uuid.toString()
+      }
+      "md5" >> {
+        val sec = java.security.MessageDigest.getInstance("MD5")
+        sec.update("lemon".getBytes())
+        val bytes = sec.digest()
+        val obj = new BsonBinary(BsonBinarySubType.MD5, bytes)
+        val meta = qdataDecoder.getMetaMeta(obj)
+        val refined = qdataDecoder.getMetaValue(obj)
+        meta must haveClass[BsonDocument]
+        getStringVal(meta, "type") === "mongo:binary"
+        refined must haveClass[BsonString]
+        refined.asString().getValue() === new String(bytes)
+      }
     }
     "symbol" >> {
       val obj = new BsonSymbol("1234")

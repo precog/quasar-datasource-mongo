@@ -24,10 +24,11 @@ import cats.instances.string._
 import java.lang.ArithmeticException
 import java.nio.charset.StandardCharsets
 import java.time.{Instant, OffsetDateTime, ZoneOffset}
-import java.util.{Map, Iterator}
+import java.util.{Base64, Map, Iterator}
 
 import org.bson._
 import org.bson.types.Decimal128
+import BsonBinarySubType._
 
 import qdata.{QType, QDataDecode}, QType._
 
@@ -204,7 +205,21 @@ object decoder {
     override def getMetaValue(bson: BsonValue): BsonValue = bson match {
       case objId: BsonObjectId => new BsonString(objId.getValue().toHexString())
       case dbPointer: BsonDbPointer => new BsonString(dbPointer.getId().toHexString())
-      case binary: BsonBinary => new BsonString(new String(binary.getData(), StandardCharsets.UTF_8))
+      case binary: BsonBinary =>
+        val btpe = binary.getType()
+        if (btpe == MD5.getValue) {
+          new BsonString(new String(binary.getData(), StandardCharsets.UTF_8))
+        }
+        else if (btpe == UUID_STANDARD.getValue) {
+          new BsonString(binary.asUuid().toString())
+        }
+        else if (btpe == UUID_LEGACY.getValue) {
+          new BsonString(binary.asUuid(UuidRepresentation.UNSPECIFIED).toString())
+        }
+        else {
+          val base64 = Base64.getEncoder().encode(binary.getData())
+          new BsonString(new String(base64, StandardCharsets.UTF_8))
+        }
       case symbol: BsonSymbol => new BsonString(symbol.getSymbol())
       case regex: BsonRegularExpression => new BsonString(regex.getPattern())
       case js: BsonJavaScript => new BsonString(js.getCode())
