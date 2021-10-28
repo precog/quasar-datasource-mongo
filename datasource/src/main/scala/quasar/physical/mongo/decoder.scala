@@ -35,6 +35,7 @@ import qdata.{QType, QDataDecode}, QType._
 import quasar.contrib.std.errorImpossible
 
 import scala.collection.JavaConverters._
+import scala.util.Try
 
 import spire.math.Real
 
@@ -84,6 +85,15 @@ object decoder {
   }
 
   val qdataDecoder: QDataDecode[BsonValue] = new QDataDecode[BsonValue] {
+    var workedUuidRepresentation: Option[UuidRepresentation] = None
+
+    val allUuidRepresentations: List[Option[UuidRepresentation]] = List(
+      Some(UuidRepresentation.C_SHARP_LEGACY),
+      Some(UuidRepresentation.JAVA_LEGACY),
+      Some(UuidRepresentation.PYTHON_LEGACY),
+      Some(UuidRepresentation.UNSPECIFIED),
+      None)
+
     override def tpe(bson: BsonValue): QType = bson.getBsonType() match {
       case BsonType.DOCUMENT => QObject
       case BsonType.ARRAY => QArray
@@ -214,11 +224,10 @@ object decoder {
           new BsonString(binary.asUuid().toString())
         }
         else if (btpe == UUID_LEGACY.getValue) {
-          new BsonString(binary.asUuid(UuidRepresentation.UNSPECIFIED).toString())
+          mkUuidString(binary)
         }
         else {
-          val base64 = Base64.getEncoder().encode(binary.getData())
-          new BsonString(new String(base64, StandardCharsets.UTF_8))
+          mkBase64(binary)
         }
       case symbol: BsonSymbol => new BsonString(symbol.getSymbol())
       case regex: BsonRegularExpression => new BsonString(regex.getPattern())
@@ -235,5 +244,34 @@ object decoder {
     override def getLocalTime(a: BsonValue) = errorImpossible
     override def getOffsetDate(a: BsonValue) = errorImpossible
     override def getOffsetTime(a: BsonValue) = errorImpossible
+
+    private def mkUuidString(binary: BsonBinary): BsonString = {
+      val tryStr =
+        allUuidRepresentations
+          .foldLeft(mkUuid(binary, workedUuidRepresentation)) { (acc, repr) =>
+        acc.orElse(mkUuid(binary, repr))
+      }
+
+      tryStr.toOption match {
+        case None =>
+          mkBase64(binary)
+        case Some((repr, str)) =>
+          workedUuidRepresentation = repr
+          str
+      }
+    }
+
+    private def mkUuid(binary: BsonBinary, repr: Option[UuidRepresentation])
+        : Try[(Option[UuidRepresentation], BsonString)] = Try {
+      (repr, new BsonString(repr match {
+        case None => binary.asUuid().toString
+        case Some(x) => binary.asUuid(x).toString
+      }))
+    }
+
+    private def mkBase64(binary: BsonBinary): BsonString = {
+      val base64 = Base64.getEncoder().encode(binary.getData())
+      new BsonString(new String(base64, StandardCharsets.UTF_8))
+    }
   }
 }
